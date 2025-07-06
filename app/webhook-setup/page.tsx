@@ -1,98 +1,147 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Copy, Check, ExternalLink, Settings, Webhook, AlertCircle, CheckCircle } from "lucide-react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { AlertTriangle, CheckCircle, Copy, ExternalLink, Globe, Key, RefreshCw, Settings, Webhook } from "lucide-react"
+import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 
-export default function WebhookSetupPage() {
-  const [copied, setCopied] = useState<string | null>(null)
+export default function WebhookSetup() {
+  const router = useRouter()
+  const [user, setUser] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
   const [webhookUrl, setWebhookUrl] = useState("")
-  const [setupStatus, setSetupStatus] = useState<"idle" | "loading" | "success" | "error">("idle")
-  const [webhookInfo, setWebhookInfo] = useState<any>(null)
-  const [isChecking, setIsChecking] = useState(false)
-
-  const botToken = "8057847116:AAEOUXELJqQNmh0lQDAl2HgPGKQ_e1x1dkA"
-  const defaultWebhookUrl = `${typeof window !== "undefined" ? window.location.origin : "https://gmarketshop.vercel.app"}/api/webhook/telegram`
+  const [botToken, setBotToken] = useState("")
+  const [webhookStatus, setWebhookStatus] = useState<"unknown" | "active" | "inactive">("unknown")
+  const [testingWebhook, setTestingWebhook] = useState(false)
 
   useEffect(() => {
-    checkWebhook()
+    checkAdminAccess()
   }, [])
 
-  const copyToClipboard = async (text: string, type: string) => {
+  const checkAdminAccess = async () => {
     try {
-      await navigator.clipboard.writeText(text)
-      setCopied(type)
-      toast.success("Nusxalandi!")
-      setTimeout(() => setCopied(null), 2000)
+      const {
+        data: { user: currentUser },
+      } = await supabase.auth.getUser()
+
+      if (!currentUser) {
+        router.push("/login")
+        return
+      }
+
+      const { data: userData } = await supabase.from("users").select("*").eq("id", currentUser.id).single()
+
+      if (!userData?.is_admin) {
+        toast.error("Sizda admin huquqi yo'q")
+        router.push("/")
+        return
+      }
+
+      setUser(userData)
+      loadWebhookSettings()
     } catch (error) {
-      toast.error("Nusxalashda xatolik")
+      console.error("Error checking admin access:", error)
+      router.push("/")
+    } finally {
+      setLoading(false)
     }
   }
 
+  const loadWebhookSettings = () => {
+    // Load from environment or localStorage
+    const savedWebhookUrl = localStorage.getItem("telegram_webhook_url") || ""
+    const savedBotToken = localStorage.getItem("telegram_bot_token") || ""
+
+    setWebhookUrl(savedWebhookUrl)
+    setBotToken(savedBotToken)
+  }
+
+  const saveWebhookSettings = () => {
+    localStorage.setItem("telegram_webhook_url", webhookUrl)
+    localStorage.setItem("telegram_bot_token", botToken)
+    toast.success("Sozlamalar saqlandi")
+  }
+
   const setupWebhook = async () => {
-    const url = webhookUrl || defaultWebhookUrl
-    setSetupStatus("loading")
+    if (!botToken || !webhookUrl) {
+      toast.error("Bot token va webhook URL ni kiriting")
+      return
+    }
 
     try {
+      setTestingWebhook(true)
+
+      // Set webhook via Telegram API
       const response = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          url: url,
-          allowed_updates: ["message", "callback_query"],
-          drop_pending_updates: true, // Clear pending updates
+          url: webhookUrl,
+          allowed_updates: ["message", "callback_query", "inline_query"],
         }),
       })
 
       const result = await response.json()
 
       if (result.ok) {
-        setSetupStatus("success")
-        toast.success("Webhook muvaffaqiyatli o'rnatildi!")
-        // Refresh webhook info
-        setTimeout(() => checkWebhook(), 1000)
+        setWebhookStatus("active")
+        toast.success("Webhook muvaffaqiyatli o'rnatildi")
+        saveWebhookSettings()
       } else {
-        setSetupStatus("error")
-        toast.error(`Xatolik: ${result.description}`)
+        toast.error(`Webhook o'rnatishda xatolik: ${result.description}`)
       }
     } catch (error) {
-      setSetupStatus("error")
-      toast.error("Webhook o'rnatishda xatolik")
+      console.error("Error setting webhook:", error)
+      toast.error("Webhook o'rnatishda xatolik yuz berdi")
+    } finally {
+      setTestingWebhook(false)
     }
   }
 
-  const checkWebhook = async () => {
-    setIsChecking(true)
+  const checkWebhookStatus = async () => {
+    if (!botToken) {
+      toast.error("Bot token ni kiriting")
+      return
+    }
+
     try {
       const response = await fetch(`https://api.telegram.org/bot${botToken}/getWebhookInfo`)
       const result = await response.json()
 
       if (result.ok) {
-        setWebhookInfo(result.result)
         const info = result.result
-
         if (info.url) {
-          toast.success(`Webhook faol: ${info.url}`)
+          setWebhookStatus("active")
+          setWebhookUrl(info.url)
+          toast.success("Webhook faol")
         } else {
-          toast.info("Webhook o'rnatilmagan")
+          setWebhookStatus("inactive")
+          toast.warning("Webhook o'rnatilmagan")
         }
+      } else {
+        toast.error("Webhook holatini tekshirishda xatolik")
       }
     } catch (error) {
+      console.error("Error checking webhook:", error)
       toast.error("Webhook holatini tekshirishda xatolik")
-    } finally {
-      setIsChecking(false)
     }
   }
 
   const deleteWebhook = async () => {
+    if (!botToken) {
+      toast.error("Bot token ni kiriting")
+      return
+    }
+
     try {
       const response = await fetch(`https://api.telegram.org/bot${botToken}/deleteWebhook`, {
         method: "POST",
@@ -101,386 +150,266 @@ export default function WebhookSetupPage() {
       const result = await response.json()
 
       if (result.ok) {
-        toast.success("Webhook o'chirildi!")
-        setSetupStatus("idle")
-        setWebhookInfo(null)
-        // Refresh webhook info
-        setTimeout(() => checkWebhook(), 1000)
+        setWebhookStatus("inactive")
+        toast.success("Webhook o'chirildi")
       } else {
         toast.error("Webhook o'chirishda xatolik")
       }
     } catch (error) {
+      console.error("Error deleting webhook:", error)
       toast.error("Webhook o'chirishda xatolik")
     }
   }
 
-  const testWebhook = async () => {
-    try {
-      const response = await fetch("/api/webhook/telegram", {
-        method: "GET",
-      })
-      const result = await response.json()
-
-      if (response.ok) {
-        toast.success("Webhook endpoint ishlayapti!")
-        console.log("Webhook test result:", result)
-      } else {
-        toast.error("Webhook endpoint ishlamayapti")
-      }
-    } catch (error) {
-      toast.error("Webhook testida xatolik")
-    }
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text)
+    toast.success("Nusxalandi")
   }
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+      </div>
+    )
+  }
+
+  const currentDomain = typeof window !== "undefined" ? window.location.origin : ""
+  const suggestedWebhookUrl = `${currentDomain}/api/webhook/telegram`
+
   return (
-    <div className="min-h-screen bg-background">
-      <div className="container mx-auto px-4 py-8">
-        <div className="max-w-4xl mx-auto">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold gradient-text mb-2">Telegram Bot Webhook Sozlash</h1>
-            <p className="text-muted-foreground">
-              GlobalMarket Telegram botini websayt bilan bog'lash uchun webhook sozlang
-            </p>
-          </div>
+    <div className="container mx-auto px-4 py-8 max-w-4xl">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold gradient-text mb-2">Telegram Bot Sozlamalari</h1>
+        <p className="text-gray-600">Telegram bot webhook sozlamalarini boshqaring</p>
+      </div>
 
-          {/* Webhook Status */}
-          {webhookInfo && (
-            <Alert
-              className={`mb-6 ${webhookInfo.url ? "border-green-200 bg-green-50" : "border-yellow-200 bg-yellow-50"}`}
-            >
-              <div className="flex items-center gap-2">
-                {webhookInfo.url ? (
-                  <CheckCircle className="h-4 w-4 text-green-600" />
-                ) : (
-                  <AlertCircle className="h-4 w-4 text-yellow-600" />
-                )}
-                <AlertDescription className={webhookInfo.url ? "text-green-800" : "text-yellow-800"}>
-                  <strong>Webhook holati:</strong> {webhookInfo.url ? `Faol - ${webhookInfo.url}` : "Faol emas"}
-                  {webhookInfo.pending_update_count > 0 && (
-                    <span className="ml-2">({webhookInfo.pending_update_count} kutilayotgan yangilanish)</span>
-                  )}
-                </AlertDescription>
-              </div>
-            </Alert>
-          )}
+      <Tabs defaultValue="setup" className="space-y-6">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="setup">Sozlash</TabsTrigger>
+          <TabsTrigger value="status">Holat</TabsTrigger>
+          <TabsTrigger value="help">Yordam</TabsTrigger>
+        </TabsList>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* Bot Ma'lumotlari */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Settings className="h-5 w-5" />
-                  Bot Ma'lumotlari
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <Label className="text-sm font-medium">Bot Token</Label>
-                  <div className="flex items-center gap-2 mt-1">
-                    <Input value={`${botToken.slice(0, 20)}...`} readOnly className="font-mono text-sm" />
-                    <Button
-                      size="icon"
-                      variant="outline"
-                      onClick={() => copyToClipboard(botToken, "token")}
-                      className="flex-shrink-0"
-                    >
-                      {copied === "token" ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                    </Button>
-                  </div>
-                </div>
-
-                <div>
-                  <Label className="text-sm font-medium">Bot Username</Label>
-                  <div className="flex items-center gap-2 mt-1">
-                    <Input value="@globalmarketshopbot" readOnly />
-                    <Button
-                      size="icon"
-                      variant="outline"
-                      onClick={() => window.open("https://t.me/globalmarketshopbot", "_blank")}
-                    >
-                      <ExternalLink className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                <div>
-                  <Label className="text-sm font-medium">Webhook URL</Label>
-                  <div className="flex items-center gap-2 mt-1">
-                    <Input value={defaultWebhookUrl} readOnly className="font-mono text-xs" />
-                    <Button
-                      size="icon"
-                      variant="outline"
-                      onClick={() => copyToClipboard(defaultWebhookUrl, "webhook")}
-                      className="flex-shrink-0"
-                    >
-                      {copied === "webhook" ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                    </Button>
-                  </div>
-                </div>
-
-                <Button onClick={testWebhook} variant="outline" className="w-full bg-transparent">
-                  Webhook Endpoint Sinash
-                </Button>
-              </CardContent>
-            </Card>
-
-            {/* Webhook Sozlash */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Webhook className="h-5 w-5" />
-                  Webhook Sozlash
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <Label htmlFor="webhookUrl">Maxsus Webhook URL (ixtiyoriy)</Label>
+        {/* Setup Tab */}
+        <TabsContent value="setup" className="space-y-6">
+          <Card className="card-beautiful">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Settings className="h-5 w-5" />
+                Webhook Sozlamalari
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Bot Token</label>
+                <div className="flex gap-2">
                   <Input
-                    id="webhookUrl"
-                    placeholder={defaultWebhookUrl}
+                    type="password"
+                    placeholder="1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
+                    value={botToken}
+                    onChange={(e) => setBotToken(e.target.value)}
+                  />
+                  <Button variant="outline" size="icon" onClick={() => copyToClipboard(botToken)} disabled={!botToken}>
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+                <p className="text-sm text-gray-500">@BotFather dan olgan bot tokeningizni kiriting</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Webhook URL</label>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="https://yoursite.com/api/webhook/telegram"
                     value={webhookUrl}
                     onChange={(e) => setWebhookUrl(e.target.value)}
-                    className="font-mono text-sm"
                   />
-                  <p className="text-xs text-muted-foreground mt-1">Bo'sh qoldiring avtomatik URL ishlatish uchun</p>
-                </div>
-
-                <div className="flex flex-col gap-2">
-                  <Button onClick={setupWebhook} disabled={setupStatus === "loading"} className="btn-primary" size="lg">
-                    {setupStatus === "loading" ? "O'rnatilmoqda..." : "Webhook O'rnatish"}
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => copyToClipboard(webhookUrl)}
+                    disabled={!webhookUrl}
+                  >
+                    <Copy className="h-4 w-4" />
                   </Button>
-
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={checkWebhook}
-                      variant="outline"
-                      size="sm"
-                      className="flex-1 bg-transparent"
-                      disabled={isChecking}
-                    >
-                      {isChecking ? "Tekshirilmoqda..." : "Holatni Tekshirish"}
-                    </Button>
-                    <Button onClick={deleteWebhook} variant="destructive" size="sm" className="flex-1">
-                      Webhook O'chirish
-                    </Button>
-                  </div>
                 </div>
+                <p className="text-sm text-gray-500">
+                  Tavsiya etilgan: <code className="bg-gray-100 px-1 rounded">{suggestedWebhookUrl}</code>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="p-0 h-auto ml-2"
+                    onClick={() => setWebhookUrl(suggestedWebhookUrl)}
+                  >
+                    Ishlatish
+                  </Button>
+                </p>
+              </div>
 
-                {setupStatus === "success" && (
-                  <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-green-600" />
-                      <span className="text-sm font-medium text-green-800">Webhook muvaffaqiyatli o'rnatildi!</span>
-                    </div>
-                  </div>
-                )}
-
-                {setupStatus === "error" && (
-                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                    <span className="text-sm text-red-800">Webhook o'rnatishda xatolik yuz berdi.</span>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Webhook Ma'lumotlari */}
-          {webhookInfo && (
-            <Card className="mt-8">
-              <CardHeader>
-                <CardTitle>Webhook Tafsilotlari</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <strong>URL:</strong> {webhookInfo.url || "O'rnatilmagan"}
-                  </div>
-                  <div>
-                    <strong>SSL Sertifikat:</strong> {webhookInfo.has_custom_certificate ? "Bor" : "Yo'q"}
-                  </div>
-                  <div>
-                    <strong>Kutilayotgan yangilanishlar:</strong> {webhookInfo.pending_update_count}
-                  </div>
-                  <div>
-                    <strong>Oxirgi xatolik sanasi:</strong>{" "}
-                    {webhookInfo.last_error_date
-                      ? new Date(webhookInfo.last_error_date * 1000).toLocaleString()
-                      : "Yo'q"}
-                  </div>
-                  {webhookInfo.last_error_message && (
-                    <div className="md:col-span-2">
-                      <strong>Oxirgi xatolik:</strong> {webhookInfo.last_error_message}
-                    </div>
+              <div className="flex gap-4">
+                <Button onClick={setupWebhook} disabled={testingWebhook || !botToken || !webhookUrl} className="flex-1">
+                  {testingWebhook ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      O'rnatilmoqda...
+                    </>
+                  ) : (
+                    <>
+                      <Webhook className="h-4 w-4 mr-2" />
+                      Webhook O'rnatish
+                    </>
                   )}
-                  {webhookInfo.max_connections && (
-                    <div>
-                      <strong>Maksimal ulanishlar:</strong> {webhookInfo.max_connections}
-                    </div>
-                  )}
-                  {webhookInfo.allowed_updates && (
-                    <div className="md:col-span-2">
-                      <strong>Ruxsat etilgan yangilanishlar:</strong> {webhookInfo.allowed_updates.join(", ")}
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          )}
+                </Button>
+                <Button variant="outline" onClick={saveWebhookSettings}>
+                  Saqlash
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-          {/* Qo'llanma */}
-          <Card className="mt-8">
+        {/* Status Tab */}
+        <TabsContent value="status" className="space-y-6">
+          <Card className="card-beautiful">
             <CardHeader>
-              <CardTitle>Qadamlar bo'yicha qo'llanma</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <Globe className="h-5 w-5" />
+                Webhook Holati
+              </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-6">
+              <div className="flex items-center justify-between p-4 border rounded-lg">
+                <div className="flex items-center gap-3">
+                  {webhookStatus === "active" ? (
+                    <CheckCircle className="h-6 w-6 text-green-600" />
+                  ) : webhookStatus === "inactive" ? (
+                    <AlertTriangle className="h-6 w-6 text-red-600" />
+                  ) : (
+                    <RefreshCw className="h-6 w-6 text-gray-400" />
+                  )}
+                  <div>
+                    <p className="font-medium">
+                      {webhookStatus === "active"
+                        ? "Webhook Faol"
+                        : webhookStatus === "inactive"
+                          ? "Webhook Faol Emas"
+                          : "Noma'lum Holat"}
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      {webhookStatus === "active"
+                        ? "Bot xabarlarni qabul qilmoqda"
+                        : webhookStatus === "inactive"
+                          ? "Bot xabarlarni qabul qilmayapti"
+                          : "Holatni tekshiring"}
+                    </p>
+                  </div>
+                </div>
+                <Badge
+                  variant={
+                    webhookStatus === "active" ? "default" : webhookStatus === "inactive" ? "destructive" : "secondary"
+                  }
+                >
+                  {webhookStatus === "active" ? "Faol" : webhookStatus === "inactive" ? "Faol emas" : "Noma'lum"}
+                </Badge>
+              </div>
+
+              <div className="flex gap-4">
+                <Button onClick={checkWebhookStatus} variant="outline" className="flex-1 bg-transparent">
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Holatni Tekshirish
+                </Button>
+                <Button onClick={deleteWebhook} variant="destructive" disabled={webhookStatus !== "active"}>
+                  <AlertTriangle className="h-4 w-4 mr-2" />
+                  Webhook O'chirish
+                </Button>
+              </div>
+
+              {webhookUrl && (
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  <p className="text-sm font-medium mb-2">Joriy Webhook URL:</p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 text-sm bg-white p-2 rounded border">{webhookUrl}</code>
+                    <Button variant="outline" size="icon" onClick={() => copyToClipboard(webhookUrl)}>
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Help Tab */}
+        <TabsContent value="help" className="space-y-6">
+          <Card className="card-beautiful">
+            <CardHeader>
+              <CardTitle>Qo'llanma</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
               <div className="space-y-4">
-                <div className="flex items-start gap-3">
-                  <Badge variant="secondary" className="mt-1">
-                    1
-                  </Badge>
-                  <div>
-                    <h4 className="font-semibold">Websaytni deploy qiling</h4>
-                    <p className="text-sm text-muted-foreground">
-                      Websaytingizni Vercel, Netlify yoki boshqa platformaga deploy qiling va HTTPS URL oling
-                    </p>
+                <div>
+                  <h3 className="font-semibold mb-2">1. Bot yaratish</h3>
+                  <p className="text-gray-600 mb-2">Telegram da @BotFather ga yozing va yangi bot yarating:</p>
+                  <div className="bg-gray-50 p-3 rounded-lg font-mono text-sm">
+                    /newbot
+                    <br />
+                    Bot nomini kiriting
+                    <br />
+                    Bot username ini kiriting (@username_bot)
                   </div>
                 </div>
 
-                <div className="flex items-start gap-3">
-                  <Badge variant="secondary" className="mt-1">
-                    2
-                  </Badge>
-                  <div>
-                    <h4 className="font-semibold">Webhook URL ni tekshiring</h4>
-                    <p className="text-sm text-muted-foreground">
-                      "Webhook Endpoint Sinash" tugmasini bosib, endpoint ishlaganini tekshiring
-                    </p>
-                  </div>
+                <div>
+                  <h3 className="font-semibold mb-2">2. Bot tokenini olish</h3>
+                  <p className="text-gray-600">
+                    @BotFather sizga bot token beradi. Bu tokenni yuqoridagi "Bot Token" maydoniga kiriting.
+                  </p>
                 </div>
 
-                <div className="flex items-start gap-3">
-                  <Badge variant="secondary" className="mt-1">
-                    3
-                  </Badge>
-                  <div>
-                    <h4 className="font-semibold">Webhook o'rnating</h4>
-                    <p className="text-sm text-muted-foreground">
-                      "Webhook O'rnatish" tugmasini bosing va natijani kuting
-                    </p>
-                  </div>
+                <div>
+                  <h3 className="font-semibold mb-2">3. Webhook o'rnatish</h3>
+                  <p className="text-gray-600">
+                    Webhook URL ni kiriting va "Webhook O'rnatish" tugmasini bosing. Tavsiya etilgan URL dan
+                    foydalanishingiz mumkin.
+                  </p>
                 </div>
 
-                <div className="flex items-start gap-3">
-                  <Badge variant="secondary" className="mt-1">
-                    4
-                  </Badge>
-                  <div>
-                    <h4 className="font-semibold">Botni sinab ko'ring</h4>
-                    <p className="text-sm text-muted-foreground">
-                      Telegram botiga o'ting va /start buyrug'ini yuboring
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <Badge variant="secondary" className="mt-1">
-                    5
-                  </Badge>
-                  <div>
-                    <h4 className="font-semibold">Admin yarating</h4>
-                    <p className="text-sm text-muted-foreground">
-                      Database da o'zingizni admin qilib belgilang va Telegram ID ni qo'shing
-                    </p>
-                  </div>
+                <div>
+                  <h3 className="font-semibold mb-2">4. Botni sinash</h3>
+                  <p className="text-gray-600">
+                    Webhook o'rnatilgandan so'ng, botingizga Telegram da xabar yuboring va javob qaytarishini
+                    tekshiring.
+                  </p>
                 </div>
               </div>
-            </CardContent>
-          </Card>
 
-          {/* Foydali Buyruqlar */}
-          <Card className="mt-8">
-            <CardHeader>
-              <CardTitle>Foydali Buyruqlar</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                <div className="p-3 bg-muted rounded-lg">
-                  <Label className="text-sm font-medium">Webhook o'rnatish (cURL)</Label>
-                  <div className="flex items-center gap-2 mt-1">
-                    <code className="text-xs bg-background p-2 rounded flex-1 overflow-x-auto">
-                      curl -X POST "https://api.telegram.org/bot{botToken.slice(0, 20)}..."/setWebhook -d "url=
-                      {defaultWebhookUrl}"
-                    </code>
-                    <Button
-                      size="icon"
-                      variant="outline"
-                      onClick={() =>
-                        copyToClipboard(
-                          `curl -X POST "https://api.telegram.org/bot${botToken}/setWebhook" -d "url=${defaultWebhookUrl}"`,
-                          "curl",
-                        )
-                      }
-                      className="flex-shrink-0"
-                    >
-                      {copied === "curl" ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                    </Button>
-                  </div>
-                </div>
+              <Alert>
+                <Key className="h-4 w-4" />
+                <AlertDescription>
+                  <strong>Muhim:</strong> Bot tokenini hech kimga bermang va xavfsiz saqlang. Bu token orqali botingizni
+                  boshqarish mumkin.
+                </AlertDescription>
+              </Alert>
 
-                <div className="p-3 bg-muted rounded-lg">
-                  <Label className="text-sm font-medium">Webhook holatini tekshirish</Label>
-                  <div className="flex items-center gap-2 mt-1">
-                    <code className="text-xs bg-background p-2 rounded flex-1">
-                      curl "https://api.telegram.org/bot{botToken.slice(0, 20)}..."/getWebhookInfo
-                    </code>
-                    <Button
-                      size="icon"
-                      variant="outline"
-                      onClick={() =>
-                        copyToClipboard(`curl "https://api.telegram.org/bot${botToken}/getWebhookInfo"`, "check")
-                      }
-                      className="flex-shrink-0"
-                    >
-                      {copied === "check" ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Foydali Havolalar */}
-          <Card className="mt-8">
-            <CardHeader>
-              <CardTitle>Foydali Havolalar</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="flex gap-4">
                 <Button variant="outline" asChild>
-                  <a href="https://t.me/globalmarketshopbot" target="_blank" rel="noopener noreferrer">
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    Botga o'tish
+                  <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="h-4 w-4 mr-2" />
+                    @BotFather ga o'tish
                   </a>
                 </Button>
-
                 <Button variant="outline" asChild>
-                  <a href="/admin" target="_blank" rel="noopener noreferrer">
-                    <Settings className="mr-2 h-4 w-4" />
-                    Admin Panel
-                  </a>
-                </Button>
-
-                <Button variant="outline" asChild>
-                  <a href="/api/webhook/telegram" target="_blank" rel="noopener noreferrer">
-                    <Webhook className="mr-2 h-4 w-4" />
-                    Webhook Test
+                  <a href="https://core.telegram.org/bots/api#setwebhook" target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="h-4 w-4 mr-2" />
+                    Telegram Bot API
                   </a>
                 </Button>
               </div>
             </CardContent>
           </Card>
-        </div>
-      </div>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

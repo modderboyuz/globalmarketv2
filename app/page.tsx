@@ -10,34 +10,21 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import {
   Search,
-  BookOpen,
-  PenTool,
-  Calculator,
-  Palette,
-  Star,
   ShoppingCart,
-  Users,
-  Package,
   Heart,
+  Star,
   Award,
-  ArrowRight,
   Phone,
   MapPin,
   Clock,
-  Store,
+  ArrowRight,
+  Package,
+  Users,
+  TrendingUp,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { AdBanner } from "@/components/layout/ad-banner"
 import { toast } from "sonner"
-
-interface Category {
-  id: string
-  name_uz: string
-  slug: string
-  icon: string
-  description: string
-  product_count: number
-}
 
 interface Product {
   id: string
@@ -49,6 +36,10 @@ interface Product {
   order_count: number
   like_count: number
   average_rating: number
+  product_type: string
+  brand: string
+  author: string
+  has_delivery: boolean
   categories: {
     name_uz: string
     icon: string
@@ -64,21 +55,18 @@ interface Stats {
   totalProducts: number
   totalOrders: number
   totalUsers: number
-  totalSellers: number
 }
 
 export default function HomePage() {
-  const [categories, setCategories] = useState<Category[]>([])
-  const [featuredProducts, setFeaturedProducts] = useState<Product[]>([])
-  const [popularProducts, setPopularProducts] = useState<Product[]>([])
+  const [products, setProducts] = useState<Product[]>([])
   const [stats, setStats] = useState<Stats>({
     totalProducts: 0,
     totalOrders: 0,
     totalUsers: 0,
-    totalSellers: 0,
   })
   const [searchQuery, setSearchQuery] = useState("")
   const [user, setUser] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     fetchData()
@@ -98,32 +86,8 @@ export default function HomePage() {
 
   const fetchData = async () => {
     try {
-      // Fetch categories with product count
-      const { data: categoriesData } = await supabase
-        .from("categories")
-        .select(`
-        *,
-        products!inner(count)
-      `)
-        .order("sort_order")
-
-      // Fetch featured products (high rating)
-      const { data: featuredData } = await supabase
-        .from("products")
-        .select(`
-          *,
-          categories (name_uz, icon),
-          users (full_name, company_name, is_verified_seller)
-        `)
-        .eq("is_active", true)
-        .eq("is_approved", true)
-        .gt("stock_quantity", 0)
-        .gte("average_rating", 4.0)
-        .order("average_rating", { ascending: false })
-        .limit(8)
-
-      // Fetch popular products (high order count)
-      const { data: popularData } = await supabase
+      // Fetch all products
+      const { data: productsData } = await supabase
         .from("products")
         .select(`
           *,
@@ -134,27 +98,25 @@ export default function HomePage() {
         .eq("is_approved", true)
         .gt("stock_quantity", 0)
         .order("order_count", { ascending: false })
-        .limit(8)
+        .limit(24)
 
       // Fetch stats
-      const [productsResult, ordersResult, usersResult, sellersResult] = await Promise.all([
+      const [productsResult, ordersResult, usersResult] = await Promise.all([
         supabase.from("products").select("*", { count: "exact", head: true }).eq("is_active", true),
         supabase.from("orders").select("*", { count: "exact", head: true }),
         supabase.from("users").select("*", { count: "exact", head: true }),
-        supabase.from("users").select("*", { count: "exact", head: true }).eq("is_verified_seller", true),
       ])
 
-      setCategories(categoriesData || [])
-      setFeaturedProducts(featuredData || [])
-      setPopularProducts(popularData || [])
+      setProducts(productsData || [])
       setStats({
         totalProducts: productsResult.count || 0,
         totalOrders: ordersResult.count || 0,
         totalUsers: usersResult.count || 0,
-        totalSellers: sellersResult.count || 0,
       })
     } catch (error) {
       console.error("Error fetching data:", error)
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -205,17 +167,6 @@ export default function HomePage() {
     return new Intl.NumberFormat("uz-UZ").format(price) + " so'm"
   }
 
-  const getCategoryIcon = (iconName: string) => {
-    const icons: { [key: string]: any } = {
-      book: BookOpen,
-      pen: PenTool,
-      calculator: Calculator,
-      palette: Palette,
-    }
-    const IconComponent = icons[iconName] || Package
-    return <IconComponent className="h-6 w-6" />
-  }
-
   const ProductCard = ({ product }: { product: Product }) => (
     <Card className="product-card card-beautiful card-hover group">
       <CardContent className="product-card-content">
@@ -238,6 +189,9 @@ export default function HomePage() {
                 <Award className="h-3 w-3 mr-1" />
                 Tasdiqlangan
               </Badge>
+            )}
+            {product.has_delivery && (
+              <Badge className="badge-beautiful border-purple-200 text-purple-700 text-xs">🚚 Yetkazib berish</Badge>
             )}
           </div>
 
@@ -271,7 +225,8 @@ export default function HomePage() {
             <h3 className="font-semibold text-lg line-clamp-2 group-hover:text-blue-600 transition-colors duration-300">
               {product.name}
             </h3>
-            <p className="text-sm text-gray-600 line-clamp-2 mt-1">{product.description}</p>
+            {product.author && <p className="text-sm text-gray-500 mt-1">Muallif: {product.author}</p>}
+            {product.brand && <p className="text-sm text-gray-500 mt-1">Brend: {product.brand}</p>}
           </div>
 
           {/* Seller Info */}
@@ -318,28 +273,24 @@ export default function HomePage() {
 
   return (
     <div className="page-container">
-      {/* Hero Section */}
-      <section className="relative py-20 overflow-hidden">
+      {/* Hero Section with Search */}
+      <section className="relative py-16 overflow-hidden">
         <div className="container mx-auto px-4">
           <div className="max-w-4xl mx-auto text-center">
             <div className="floating-animation mb-8">
-              <div className="w-24 h-24 mx-auto bg-gradient-to-br from-blue-600 to-purple-600 rounded-3xl flex items-center justify-center shadow-2xl">
+              <div className="w-20 h-20 mx-auto bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl flex items-center justify-center shadow-2xl">
                 <Image
-                  src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/5426970643884275035.jpg-yVZDWJVWW6CEkuwFJn0lPC3jajm4YQ.jpeg"
+                  src="/placeholder-logo.png"
                   alt="GlobalMarket Logo"
-                  width={60}
-                  height={60}
-                  className="object-contain"
+                  width={50}
+                  height={50}
+                  className="object-contain rounded-lg"
                 />
               </div>
             </div>
 
-            <h1 className="text-5xl md:text-6xl font-bold gradient-text mb-6 text-shadow">GlobalMarket</h1>
-            <p className="text-xl md:text-2xl text-gray-600 mb-8 leading-relaxed">
-              G'uzor tumanidagi eng yirik onlayn bozor
-              <br />
-              <span className="text-lg text-gray-500">Kitoblar, maktab buyumlari va ko'p narsalar</span>
-            </p>
+            <h1 className="text-4xl md:text-5xl font-bold gradient-text mb-4 text-shadow">GlobalMarket</h1>
+            <p className="text-lg md:text-xl text-gray-600 mb-8">G'uzor tumanidagi eng yirik onlayn bozor</p>
 
             {/* Search Bar */}
             <form onSubmit={handleSearch} className="max-w-2xl mx-auto mb-8">
@@ -350,11 +301,11 @@ export default function HomePage() {
                   placeholder="Qidirayotgan mahsulotingizni yozing..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-12 pr-4 h-14 text-lg rounded-3xl border-2 border-gray-200 focus:border-blue-400 bg-white/80 backdrop-blur-sm shadow-lg"
+                  className="pl-12 pr-4 h-12 text-lg rounded-3xl border-2 border-gray-200 focus:border-blue-400 bg-white/80 backdrop-blur-sm shadow-lg"
                 />
                 <Button
                   type="submit"
-                  className="absolute right-2 top-1/2 transform -translate-y-1/2 h-10 px-6 rounded-2xl btn-primary"
+                  className="absolute right-2 top-1/2 transform -translate-y-1/2 h-8 px-6 rounded-2xl btn-primary"
                 >
                   Qidirish
                 </Button>
@@ -364,15 +315,15 @@ export default function HomePage() {
             {/* Contact Info */}
             <div className="flex flex-wrap items-center justify-center gap-6 text-gray-600">
               <div className="flex items-center gap-2">
-                <Phone className="h-5 w-5 text-blue-600" />
+                <Phone className="h-4 w-4 text-blue-600" />
                 <span className="font-medium">+998 95 865 75 00</span>
               </div>
               <div className="flex items-center gap-2">
-                <MapPin className="h-5 w-5 text-blue-600" />
+                <MapPin className="h-4 w-4 text-blue-600" />
                 <span>G'uzor tumani, Qashqadaryo</span>
               </div>
               <div className="flex items-center gap-2">
-                <Clock className="h-5 w-5 text-blue-600" />
+                <Clock className="h-4 w-4 text-blue-600" />
                 <span>24/7 xizmat</span>
               </div>
             </div>
@@ -381,28 +332,23 @@ export default function HomePage() {
       </section>
 
       {/* Stats Section */}
-      <section className="py-16 bg-white/50">
+      <section className="py-12 bg-white/50">
         <div className="container mx-auto px-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-            <div className="stats-card">
-              <Package className="h-8 w-8 text-blue-600 mx-auto mb-3" />
-              <div className="text-3xl font-bold text-gray-800 mb-1">{stats.totalProducts}</div>
-              <div className="text-gray-600">Mahsulotlar</div>
+          <div className="grid grid-cols-3 gap-6 max-w-2xl mx-auto">
+            <div className="stats-card text-center">
+              <Package className="h-8 w-8 text-blue-600 mx-auto mb-2" />
+              <div className="text-2xl font-bold text-gray-800 mb-1">{stats.totalProducts}</div>
+              <div className="text-gray-600 text-sm">Mahsulotlar</div>
             </div>
-            <div className="stats-card">
-              <ShoppingCart className="h-8 w-8 text-green-600 mx-auto mb-3" />
-              <div className="text-3xl font-bold text-gray-800 mb-1">{stats.totalOrders}</div>
-              <div className="text-gray-600">Buyurtmalar</div>
+            <div className="stats-card text-center">
+              <ShoppingCart className="h-8 w-8 text-green-600 mx-auto mb-2" />
+              <div className="text-2xl font-bold text-gray-800 mb-1">{stats.totalOrders}</div>
+              <div className="text-gray-600 text-sm">Buyurtmalar</div>
             </div>
-            <div className="stats-card">
-              <Users className="h-8 w-8 text-purple-600 mx-auto mb-3" />
-              <div className="text-3xl font-bold text-gray-800 mb-1">{stats.totalUsers}</div>
-              <div className="text-gray-600">Foydalanuvchilar</div>
-            </div>
-            <div className="stats-card">
-              <Award className="h-8 w-8 text-orange-600 mx-auto mb-3" />
-              <div className="text-3xl font-bold text-gray-800 mb-1">{stats.totalSellers}</div>
-              <div className="text-gray-600">Sotuvchilar</div>
+            <div className="stats-card text-center">
+              <Users className="h-8 w-8 text-purple-600 mx-auto mb-2" />
+              <div className="text-2xl font-bold text-gray-800 mb-1">{stats.totalUsers}</div>
+              <div className="text-gray-600 text-sm">Foydalanuvchilar</div>
             </div>
           </div>
         </div>
@@ -415,98 +361,70 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Categories Section */}
+      {/* Products Section */}
       <section className="py-16">
         <div className="container mx-auto px-4">
-          <div className="text-center mb-12">
-            <h2 className="text-4xl font-bold gradient-text mb-4">Kategoriyalar</h2>
-            <p className="text-xl text-gray-600">Kerakli mahsulotingizni toping</p>
+          <div className="flex items-center justify-between mb-12">
+            <div>
+              <h2 className="text-3xl font-bold gradient-text mb-2">Barcha mahsulotlar</h2>
+              <p className="text-gray-600">Eng yaxshi narxlarda sifatli mahsulotlar</p>
+            </div>
+            <Link href="/products">
+              <Button variant="outline" className="rounded-2xl border-2 bg-transparent">
+                Barchasini ko'rish
+                <ArrowRight className="h-4 w-4 ml-2" />
+              </Button>
+            </Link>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-            {categories.map((category) => (
-              <Link key={category.id} href={`/category/${category.slug}`}>
-                <Card className="card-beautiful card-hover text-center p-6 h-full">
-                  <CardContent className="p-0">
-                    <div className="w-16 h-16 mx-auto bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mb-4 shadow-lg">
-                      {getCategoryIcon(category.icon)}
+          {loading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {[...Array(8)].map((_, i) => (
+                <Card key={i} className="card-beautiful">
+                  <CardContent className="p-4">
+                    <div className="animate-pulse space-y-4">
+                      <div className="aspect-square bg-gray-200 rounded-2xl"></div>
+                      <div className="h-4 bg-gray-200 rounded"></div>
+                      <div className="h-3 bg-gray-200 rounded w-3/4"></div>
+                      <div className="h-6 bg-gray-200 rounded w-1/2"></div>
                     </div>
-                    <h3 className="font-semibold text-lg mb-2">{category.name_uz}</h3>
-                    <p className="text-sm text-gray-600 mb-3 line-clamp-2">{category.description}</p>
-                    <Badge variant="secondary" className="text-xs">
-                      {category.product_count} mahsulot
-                    </Badge>
                   </CardContent>
                 </Card>
-              </Link>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Featured Products */}
-      <section className="py-16 bg-white/50">
-        <div className="container mx-auto px-4">
-          <div className="flex items-center justify-between mb-12">
-            <div>
-              <h2 className="text-4xl font-bold gradient-text mb-4">Tavsiya etilgan mahsulotlar</h2>
-              <p className="text-xl text-gray-600">Eng yaxshi bahoga ega mahsulotlar</p>
+              ))}
             </div>
-            <Link href="/products?sort=rating">
-              <Button variant="outline" className="rounded-2xl border-2 bg-transparent">
-                Barchasini ko'rish
-                <ArrowRight className="h-4 w-4 ml-2" />
-              </Button>
-            </Link>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {featuredProducts.map((product) => (
-              <ProductCard key={product.id} product={product} />
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Popular Products */}
-      <section className="py-16">
-        <div className="container mx-auto px-4">
-          <div className="flex items-center justify-between mb-12">
-            <div>
-              <h2 className="text-4xl font-bold gradient-text mb-4">Mashhur mahsulotlar</h2>
-              <p className="text-xl text-gray-600">Eng ko'p sotilgan mahsulotlar</p>
+          ) : products.length === 0 ? (
+            <div className="text-center py-16">
+              <div className="w-32 h-32 mx-auto bg-gradient-to-br from-gray-100 to-gray-200 rounded-3xl flex items-center justify-center mb-8">
+                <Package className="h-16 w-16 text-gray-400" />
+              </div>
+              <h3 className="text-xl font-semibold mb-2">Mahsulotlar topilmadi</h3>
+              <p className="text-gray-600">Hozircha mahsulotlar yo'q</p>
             </div>
-            <Link href="/products?sort=popular">
-              <Button variant="outline" className="rounded-2xl border-2 bg-transparent">
-                Barchasini ko'rish
-                <ArrowRight className="h-4 w-4 ml-2" />
-              </Button>
-            </Link>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {popularProducts.map((product) => (
-              <ProductCard key={product.id} product={product} />
-            ))}
-          </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {products.map((product) => (
+                <ProductCard key={product.id} product={product} />
+              ))}
+            </div>
+          )}
         </div>
       </section>
 
       {/* CTA Section */}
-      <section className="py-20 bg-gradient-to-br from-blue-600 to-purple-600 text-white">
+      <section className="py-16 bg-gradient-to-br from-blue-600 to-purple-600 text-white">
         <div className="container mx-auto px-4 text-center">
-          <div className="max-w-3xl mx-auto">
-            <h2 className="text-4xl md:text-5xl font-bold mb-6">Bizning jamiyatga qo'shiling!</h2>
-            <p className="text-xl md:text-2xl mb-8 opacity-90">
+          <div className="max-w-2xl mx-auto">
+            <h2 className="text-3xl md:text-4xl font-bold mb-4">Bizning jamiyatga qo'shiling!</h2>
+            <p className="text-lg md:text-xl mb-8 opacity-90">
               G'uzor tumanidagi eng katta onlayn bozorda o'z mahsulotlaringizni soting
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link href="/become-seller">
                 <Button
                   size="lg"
-                  className="bg-white text-blue-600 hover:bg-gray-100 rounded-2xl px-8 py-4 text-lg font-semibold"
+                  className="bg-white text-blue-600 hover:bg-gray-100 rounded-2xl px-8 py-3 text-lg font-semibold"
                 >
-                  <Store className="h-5 w-5 mr-2" />
+                  <TrendingUp className="h-5 w-5 mr-2" />
                   Sotuvchi bo'lish
                 </Button>
               </Link>
@@ -514,7 +432,7 @@ export default function HomePage() {
                 <Button
                   size="lg"
                   variant="outline"
-                  className="border-white text-white hover:bg-white hover:text-blue-600 rounded-2xl px-8 py-4 text-lg font-semibold bg-transparent"
+                  className="border-white text-white hover:bg-white hover:text-blue-600 rounded-2xl px-8 py-3 text-lg font-semibold bg-transparent"
                 >
                   <Package className="h-5 w-5 mr-2" />
                   Mahsulotlarni ko'rish
