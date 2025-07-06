@@ -24,7 +24,6 @@ interface Seller {
   seller_rating: number
   total_products: number
   total_orders: number
-  profile_image: string
 }
 
 export default function SellersPage() {
@@ -55,8 +54,7 @@ export default function SellersPage() {
           phone,
           address,
           is_verified_seller,
-          created_at,
-          profile_image
+          created_at
         `)
         .eq("is_verified_seller", true)
         .order("created_at", { ascending: false })
@@ -160,7 +158,7 @@ export default function SellersPage() {
         <div className="flex items-start gap-4">
           {/* Seller Avatar */}
           <Avatar className="w-16 h-16">
-            <AvatarImage src={seller.profile_image || "/placeholder-user.jpg"} />
+            <AvatarImage src="/placeholder-user.jpg" />
             <AvatarFallback className="bg-gradient-to-br from-blue-500 to-purple-600 text-white text-lg">
               {seller.company_name?.charAt(0) || seller.full_name?.charAt(0) || "S"}
             </AvatarFallback>

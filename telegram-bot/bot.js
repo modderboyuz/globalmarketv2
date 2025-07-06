@@ -16,9 +16,6 @@ const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true })
 console.log("🚀 GlobalMarket Telegram Bot ishga tushdi!")
 console.log("🔗 Bot username: @globalmarketshopbot")
 
-// Admin ID
-const SPECIFIC_ADMIN_TELEGRAM_ID = 6295092422
-
 // User sessions for tracking state
 const userSessions = new Map()
 
@@ -45,6 +42,21 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
     // Admin tekshirish
     const isAdmin = await checkAdminStatus(userId)
     await sendMainMenu(chatId, isAdmin, msg.from.first_name)
+  }
+})
+
+// /admin buyrug'i (adminlar uchun)
+bot.onText(/\/admin/, async (msg) => {
+  const chatId = msg.chat.id
+  const userId = msg.from.id
+
+  const isAdmin = await checkAdminStatus(userId)
+
+  if (isAdmin) {
+    console.log(`👑 Admin ${userId} admin paneliga kirdi`)
+    await sendAdminPanel(chatId)
+  } else {
+    await bot.sendMessage(chatId, "❌ Sizda admin huquqlari yo'q.")
   }
 })
 
@@ -88,6 +100,7 @@ bot.on("callback_query", async (callbackQuery) => {
 
   await bot.answerCallbackQuery(callbackQuery.id)
 
+  // Main menu actions
   if (data === "buy_products") {
     await showCategories(chatId)
   } else if (data === "search_products") {
@@ -100,7 +113,8 @@ bot.on("callback_query", async (callbackQuery) => {
   } else if (data === "my_orders") {
     await showUserOrders(chatId, userId)
   } else if (data === "back_to_main") {
-    await sendMainMenu(chatId, false, callbackQuery.from.first_name)
+    const isAdmin = await checkAdminStatus(userId)
+    await sendMainMenu(chatId, isAdmin, callbackQuery.from.first_name)
   } else if (data === "back_to_categories") {
     await showCategories(chatId)
   } else if (data.startsWith("category_")) {
@@ -129,8 +143,16 @@ bot.on("callback_query", async (callbackQuery) => {
   // Admin commands
   const isAdmin = await checkAdminStatus(userId)
   if (isAdmin) {
-    if (data === "show_orders") {
+    if (data === "admin_orders") {
       await showPendingOrders(chatId)
+    } else if (data === "admin_messages") {
+      await showAdminMessages(chatId)
+    } else if (data === "admin_users") {
+      await showUserStats(chatId)
+    } else if (data === "admin_products") {
+      await showProductStats(chatId)
+    } else if (data === "back_to_admin") {
+      await sendAdminPanel(chatId)
     } else if (data.startsWith("complete_")) {
       const orderId = data.replace("complete_", "")
       await updateOrderStatus(orderId, "completed")
@@ -199,76 +221,65 @@ async function updateUserTelegramId(telegramId, userInfo) {
 }
 
 async function checkAdminStatus(telegramId) {
-  return telegramId === SPECIFIC_ADMIN_TELEGRAM_ID
+  try {
+    const { data: user } = await supabase.from("users").select("is_admin").eq("telegram_id", telegramId).single()
+
+    return user?.is_admin || false
+  } catch (error) {
+    console.error("Admin status tekshirishda xatolik:", error)
+    return false
+  }
 }
 
 async function sendMainMenu(chatId, isAdmin, firstName) {
   const name = firstName || "Foydalanuvchi"
 
-  if (isAdmin) {
-    const message = `👋 Salom ${name}! Admin paneliga xush kelibsiz!\n\n📋 Buyurtmalar: /orders\n❓ Yordam: /help`
+  const message = `👋 Salom ${name}! GlobalMarket botiga xush kelibsiz!\n\n🛒 Mahsulot sotib olish\n🔍 Mahsulot qidirish\n🏪 Market haqida\n📞 Murojaat qilish\n\n📋 Buyurtmalaringizni kuzatish uchun "Buyurtmalarim" tugmasini bosing.`
 
-    const keyboard = {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "📋 Yangi buyurtmalar", callback_data: "show_orders" }],
-          [
-            { text: "🛒 Mahsulot sotib olish", callback_data: "buy_products" },
-            { text: "🔍 Mahsulot qidirish", callback_data: "search_products" },
-          ],
-          [
-            { text: "🏪 Market haqida", callback_data: "about_market" },
-            { text: "📞 Murojaat qilish", callback_data: "contact_us" },
-          ],
-          [{ text: "📋 Buyurtmalarim", callback_data: "my_orders" }],
+  const keyboard = {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "🛒 Mahsulot sotib olish", callback_data: "buy_products" },
+          { text: "🔍 Mahsulot qidirish", callback_data: "search_products" },
         ],
-      },
-    }
-
-    await bot.sendMessage(chatId, message, keyboard)
-  } else {
-    const message = `👋 Salom ${name}! GlobalMarket botiga xush kelibsiz!\n\n🛒 Mahsulot sotib olish\n🔍 Mahsulot qidirish\n🏪 Market haqida\n📞 Murojaat qilish\n\n📋 Buyurtmalaringizni kuzatish uchun "Buyurtmalarim" tugmasini bosing.`
-
-    const keyboard = {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "🛒 Mahsulot sotib olish", callback_data: "buy_products" },
-            { text: "🔍 Mahsulot qidirish", callback_data: "search_products" },
-          ],
-          [
-            { text: "🏪 Market haqida", callback_data: "about_market" },
-            { text: "📞 Murojaat qilish", callback_data: "contact_us" },
-          ],
-          [{ text: "📋 Buyurtmalarim", callback_data: "my_orders" }],
+        [
+          { text: "🏪 Market haqida", callback_data: "about_market" },
+          { text: "📞 Murojaat qilish", callback_data: "contact_us" },
         ],
-      },
-    }
-
-    await bot.sendMessage(chatId, message, keyboard)
+        [{ text: "📋 Buyurtmalarim", callback_data: "my_orders" }],
+        ...(isAdmin ? [[{ text: "👑 Admin Panel", callback_data: "admin_panel" }]] : []),
+      ],
+    },
   }
+
+  await bot.sendMessage(chatId, message, keyboard)
+}
+
+async function sendAdminPanel(chatId) {
+  const message = `👑 *Admin Panel*\n\nTizimni boshqarish va nazorat qilish\n\n📊 Statistika va hisobotlar\n📋 Buyurtmalarni boshqarish\n💬 Xabarlarni ko'rish\n👥 Foydalanuvchilar`
+
+  const keyboard = {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "📋 Buyurtmalar", callback_data: "admin_orders" },
+          { text: "💬 Xabarlar", callback_data: "admin_messages" },
+        ],
+        [
+          { text: "👥 Foydalanuvchilar", callback_data: "admin_users" },
+          { text: "📦 Mahsulotlar", callback_data: "admin_products" },
+        ],
+        [{ text: "🔙 Bosh menyu", callback_data: "back_to_main" }],
+      ],
+    },
+  }
+
+  await bot.sendMessage(chatId, message, { parse_mode: "Markdown", ...keyboard })
 }
 
 async function sendHelpMessage(chatId) {
-  const message = `❓ *Yordam*
-
-*Mavjud buyruqlar:*
-/start - Botni boshlash
-/myorders - Buyurtmalarim
-/help - Yordam
-
-*Admin buyruqlari:*
-/orders - Barcha buyurtmalar
-
-*Buyurtma kuzatish:*
-Websaytdan buyurtma bergandan so'ng sizga maxsus havola yuboriladi.
-
-*Bot imkoniyatlari:*
-🛒 Mahsulot sotib olish
-🔍 Mahsulot qidirish
-📋 Buyurtmalarni kuzatish
-🏪 Market haqida ma'lumot
-📞 Aloqa ma'lumotlari`
+  const message = `❓ *Yordam*\n\n*Mavjud buyruqlar:*\n/start - Botni boshlash\n/myorders - Buyurtmalarim\n/help - Yordam\n\n*Admin buyruqlari:*\n/admin - Admin panel\n/orders - Barcha buyurtmalar\n\n*Buyurtma kuzatish:*\nWebsaytdan buyurtma bergandan so'ng sizga maxsus havola yuboriladi.\n\n*Bot imkoniyatlari:*\n🛒 Mahsulot sotib olish\n🔍 Mahsulot qidirish\n📋 Buyurtmalarni kuzatish\n🏪 Market haqida ma'lumot\n📞 Aloqa ma'lumotlari`
 
   await bot.sendMessage(chatId, message, { parse_mode: "Markdown" })
 }
@@ -763,7 +774,11 @@ async function showPendingOrders(chatId) {
     if (error) throw error
 
     if (!orders || orders.length === 0) {
-      await bot.sendMessage(chatId, "📭 Yangi buyurtmalar yo'q.")
+      await bot.sendMessage(chatId, "📭 Yangi buyurtmalar yo'q.", {
+        reply_markup: {
+          inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }]],
+        },
+      })
       return
     }
 
@@ -780,7 +795,12 @@ async function showPendingOrders(chatId) {
       message += `━━━━━━━━━━━━━━━━━━━━\n\n`
     }
 
-    await bot.sendMessage(chatId, message, { parse_mode: "Markdown" })
+    await bot.sendMessage(chatId, message, {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }]],
+      },
+    })
 
     // Har bir buyurtma uchun tugmalar
     for (const order of orders) {
@@ -801,6 +821,103 @@ async function showPendingOrders(chatId) {
   } catch (error) {
     console.error("Buyurtmalarni ko'rsatishda xatolik:", error)
     await bot.sendMessage(chatId, "❌ Buyurtmalarni olishda xatolik.")
+  }
+}
+
+async function showAdminMessages(chatId) {
+  try {
+    const { data: messages, error } = await supabase
+      .from("admin_messages")
+      .select(`
+        *,
+        users (full_name, phone)
+      `)
+      .eq("status", "pending")
+      .order("created_at", { ascending: false })
+      .limit(10)
+
+    if (error) throw error
+
+    if (!messages || messages.length === 0) {
+      await bot.sendMessage(chatId, "📭 Yangi xabarlar yo'q.", {
+        reply_markup: {
+          inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }]],
+        },
+      })
+      return
+    }
+
+    let message = "💬 *Yangi xabarlar:*\n\n"
+
+    for (const msg of messages) {
+      const typeText = getMessageTypeText(msg.type)
+      message += `📝 *${typeText}*\n`
+      message += `👤 ${msg.users?.full_name || "Noma'lum"}\n`
+      message += `📞 ${msg.users?.phone || "Noma'lum"}\n`
+      message += `💬 ${msg.content}\n`
+      message += `📅 ${formatDate(msg.created_at)}\n`
+      message += `━━━━━━━━━━━━━━━━━━━━\n\n`
+    }
+
+    await bot.sendMessage(chatId, message, {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }]],
+      },
+    })
+  } catch (error) {
+    console.error("Admin xabarlarni ko'rsatishda xatolik:", error)
+    await bot.sendMessage(chatId, "❌ Xabarlarni olishda xatolik.")
+  }
+}
+
+async function showUserStats(chatId) {
+  try {
+    const [usersResult, sellersResult, todayUsersResult] = await Promise.all([
+      supabase.from("users").select("*", { count: "exact", head: true }),
+      supabase.from("users").select("*", { count: "exact", head: true }).eq("is_verified_seller", true),
+      supabase
+        .from("users")
+        .select("*", { count: "exact", head: true })
+        .gte("created_at", new Date().toISOString().split("T")[0]),
+    ])
+
+    const message = `👥 *Foydalanuvchilar statistikasi:*\n\n📊 Jami foydalanuvchilar: ${usersResult.count || 0}\n🏪 Sotuvchilar: ${sellersResult.count || 0}\n📅 Bugun ro'yxatdan o'tganlar: ${todayUsersResult.count || 0}`
+
+    await bot.sendMessage(chatId, message, {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }]],
+      },
+    })
+  } catch (error) {
+    console.error("Foydalanuvchilar statistikasini ko'rsatishda xatolik:", error)
+    await bot.sendMessage(chatId, "❌ Statistikani olishda xatolik.")
+  }
+}
+
+async function showProductStats(chatId) {
+  try {
+    const [productsResult, activeProductsResult, todayProductsResult] = await Promise.all([
+      supabase.from("products").select("*", { count: "exact", head: true }),
+      supabase.from("products").select("*", { count: "exact", head: true }).eq("is_active", true),
+      supabase
+        .from("products")
+        .select("*", { count: "exact", head: true })
+        .gte("created_at", new Date().toISOString().split("T")[0]),
+    ])
+
+    const message = `📦 *Mahsulotlar statistikasi:*\n\n📊 Jami mahsulotlar: ${productsResult.count || 0}\n✅ Faol mahsulotlar: ${activeProductsResult.count || 0}\n📅 Bugun qo'shilganlar: ${todayProductsResult.count || 0}`
+
+    await bot.sendMessage(chatId, message, {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }]],
+      },
+    })
+  } catch (error) {
+    console.error("Mahsulotlar statistikasini ko'rsatishda xatolik:", error)
+    await bot.sendMessage(chatId, "❌ Statistikani olishda xatolik.")
   }
 }
 
@@ -996,12 +1113,64 @@ async function notifyAdminsNewOrder(orderId) {
       },
     }
 
-    // Yagona admin uchun xabar yuborish
-    try {
-      await bot.sendMessage(SPECIFIC_ADMIN_TELEGRAM_ID, message, { parse_mode: "Markdown", ...keyboard })
-      console.log(`✅ Admin ${SPECIFIC_ADMIN_TELEGRAM_ID} ga xabar yuborildi`)
-    } catch (error) {
-      console.error(`❌ Admin ${SPECIFIC_ADMIN_TELEGRAM_ID} ga xabar yuborishda xatolik:`, error)
+    // Barcha adminlarga xabar yuborish
+    const { data: admins } = await supabase
+      .from("users")
+      .select("telegram_id")
+      .eq("is_admin", true)
+      .not("telegram_id", "is", null)
+
+    if (admins && admins.length > 0) {
+      for (const admin of admins) {
+        try {
+          await bot.sendMessage(admin.telegram_id, message, { parse_mode: "Markdown", ...keyboard })
+          console.log(`✅ Admin ${admin.telegram_id} ga xabar yuborildi`)
+        } catch (error) {
+          console.error(`❌ Admin ${admin.telegram_id} ga xabar yuborishda xatolik:`, error)
+        }
+      }
+    } else {
+      console.log("❌ Adminlar topilmadi")
+    }
+  } catch (error) {
+    console.error("Adminlarga xabar berishda xatolik:", error)
+  }
+}
+
+// Real-time admin notifications for all admin messages
+async function notifyAdminsNewMessage(messageType, title, content, userData) {
+  try {
+    console.log(`📢 Adminlarga yangi xabar: ${messageType}`)
+
+    const typeText = getMessageTypeText(messageType)
+
+    let message = `🔔 *${typeText}*\n\n`
+    message += `📝 ${title}\n`
+    message += `💬 ${content}\n`
+
+    if (userData) {
+      message += `👤 ${userData.full_name || "Noma'lum"}\n`
+      message += `📞 ${userData.phone || "Noma'lum"}\n`
+    }
+
+    message += `📅 ${formatDate(new Date().toISOString())}`
+
+    // Barcha adminlarga xabar yuborish
+    const { data: admins } = await supabase
+      .from("users")
+      .select("telegram_id")
+      .eq("is_admin", true)
+      .not("telegram_id", "is", null)
+
+    if (admins && admins.length > 0) {
+      for (const admin of admins) {
+        try {
+          await bot.sendMessage(admin.telegram_id, message, { parse_mode: "Markdown" })
+          console.log(`✅ Admin ${admin.telegram_id} ga xabar yuborildi`)
+        } catch (error) {
+          console.error(`❌ Admin ${admin.telegram_id} ga xabar yuborishda xatolik:`, error)
+        }
+      }
     }
   } catch (error) {
     console.error("Adminlarga xabar berishda xatolik:", error)
@@ -1045,6 +1214,17 @@ function getStatusText(status) {
   return texts[status] || "Noma'lum"
 }
 
+function getMessageTypeText(type) {
+  const types = {
+    seller_application: "Sotuvchi arizasi",
+    product_approval: "Mahsulot tasdiqlash",
+    contact: "Murojaat",
+    book_request: "Kitob so'rovi",
+    sell_request: "Mahsulot sotish so'rovi",
+  }
+  return types[type] || "Xabar"
+}
+
 // ERROR HANDLING
 bot.on("error", (error) => {
   console.error("❌ Bot xatoligi:", error)
@@ -1054,5 +1234,8 @@ bot.on("polling_error", (error) => {
   console.error("❌ Polling xatoligi:", error)
 })
 
-// Export function for webhook usage
-module.exports = { notifyAdminsNewOrder }
+// Export functions for webhook usage
+module.exports = {
+  notifyAdminsNewOrder,
+  notifyAdminsNewMessage,
+}

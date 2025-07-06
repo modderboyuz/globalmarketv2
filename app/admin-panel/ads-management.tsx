@@ -170,7 +170,7 @@ export function AdsManagement() {
             <CardContent className="p-6">
               <div className="animate-pulse space-y-4">
                 <div className="h-4 bg-gray-200 rounded w-1/4"></div>
-                <div className="h-32 bg-gray-200 rounded"></div>
+                <div className="h-20 bg-gray-200 rounded"></div>
                 <div className="h-4 bg-gray-200 rounded w-1/2"></div>
               </div>
             </CardContent>
@@ -347,18 +347,18 @@ export function AdsManagement() {
         ) : (
           ads.map((ad) => (
             <Card key={ad.id} className="card-beautiful">
-              <CardContent className="p-6">
-                <div className="flex items-start gap-6">
+              <CardContent className="p-4">
+                <div className="flex items-start gap-4">
                   {/* Ad Preview */}
-                  <div className="w-48 h-24 relative rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
+                  <div className="w-32 h-16 relative rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
                     <Image src={ad.image_url || "/placeholder.svg"} alt={ad.title} fill className="object-cover" />
                   </div>
 
                   {/* Ad Info */}
-                  <div className="flex-1 space-y-3">
+                  <div className="flex-1 space-y-2">
                     <div className="flex items-start justify-between">
                       <div>
-                        <h3 className="text-lg font-semibold">{ad.title}</h3>
+                        <h3 className="font-semibold">{ad.title}</h3>
                         {ad.description && <p className="text-gray-600 text-sm">{ad.description}</p>}
                       </div>
 
