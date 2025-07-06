@@ -18,7 +18,7 @@ export default function WebhookSetupPage() {
   const [isChecking, setIsChecking] = useState(false)
 
   const botToken = "8057847116:AAEOUXELJqQNmh0lQDAl2HgPGKQ_e1x1dkA"
-  const defaultWebhookUrl = `${typeof window !== "undefined" ? window.location.origin : "https://your-domain.com"}/api/webhook/telegram`
+  const defaultWebhookUrl = `${typeof window !== "undefined" ? window.location.origin : "https://gmarketshop.vercel.app"}/api/webhook/telegram`
 
   useEffect(() => {
     checkWebhook()

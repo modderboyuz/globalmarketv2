@@ -4,7 +4,7 @@ import { supabase } from "@/lib/supabase"; // Bu import joyi sizning loyiha tuzi
 // Agar sizning supabase import yo'lingiz boshqa bo'lsa, shu qismni o'zgartiring
 // Misol: import { createClient } from '@supabase/supabase-js'; const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const TELEGRAM_BOT_TOKEN = "8057847116:AAGD-kfGrw8R2ZjTOZqFkpMvNJ6pdHIDfIk";
+const TELEGRAM_BOT_TOKEN = "8057847116:AAEOUXELJqQNmh0lQDAl2HgPGKQ_e1x1dkA";
 const BOT_API_URL = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
 // Agar siz faqat bitta admin bo'lsa, uning Telegram ID sini shu yerga yozing.

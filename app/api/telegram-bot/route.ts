@@ -8,7 +8,7 @@ const TelegramBot = require("node-telegram-bot-api")
 const { createClient } = require("@supabase/supabase-js")
 
 // Bot Token
-const TELEGRAM_BOT_TOKEN = "8057847116:AAGD-kfGrw8R2ZjTOZqFkpMvNJ6pdHIDfIk"
+const TELEGRAM_BOT_TOKEN = "8057847116:AAEOUXELJqQNmh0lQDAl2HgPGKQ_e1x1dkA"
 
 // Supabase ma'lumotlari (o'zingiznikini kiriting)
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
