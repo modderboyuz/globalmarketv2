@@ -60,6 +60,10 @@
 
 /* Custom Styles */
 @layer components {
+  .page-container {
+    @apply min-h-screen bg-gradient-to-br from-blue-50/30 via-white to-purple-50/30;
+  }
+
   /* Gradient text that works on all devices */
   .gradient-text {
     background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 50%, #1e40af 100%);
@@ -82,20 +86,256 @@
     }
   }
 
-  /* Beautiful cards */
+  .text-shadow {
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+
   .card-beautiful {
     @apply bg-white/80 backdrop-blur-sm border-2 border-gray-200/60 rounded-3xl shadow-lg hover:shadow-xl transition-all duration-300;
   }
 
   .card-hover {
-    @apply transform transition-all duration-300 hover:scale-[1.02] hover:shadow-xl;
+    @apply hover:scale-[1.02] hover:shadow-2xl transition-all duration-300;
   }
 
-  /* Beautiful inputs */
-  .input-beautiful {
-    @apply rounded-2xl border-2 border-gray-200/60 bg-white/80 backdrop-blur-sm focus:border-blue-400/70 focus:ring-4 focus:ring-blue-100/50 transition-all duration-300;
-  }
-
-  /* Beautiful buttons */
   .btn-primary {
-    @apply bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-2xl transition\
+    @apply bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-medium shadow-lg hover:shadow-xl transition-all duration-300 rounded-2xl;
+  }
+
+  .input-beautiful {
+    @apply border-2 border-gray-200/60 rounded-2xl bg-white/80 backdrop-blur-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-200 transition-all duration-300;
+  }
+
+  .badge-beautiful {
+    @apply bg-white/90 backdrop-blur-sm border-2 rounded-xl font-medium shadow-sm;
+  }
+
+  .stats-card {
+    @apply bg-white/60 backdrop-blur-sm border-2 border-gray-200/40 rounded-2xl p-4 text-center hover:bg-white/80 transition-all duration-300;
+  }
+
+  .icon-container {
+    @apply w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center text-white shadow-lg;
+  }
+
+  .floating-animation {
+    animation: float 6s ease-in-out infinite;
+  }
+
+  .section-divider {
+    @apply w-full h-px bg-gradient-to-r from-transparent via-gray-300 to-transparent my-8;
+  }
+
+  /* Product card responsive button positioning */
+  .product-card {
+    @apply relative overflow-hidden;
+  }
+
+  .product-card-content {
+    @apply p-4 pb-16;
+  }
+
+  .product-card-button {
+    @apply absolute bottom-4 left-4 right-4;
+  }
+
+  @media (max-width: 640px) {
+    .product-card-button {
+      @apply bottom-3 left-3 right-3;
+    }
+  }
+
+  @keyframes float {
+    0%,
+    100% {
+      transform: translateY(0px);
+    }
+    50% {
+      transform: translateY(-10px);
+    }
+  }
+
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Chat styles */
+  .chat-container {
+    @apply h-[600px] flex flex-col bg-white rounded-2xl border-2 border-gray-200;
+  }
+
+  .chat-header {
+    @apply p-4 border-b border-gray-200 bg-gray-50 rounded-t-2xl;
+  }
+
+  .chat-messages {
+    @apply flex-1 overflow-y-auto p-4 space-y-4;
+  }
+
+  .chat-input {
+    @apply p-4 border-t border-gray-200 bg-gray-50 rounded-b-2xl;
+  }
+
+  .message-bubble {
+    @apply max-w-xs lg:max-w-md px-4 py-2 rounded-2xl;
+  }
+
+  .message-sent {
+    @apply bg-blue-600 text-white ml-auto;
+  }
+
+  .message-received {
+    @apply bg-gray-200 text-gray-800 mr-auto;
+  }
+
+  /* Rating stars */
+  .rating-stars {
+    @apply flex items-center gap-1;
+  }
+
+  .star-filled {
+    @apply text-yellow-400 fill-current;
+  }
+
+  .star-empty {
+    @apply text-gray-300;
+  }
+
+  /* Ad banner responsive */
+  .ad-banner {
+    @apply w-full rounded-2xl overflow-hidden shadow-lg;
+    height: 200px;
+  }
+
+  @media (min-width: 768px) {
+    .ad-banner {
+      height: 250px;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .ad-banner {
+      height: 300px;
+    }
+  }
+}
+
+/* Phone Input Formatting */
+.phone-input {
+  @apply input-beautiful;
+}
+
+.phone-input::placeholder {
+  color: #9ca3af;
+}
+
+/* Scrollbar Styles */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+}
+
+/* Loading Animation */
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Responsive Design */
+@media (max-width: 640px) {
+  .container {
+    @apply px-2;
+  }
+
+  .card-beautiful {
+    @apply rounded-2xl;
+  }
+
+  .btn-primary {
+    @apply text-sm px-3 py-2;
+  }
+
+  .gradient-text {
+    @apply text-2xl;
+  }
+}
+
+/* Print Styles */
+@media print {
+  .page-container {
+    @apply bg-white;
+  }
+
+  .card-beautiful {
+    @apply bg-white border border-gray-300 shadow-none;
+  }
+
+  .gradient-text {
+    @apply text-gray-900;
+    background: none;
+    -webkit-background-clip: unset;
+    -webkit-text-fill-color: unset;
+    background-clip: unset;
+  }
+}
+
+/* High Contrast Mode */
+@media (prefers-contrast: high) {
+  .card-beautiful {
+    @apply border-gray-900 bg-white;
+  }
+
+  .btn-primary {
+    @apply bg-blue-900 hover:bg-blue-800;
+  }
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  .card-hover {
+    @apply hover:scale-100;
+  }
+
+  .floating-animation {
+    animation: none;
+  }
+
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
