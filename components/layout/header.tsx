@@ -1,10 +1,10 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
+import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -15,6 +15,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  NavigationMenu,
+  NavigationMenuContent,
+  NavigationMenuItem,
+  NavigationMenuLink,
+  NavigationMenuList,
+  NavigationMenuTrigger,
+} from "@/components/ui/navigation-menu"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   Search,
@@ -23,15 +31,31 @@ import {
   LogOut,
   Package,
   Heart,
-  Settings,
   Store,
   Plus,
   MessageSquare,
   Info,
+  BookOpen,
+  PenTool,
+  Phone,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { AuthModal } from "@/components/auth/auth-modal"
 import { toast } from "sonner"
+
+interface Category {
+  id: string
+  name_uz: string
+  slug: string
+  icon: string
+}
+
+interface Product {
+  id: string
+  name: string
+  price: number
+  image_url: string
+}
 
 export function Header() {
   const router = useRouter()
@@ -40,9 +64,13 @@ export function Header() {
   const [searchQuery, setSearchQuery] = useState("")
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [categories, setCategories] = useState<Category[]>([])
+  const [featuredProducts, setFeaturedProducts] = useState<Product[]>([])
 
   useEffect(() => {
     checkUser()
+    fetchCategories()
+    fetchFeaturedProducts()
 
     // Listen for auth changes
     const {
@@ -90,6 +118,34 @@ export function Header() {
     }
   }
 
+  const fetchCategories = async () => {
+    try {
+      const { data, error } = await supabase.from("categories").select("*").order("sort_order").limit(6)
+
+      if (error) throw error
+      setCategories(data || [])
+    } catch (error) {
+      console.error("Error fetching categories:", error)
+    }
+  }
+
+  const fetchFeaturedProducts = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("products")
+        .select("id, name, price, image_url")
+        .eq("is_active", true)
+        .gt("stock_quantity", 0)
+        .order("order_count", { ascending: false })
+        .limit(6)
+
+      if (error) throw error
+      setFeaturedProducts(data || [])
+    } catch (error) {
+      console.error("Error fetching featured products:", error)
+    }
+  }
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
     if (searchQuery.trim()) {
@@ -109,18 +165,22 @@ export function Header() {
     }
   }
 
+  const formatPrice = (price: number) => {
+    return new Intl.NumberFormat("uz-UZ").format(price) + " so'm"
+  }
+
   return (
     <>
-      <header className="sticky top-0 z-40 w-full bg-white/95 backdrop-blur-md border-b border-gray-200">
+      <header className="sticky top-0 z-50 w-full bg-white/95 backdrop-blur-md border-b border-gray-200">
         <div className="container mx-auto px-4">
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
             <Link href="/" className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
-                <span className="text-white font-bold text-lg">GM</span>
+              <div className="relative w-10 h-10">
+                <Image src="/placeholder-logo.png" alt="GlobalMarket Logo" fill className="object-contain" priority />
               </div>
               <div className="hidden sm:block">
-                <h1 className="text-xl font-bold gradient-text">GlobalMarket</h1>
+                <h1 className="text-xl font-bold text-gray-800">GlobalMarket</h1>
                 <p className="text-xs text-gray-500">G'uzor tumani</p>
               </div>
             </Link>
@@ -143,6 +203,17 @@ export function Header() {
 
             {/* Right Side Actions */}
             <div className="flex items-center space-x-2">
+              {/* Contact Button */}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="hidden lg:flex items-center gap-2 text-blue-600 hover:bg-blue-50"
+                onClick={() => window.open("tel:+998958657500")}
+              >
+                <Phone className="h-4 w-4" />
+                <span className="font-medium">+998 95 865 75 00</span>
+              </Button>
+
               {/* Search Button - Mobile only */}
               <Button
                 variant="ghost"
@@ -201,6 +272,10 @@ export function Header() {
                       <Heart className="mr-2 h-4 w-4" />
                       <span>Sevimlilar</span>
                     </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => router.push("/messages")}>
+                      <MessageSquare className="mr-2 h-4 w-4" />
+                      <span>Xabarlar</span>
+                    </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => router.push("/become-seller")}>
                       <Store className="mr-2 h-4 w-4" />
@@ -220,10 +295,6 @@ export function Header() {
                       <span>Biz haqimizda</span>
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => router.push("/settings")}>
-                      <Settings className="mr-2 h-4 w-4" />
-                      <span>Sozlamalar</span>
-                    </DropdownMenuItem>
                     <DropdownMenuItem onClick={handleLogout}>
                       <LogOut className="mr-2 h-4 w-4" />
                       <span>Chiqish</span>
@@ -231,12 +302,154 @@ export function Header() {
                   </DropdownMenuContent>
                 </DropdownMenu>
               ) : (
-                <Button variant="destructive" onClick={() => setShowAuthModal(true)} className="btn-primary rounded-2xl">
+                <Button
+                  variant="default"
+                  onClick={() => setShowAuthModal(true)}
+                  className="rounded-2xl bg-blue-600 hover:bg-blue-700"
+                >
                   <User className="h-4 w-4 mr-2" />
                   <span className="hidden sm:inline">Kirish</span>
                 </Button>
               )}
             </div>
+          </div>
+
+          {/* Desktop Navigation Menu */}
+          <div className="hidden lg:block border-t border-gray-100">
+            <NavigationMenu className="mx-auto">
+              <NavigationMenuList className="flex space-x-6 py-3">
+                <NavigationMenuItem>
+                  <NavigationMenuTrigger className="text-gray-700 hover:text-blue-600">
+                    <BookOpen className="h-4 w-4 mr-2" />
+                    Kitoblar
+                  </NavigationMenuTrigger>
+                  <NavigationMenuContent>
+                    <div className="grid gap-3 p-6 w-[600px] grid-cols-2">
+                      <div className="space-y-3">
+                        <h4 className="font-medium text-gray-900">Kategoriyalar</h4>
+                        {categories
+                          .filter((cat) => cat.slug.includes("kitob"))
+                          .map((category) => (
+                            <NavigationMenuLink key={category.id} asChild>
+                              <Link
+                                href={`/category/${category.slug}`}
+                                className="block select-none space-y-1 rounded-md p-3 leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
+                              >
+                                <div className="text-sm font-medium leading-none">
+                                  {category.icon} {category.name_uz}
+                                </div>
+                              </Link>
+                            </NavigationMenuLink>
+                          ))}
+                      </div>
+                      <div className="space-y-3">
+                        <h4 className="font-medium text-gray-900">Mashhur kitoblar</h4>
+                        {featuredProducts.slice(0, 3).map((product) => (
+                          <NavigationMenuLink key={product.id} asChild>
+                            <Link
+                              href={`/product/${product.id}`}
+                              className="flex items-center space-x-3 rounded-md p-3 leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
+                            >
+                              <div className="w-12 h-12 relative rounded-lg overflow-hidden bg-gray-100">
+                                <Image
+                                  src={product.image_url || "/placeholder.svg"}
+                                  alt={product.name}
+                                  fill
+                                  className="object-cover"
+                                />
+                              </div>
+                              <div className="flex-1">
+                                <div className="text-sm font-medium leading-none line-clamp-1">{product.name}</div>
+                                <div className="text-xs text-blue-600 mt-1">{formatPrice(product.price)}</div>
+                              </div>
+                            </Link>
+                          </NavigationMenuLink>
+                        ))}
+                      </div>
+                    </div>
+                  </NavigationMenuContent>
+                </NavigationMenuItem>
+
+                <NavigationMenuItem>
+                  <NavigationMenuTrigger className="text-gray-700 hover:text-blue-600">
+                    <PenTool className="h-4 w-4 mr-2" />
+                    Maktab buyumlari
+                  </NavigationMenuTrigger>
+                  <NavigationMenuContent>
+                    <div className="grid gap-3 p-6 w-[600px] grid-cols-2">
+                      <div className="space-y-3">
+                        <h4 className="font-medium text-gray-900">Kategoriyalar</h4>
+                        {categories
+                          .filter((cat) => !cat.slug.includes("kitob"))
+                          .map((category) => (
+                            <NavigationMenuLink key={category.id} asChild>
+                              <Link
+                                href={`/category/${category.slug}`}
+                                className="block select-none space-y-1 rounded-md p-3 leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
+                              >
+                                <div className="text-sm font-medium leading-none">
+                                  {category.icon} {category.name_uz}
+                                </div>
+                              </Link>
+                            </NavigationMenuLink>
+                          ))}
+                      </div>
+                      <div className="space-y-3">
+                        <h4 className="font-medium text-gray-900">Mashhur mahsulotlar</h4>
+                        {featuredProducts.slice(3, 6).map((product) => (
+                          <NavigationMenuLink key={product.id} asChild>
+                            <Link
+                              href={`/product/${product.id}`}
+                              className="flex items-center space-x-3 rounded-md p-3 leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
+                            >
+                              <div className="w-12 h-12 relative rounded-lg overflow-hidden bg-gray-100">
+                                <Image
+                                  src={product.image_url || "/placeholder.svg"}
+                                  alt={product.name}
+                                  fill
+                                  className="object-cover"
+                                />
+                              </div>
+                              <div className="flex-1">
+                                <div className="text-sm font-medium leading-none line-clamp-1">{product.name}</div>
+                                <div className="text-xs text-blue-600 mt-1">{formatPrice(product.price)}</div>
+                              </div>
+                            </Link>
+                          </NavigationMenuLink>
+                        ))}
+                      </div>
+                    </div>
+                  </NavigationMenuContent>
+                </NavigationMenuItem>
+
+                <NavigationMenuItem>
+                  <Link
+                    href="/products"
+                    className="text-gray-700 hover:text-blue-600 px-4 py-2 rounded-md transition-colors"
+                  >
+                    Barcha mahsulotlar
+                  </Link>
+                </NavigationMenuItem>
+
+                <NavigationMenuItem>
+                  <Link
+                    href="/sellers"
+                    className="text-gray-700 hover:text-blue-600 px-4 py-2 rounded-md transition-colors"
+                  >
+                    Sotuvchilar
+                  </Link>
+                </NavigationMenuItem>
+
+                <NavigationMenuItem>
+                  <Link
+                    href="/contact"
+                    className="text-gray-700 hover:text-blue-600 px-4 py-2 rounded-md transition-colors"
+                  >
+                    Aloqa
+                  </Link>
+                </NavigationMenuItem>
+              </NavigationMenuList>
+            </NavigationMenu>
           </div>
         </div>
       </header>
