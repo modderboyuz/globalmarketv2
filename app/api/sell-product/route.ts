@@ -51,6 +51,32 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "So'rov yaratishda xatolik" }, { status: 500 })
     }
 
+    // Create admin message for notification
+    await supabase.from("admin_messages").insert({
+      type: "sell_request",
+      title: `Yangi mahsulot sotish so'rovi: ${product_name}`,
+      content: `${product_name} mahsulotini sotish uchun so'rov yuborildi. Narx: ${Number.parseFloat(price).toLocaleString()} so'm`,
+      data: {
+        sell_request_id: sellRequest.id,
+        user_id,
+        product_name,
+        price: Number.parseFloat(price),
+      },
+      status: "pending",
+      created_by: user_id,
+    })
+
+    // Notify admins via Telegram (if bot is available)
+    try {
+      const { data: userData } = await supabase.from("users").select("full_name, phone").eq("id", user_id).single()
+
+      // This would trigger the Telegram bot notification
+      // The bot will pick this up from admin_messages table
+    } catch (notificationError) {
+      console.error("Notification error:", notificationError)
+      // Don't fail the main request if notification fails
+    }
+
     return NextResponse.json({
       success: true,
       message: "Mahsulot sotish so'rovi muvaffaqiyatli yuborildi!",

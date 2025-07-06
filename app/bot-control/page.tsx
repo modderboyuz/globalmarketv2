@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Bot, Send, RefreshCw, CheckCircle, Clock, Users, MessageSquare, Settings, ExternalLink } from "lucide-react"
+import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 
 interface BotInfo {
@@ -20,6 +21,16 @@ interface BotInfo {
   supports_inline_queries: boolean
 }
 
+interface WebhookInfo {
+  url: string
+  has_custom_certificate: boolean
+  pending_update_count: number
+  last_error_date?: number
+  last_error_message?: string
+  max_connections?: number
+  allowed_updates?: string[]
+}
+
 interface Order {
   id: string
   full_name: string
@@ -27,28 +38,50 @@ interface Order {
   total_amount: number
   status: string
   created_at: string
-  books: {
-    title: string
-    author: string
+  products: {
+    name: string
+    price: number
+  }
+}
+
+interface AdminMessage {
+  id: string
+  type: string
+  title: string
+  content: string
+  status: string
+  created_at: string
+  users: {
+    full_name: string
+    phone: string
   }
 }
 
 export default function BotControlPage() {
   const [botInfo, setBotInfo] = useState<BotInfo | null>(null)
-  const [webhookInfo, setWebhookInfo] = useState<any>(null)
+  const [webhookInfo, setWebhookInfo] = useState<WebhookInfo | null>(null)
   const [orders, setOrders] = useState<Order[]>([])
+  const [messages, setMessages] = useState<AdminMessage[]>([])
   const [loading, setLoading] = useState(false)
   const [chatId, setChatId] = useState("")
   const [message, setMessage] = useState("")
+  const [stats, setStats] = useState({
+    totalUsers: 0,
+    totalOrders: 0,
+    pendingOrders: 0,
+    pendingMessages: 0,
+  })
 
   useEffect(() => {
     fetchBotInfo()
     fetchOrders()
+    fetchMessages()
+    fetchStats()
   }, [])
 
   const fetchBotInfo = async () => {
     try {
-      const response = await fetch("/api/bot/start")
+      const response = await fetch("/api/telegram-bot/info")
       const data = await response.json()
 
       if (data.success) {
@@ -56,24 +89,68 @@ export default function BotControlPage() {
         setWebhookInfo(data.webhook)
       }
     } catch (error) {
+      console.error("Bot info fetch error:", error)
       toast.error("Bot ma'lumotlarini olishda xatolik")
     }
   }
 
   const fetchOrders = async () => {
     try {
-      const response = await fetch("/api/bot/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "get_orders" }),
-      })
-      const data = await response.json()
+      const { data, error } = await supabase
+        .from("orders")
+        .select(`
+          *,
+          products (name, price)
+        `)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false })
+        .limit(10)
 
-      if (data.success) {
-        setOrders(data.orders || [])
-      }
+      if (error) throw error
+      setOrders(data || [])
     } catch (error) {
+      console.error("Orders fetch error:", error)
       toast.error("Buyurtmalarni olishda xatolik")
+    }
+  }
+
+  const fetchMessages = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("admin_messages")
+        .select(`
+          *,
+          users (full_name, phone)
+        `)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false })
+        .limit(10)
+
+      if (error) throw error
+      setMessages(data || [])
+    } catch (error) {
+      console.error("Messages fetch error:", error)
+      toast.error("Xabarlarni olishda xatolik")
+    }
+  }
+
+  const fetchStats = async () => {
+    try {
+      const [usersResult, ordersResult, pendingOrdersResult, pendingMessagesResult] = await Promise.all([
+        supabase.from("users").select("*", { count: "exact", head: true }).not("telegram_id", "is", null),
+        supabase.from("orders").select("*", { count: "exact", head: true }),
+        supabase.from("orders").select("*", { count: "exact", head: true }).eq("status", "pending"),
+        supabase.from("admin_messages").select("*", { count: "exact", head: true }).eq("status", "pending"),
+      ])
+
+      setStats({
+        totalUsers: usersResult.count || 0,
+        totalOrders: ordersResult.count || 0,
+        pendingOrders: pendingOrdersResult.count || 0,
+        pendingMessages: pendingMessagesResult.count || 0,
+      })
+    } catch (error) {
+      console.error("Stats fetch error:", error)
     }
   }
 
@@ -85,12 +162,12 @@ export default function BotControlPage() {
 
     setLoading(true)
     try {
-      const response = await fetch("/api/bot/start", {
+      const response = await fetch("/api/telegram-bot/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "send_message",
-          data: { chatId: Number.parseInt(chatId), message },
+          chat_id: Number.parseInt(chatId),
+          text: message,
         }),
       })
 
@@ -103,6 +180,7 @@ export default function BotControlPage() {
         toast.error("Xabar yuborishda xatolik")
       }
     } catch (error) {
+      console.error("Send message error:", error)
       toast.error("Xabar yuborishda xatolik")
     } finally {
       setLoading(false)
@@ -111,48 +189,42 @@ export default function BotControlPage() {
 
   const updateOrderStatus = async (orderId: string, status: string) => {
     try {
-      const response = await fetch("/api/bot/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "update_order",
-          data: { orderId, status },
-        }),
-      })
+      const { error } = await supabase
+        .from("orders")
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq("id", orderId)
 
-      const data = await response.json()
+      if (error) throw error
 
-      if (data.success) {
-        toast.success("Buyurtma holati yangilandi!")
-        fetchOrders()
-      } else {
-        toast.error("Xatolik yuz berdi")
-      }
+      toast.success("Buyurtma holati yangilandi!")
+      fetchOrders()
     } catch (error) {
+      console.error("Order update error:", error)
       toast.error("Xatolik yuz berdi")
     }
   }
 
-  const notifyAdmins = async (orderId: string) => {
+  const setWebhook = async () => {
     try {
-      const response = await fetch("/api/bot/start", {
+      const response = await fetch("/api/telegram-bot/webhook", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "notify_admins",
-          data: { orderId },
+          url: `${window.location.origin}/api/webhook/telegram`,
         }),
       })
 
       const data = await response.json()
 
       if (data.success) {
-        toast.success("Adminlarga xabar yuborildi!")
+        toast.success("Webhook o'rnatildi!")
+        fetchBotInfo()
       } else {
-        toast.error("Xatolik yuz berdi")
+        toast.error("Webhook o'rnatishda xatolik")
       }
     } catch (error) {
-      toast.error("Xatolik yuz berdi")
+      console.error("Webhook setup error:", error)
+      toast.error("Webhook o'rnatishda xatolik")
     }
   }
 
@@ -182,10 +254,42 @@ export default function BotControlPage() {
             <p className="text-muted-foreground">GlobalMarket Telegram botini boshqarish va monitoring qilish</p>
           </div>
 
+          {/* Stats Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <Card className="card-beautiful">
+              <CardContent className="p-4 text-center">
+                <Users className="h-8 w-8 text-blue-600 mx-auto mb-2" />
+                <div className="text-2xl font-bold">{stats.totalUsers}</div>
+                <div className="text-sm text-gray-600">Bot foydalanuvchilari</div>
+              </CardContent>
+            </Card>
+            <Card className="card-beautiful">
+              <CardContent className="p-4 text-center">
+                <CheckCircle className="h-8 w-8 text-green-600 mx-auto mb-2" />
+                <div className="text-2xl font-bold">{stats.totalOrders}</div>
+                <div className="text-sm text-gray-600">Jami buyurtmalar</div>
+              </CardContent>
+            </Card>
+            <Card className="card-beautiful">
+              <CardContent className="p-4 text-center">
+                <Clock className="h-8 w-8 text-orange-600 mx-auto mb-2" />
+                <div className="text-2xl font-bold">{stats.pendingOrders}</div>
+                <div className="text-sm text-gray-600">Kutilayotgan</div>
+              </CardContent>
+            </Card>
+            <Card className="card-beautiful">
+              <CardContent className="p-4 text-center">
+                <MessageSquare className="h-8 w-8 text-purple-600 mx-auto mb-2" />
+                <div className="text-2xl font-bold">{stats.pendingMessages}</div>
+                <div className="text-sm text-gray-600">Yangi xabarlar</div>
+              </CardContent>
+            </Card>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Bot Ma'lumotlari */}
             <div className="lg:col-span-1 space-y-6">
-              <Card>
+              <Card className="card-beautiful">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Settings className="h-5 w-5" />
@@ -230,12 +334,12 @@ export default function BotControlPage() {
               </Card>
 
               {/* Webhook Ma'lumotlari */}
-              {webhookInfo && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Webhook Holati</CardTitle>
-                  </CardHeader>
-                  <CardContent>
+              <Card className="card-beautiful">
+                <CardHeader>
+                  <CardTitle>Webhook Holati</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {webhookInfo ? (
                     <div className="space-y-2">
                       <div>
                         <p className="text-sm font-medium">URL</p>
@@ -245,13 +349,29 @@ export default function BotControlPage() {
                         <p className="text-sm font-medium">Kutilayotgan yangilanishlar</p>
                         <p className="text-sm text-muted-foreground">{webhookInfo.pending_update_count || 0}</p>
                       </div>
+                      {webhookInfo.last_error_message && (
+                        <div>
+                          <p className="text-sm font-medium text-red-600">Oxirgi xatolik</p>
+                          <p className="text-xs text-red-500">{webhookInfo.last_error_message}</p>
+                        </div>
+                      )}
                     </div>
-                  </CardContent>
-                </Card>
-              )}
+                  ) : (
+                    <div className="text-center py-4">
+                      <p className="text-sm text-muted-foreground">Webhook ma'lumotlari yuklanmadi</p>
+                    </div>
+                  )}
+                  <div className="pt-4 border-t">
+                    <Button onClick={setWebhook} variant="outline" size="sm" className="w-full bg-transparent">
+                      <Settings className="h-4 w-4 mr-2" />
+                      Webhook o'rnatish
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
 
               {/* Test Xabar */}
-              <Card>
+              <Card className="card-beautiful">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <MessageSquare className="h-5 w-5" />
@@ -280,14 +400,15 @@ export default function BotControlPage() {
               </Card>
             </div>
 
-            {/* Buyurtmalar */}
-            <div className="lg:col-span-2">
-              <Card>
+            {/* Buyurtmalar va Xabarlar */}
+            <div className="lg:col-span-2 space-y-6">
+              {/* Kutilayotgan Buyurtmalar */}
+              <Card className="card-beautiful">
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <CardTitle className="flex items-center gap-2">
                       <Clock className="h-5 w-5" />
-                      Kutilayotgan Buyurtmalar
+                      Kutilayotgan Buyurtmalar ({orders.length})
                     </CardTitle>
                     <Button onClick={fetchOrders} variant="outline" size="sm">
                       <RefreshCw className="h-4 w-4 mr-2" />
@@ -318,8 +439,8 @@ export default function BotControlPage() {
 
                           <div className="space-y-2 mb-4">
                             <div>
-                              <p className="text-sm font-medium">{order.books.title}</p>
-                              <p className="text-xs text-muted-foreground">{order.books.author}</p>
+                              <p className="text-sm font-medium">{order.products.name}</p>
+                              <p className="text-xs text-muted-foreground">Narx: {formatPrice(order.products.price)}</p>
                             </div>
                             <div className="grid grid-cols-2 gap-4 text-sm">
                               <div>
@@ -330,7 +451,7 @@ export default function BotControlPage() {
                               </div>
                             </div>
                             <div className="text-sm">
-                              <span className="font-medium">Summa:</span> {formatPrice(order.total_amount)}
+                              <span className="font-medium">Jami summa:</span> {formatPrice(order.total_amount)}
                             </div>
                           </div>
 
@@ -349,10 +470,58 @@ export default function BotControlPage() {
                             >
                               ✅ Bajarildi
                             </Button>
-                            <Button size="sm" variant="outline" onClick={() => notifyAdmins(order.id)}>
-                              📢 Adminlarga xabar
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => updateOrderStatus(order.id, "cancelled")}
+                            >
+                              ❌ Bekor qilish
                             </Button>
                           </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Admin Xabarlari */}
+              <Card className="card-beautiful">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2">
+                      <MessageSquare className="h-5 w-5" />
+                      Yangi Xabarlar ({messages.length})
+                    </CardTitle>
+                    <Button onClick={fetchMessages} variant="outline" size="sm">
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Yangilash
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {messages.length === 0 ? (
+                    <div className="text-center py-8">
+                      <MessageSquare className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                      <p className="text-muted-foreground">Yangi xabarlar yo'q</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {messages.map((msg) => (
+                        <div key={msg.id} className="border rounded-lg p-4">
+                          <div className="flex items-start justify-between mb-2">
+                            <div>
+                              <h3 className="font-semibold text-sm">{msg.title}</h3>
+                              <p className="text-xs text-muted-foreground">{formatDate(msg.created_at)}</p>
+                            </div>
+                            <Badge variant="secondary">{msg.type}</Badge>
+                          </div>
+                          <p className="text-sm text-muted-foreground mb-2">{msg.content}</p>
+                          {msg.users && (
+                            <div className="text-xs text-muted-foreground">
+                              {msg.users.full_name} • {msg.users.phone}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -363,7 +532,7 @@ export default function BotControlPage() {
           </div>
 
           {/* Foydali Havolalar */}
-          <Card className="mt-8">
+          <Card className="mt-8 card-beautiful">
             <CardHeader>
               <CardTitle>Foydali Havolalar</CardTitle>
             </CardHeader>
@@ -376,7 +545,7 @@ export default function BotControlPage() {
                   </a>
                 </Button>
                 <Button variant="outline" asChild>
-                  <a href="/admin" target="_blank" rel="noopener noreferrer">
+                  <a href="/admin-panel" target="_blank" rel="noopener noreferrer">
                     <Users className="mr-2 h-4 w-4" />
                     Admin Panel
                   </a>
@@ -401,7 +570,9 @@ export default function BotControlPage() {
           <Alert className="mt-8">
             <Bot className="h-4 w-4" />
             <AlertDescription>
-              <strong>Bot API Endpoint:</strong> <code>/api/bot/start</code>
+              <strong>Bot Token:</strong> 8057847116:AAEOUXELJqQNmh0lQDAl2HgPGKQ_e1x1dkA
+              <br />
+              <strong>Bot Username:</strong> @globalmarketshopbot
               <br />
               <strong>Webhook Endpoint:</strong> <code>/api/webhook/telegram</code>
               <br />
