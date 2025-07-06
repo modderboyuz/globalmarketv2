@@ -5,13 +5,11 @@ const BOT_API_URL = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`
 
 export async function POST(request: NextRequest) {
   try {
-    const { chat_id, text, parse_mode = "HTML", reply_markup } = await request.json()
+    const body = await request.json()
+    const { chat_id, text, parse_mode = "Markdown", reply_markup } = body
 
     if (!chat_id || !text) {
-      return NextResponse.json({
-        success: false,
-        error: "Chat ID va text majburiy",
-      })
+      return NextResponse.json({ error: "chat_id and text are required" }, { status: 400 })
     }
 
     const payload: any = {
@@ -21,7 +19,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (reply_markup) {
-      payload.reply_markup = JSON.stringify(reply_markup)
+      payload.reply_markup = reply_markup
     }
 
     const response = await fetch(`${BOT_API_URL}/sendMessage`, {
@@ -32,25 +30,32 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify(payload),
     })
 
-    const data = await response.json()
+    const result = await response.json()
 
-    if (data.ok) {
-      return NextResponse.json({
-        success: true,
-        message: "Xabar yuborildi",
-        data: data.result,
-      })
-    } else {
-      return NextResponse.json({
-        success: false,
-        error: data.description || "Xabar yuborishda xatolik",
-      })
+    if (!response.ok) {
+      console.error("Telegram API error:", result)
+      return NextResponse.json({ error: "Failed to send message", details: result }, { status: 500 })
     }
-  } catch (error) {
-    console.error("Send message error:", error)
+
     return NextResponse.json({
-      success: false,
-      error: "Server xatoligi",
+      success: true,
+      message: "Message sent successfully",
+      data: result,
     })
+  } catch (error) {
+    console.error("API error:", error)
+    return NextResponse.json({ error: "Server error" }, { status: 500 })
   }
+}
+
+export async function GET() {
+  return NextResponse.json({
+    message: "Telegram Bot Send API",
+    bot_token: TELEGRAM_BOT_TOKEN.slice(0, 10) + "...",
+    endpoints: {
+      send: "POST /api/telegram-bot/send",
+      info: "GET /api/telegram-bot/info",
+      webhook: "POST /api/telegram-bot/webhook",
+    },
+  })
 }

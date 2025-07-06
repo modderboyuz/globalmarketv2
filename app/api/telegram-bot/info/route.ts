@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 
 const TELEGRAM_BOT_TOKEN = "8057847116:AAEOUXELJqQNmh0lQDAl2HgPGKQ_e1x1dkA"
 const BOT_API_URL = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`
@@ -6,30 +6,67 @@ const BOT_API_URL = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`
 export async function GET() {
   try {
     // Get bot info
-    const botResponse = await fetch(`${BOT_API_URL}/getMe`)
-    const botData = await botResponse.json()
+    const botInfoResponse = await fetch(`${BOT_API_URL}/getMe`)
+    const botInfo = await botInfoResponse.json()
 
     // Get webhook info
-    const webhookResponse = await fetch(`${BOT_API_URL}/getWebhookInfo`)
-    const webhookData = await webhookResponse.json()
+    const webhookInfoResponse = await fetch(`${BOT_API_URL}/getWebhookInfo`)
+    const webhookInfo = await webhookInfoResponse.json()
 
-    if (botData.ok && webhookData.ok) {
-      return NextResponse.json({
-        success: true,
-        bot: botData.result,
-        webhook: webhookData.result,
+    return NextResponse.json({
+      success: true,
+      bot_info: botInfo.result,
+      webhook_info: webhookInfo.result,
+      api_url: BOT_API_URL.replace(TELEGRAM_BOT_TOKEN, "***"),
+      timestamp: new Date().toISOString(),
+    })
+  } catch (error) {
+    console.error("Error getting bot info:", error)
+    return NextResponse.json({ error: "Failed to get bot info" }, { status: 500 })
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const { action, webhook_url } = body
+
+    if (action === "set_webhook" && webhook_url) {
+      const response = await fetch(`${BOT_API_URL}/setWebhook`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          url: webhook_url,
+          allowed_updates: ["message", "callback_query"],
+        }),
       })
-    } else {
+
+      const result = await response.json()
+
       return NextResponse.json({
-        success: false,
-        error: "Bot ma'lumotlarini olishda xatolik",
+        success: response.ok,
+        message: response.ok ? "Webhook set successfully" : "Failed to set webhook",
+        data: result,
+      })
+    } else if (action === "delete_webhook") {
+      const response = await fetch(`${BOT_API_URL}/deleteWebhook`, {
+        method: "POST",
+      })
+
+      const result = await response.json()
+
+      return NextResponse.json({
+        success: response.ok,
+        message: response.ok ? "Webhook deleted successfully" : "Failed to delete webhook",
+        data: result,
       })
     }
+
+    return NextResponse.json({ error: "Invalid action" }, { status: 400 })
   } catch (error) {
-    console.error("Bot info error:", error)
-    return NextResponse.json({
-      success: false,
-      error: "Server xatoligi",
-    })
+    console.error("Error managing webhook:", error)
+    return NextResponse.json({ error: "Server error" }, { status: 500 })
   }
 }
