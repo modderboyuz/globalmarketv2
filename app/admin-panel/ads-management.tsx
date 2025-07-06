@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+
 import { useState, useEffect } from "react"
 import Image from "next/image"
 import { Card, CardContent } from "@/components/ui/card"
@@ -20,7 +21,7 @@ interface Ad {
   title: string
   description: string
   image_url: string
-  ad_link: string
+  link_url: string
   is_active: boolean
   click_count: number
   created_at: string
@@ -36,7 +37,7 @@ export function AdsManagement() {
     title: "",
     description: "",
     image_url: "",
-    ad_link: "",
+    link_url: "",
     is_active: true,
     expires_at: "",
   })
@@ -71,7 +72,7 @@ export function AdsManagement() {
             title: formData.title,
             description: formData.description,
             image_url: formData.image_url,
-            ad_link: formData.ad_link,
+            link_url: formData.link_url,
             is_active: formData.is_active,
             expires_at: formData.expires_at || null,
             updated_at: new Date().toISOString(),
@@ -86,7 +87,7 @@ export function AdsManagement() {
           title: formData.title,
           description: formData.description,
           image_url: formData.image_url,
-          ad_link: formData.ad_link,
+          link_url: formData.link_url,
           is_active: formData.is_active,
           expires_at: formData.expires_at || null,
         })
@@ -101,7 +102,7 @@ export function AdsManagement() {
         title: "",
         description: "",
         image_url: "",
-        ad_link: "",
+        link_url: "",
         is_active: true,
         expires_at: "",
       })
@@ -118,7 +119,7 @@ export function AdsManagement() {
       title: ad.title,
       description: ad.description || "",
       image_url: ad.image_url,
-      ad_link: ad.ad_link,
+      link_url: ad.link_url,
       is_active: ad.is_active,
       expires_at: ad.expires_at ? ad.expires_at.split("T")[0] : "",
     })
@@ -214,12 +215,12 @@ export function AdsManagement() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="ad_link">Havola *</Label>
+                  <Label htmlFor="link_url">Havola *</Label>
                   <Input
-                    id="ad_link"
+                    id="link_url"
                     type="url"
-                    value={formData.ad_link}
-                    onChange={(e) => setFormData({ ...formData, ad_link: e.target.value })}
+                    value={formData.link_url}
+                    onChange={(e) => setFormData({ ...formData, link_url: e.target.value })}
                     placeholder="https://example.com"
                     required
                   />
@@ -247,7 +248,7 @@ export function AdsManagement() {
                   placeholder="https://example.com/image.jpg"
                   required
                 />
-                <p className="text-xs text-gray-500">Tavsiya etilgan o'lcham: 1200x250px (keng ekranlar uchun)</p>
+                <p className="text-xs text-gray-500">Tavsiya etilgan o'lcham: 800x200px</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -282,7 +283,7 @@ export function AdsManagement() {
                       title: "",
                       description: "",
                       image_url: "",
-                      ad_link: "",
+                      link_url: "",
                       is_active: true,
                       expires_at: "",
                     })
@@ -297,6 +298,40 @@ export function AdsManagement() {
             </form>
           </DialogContent>
         </Dialog>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card className="card-beautiful">
+          <CardContent className="p-4 text-center">
+            <BarChart3 className="h-8 w-8 text-blue-600 mx-auto mb-2" />
+            <div className="text-2xl font-bold">{ads.length}</div>
+            <div className="text-sm text-gray-600">Jami reklamalar</div>
+          </CardContent>
+        </Card>
+        <Card className="card-beautiful">
+          <CardContent className="p-4 text-center">
+            <Eye className="h-8 w-8 text-green-600 mx-auto mb-2" />
+            <div className="text-2xl font-bold">{ads.filter((ad) => ad.is_active).length}</div>
+            <div className="text-sm text-gray-600">Faol reklamalar</div>
+          </CardContent>
+        </Card>
+        <Card className="card-beautiful">
+          <CardContent className="p-4 text-center">
+            <ExternalLink className="h-8 w-8 text-purple-600 mx-auto mb-2" />
+            <div className="text-2xl font-bold">{ads.reduce((sum, ad) => sum + ad.click_count, 0)}</div>
+            <div className="text-sm text-gray-600">Jami bosishlar</div>
+          </CardContent>
+        </Card>
+        <Card className="card-beautiful">
+          <CardContent className="p-4 text-center">
+            <ExternalLink className="h-8 w-8 text-orange-600 mx-auto mb-2" />
+            <div className="text-2xl font-bold">
+              {ads.filter((ad) => ad.expires_at && new Date(ad.expires_at) < new Date()).length}
+            </div>
+            <div className="text-sm text-gray-600">Muddati tugagan</div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Ads List */}
@@ -345,12 +380,12 @@ export function AdsManagement() {
                       <div className="flex items-center gap-1">
                         <ExternalLink className="h-4 w-4" />
                         <a
-                          href={ad.ad_link}
+                          href={ad.link_url}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-blue-600 hover:underline truncate max-w-xs"
                         >
-                          {ad.ad_link}
+                          {ad.link_url}
                         </a>
                       </div>
                       <span>Yaratilgan: {formatDate(ad.created_at)}</span>

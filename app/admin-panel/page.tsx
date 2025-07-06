@@ -27,16 +27,16 @@ import {
   MessageCircle,
   CheckCircle,
   XCircle,
-  Clock,
   Search,
   Download,
   Send,
   Award,
   Store,
-  AlertTriangle,
+  TrendingUp,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
+import { AdsManagement } from "./ads-management"
 
 interface User {
   id: string
@@ -48,6 +48,25 @@ interface User {
   is_admin: boolean
   created_at: string
   last_sign_in_at: string
+}
+
+interface Order {
+  id: string
+  full_name: string
+  phone: string
+  address: string
+  quantity: number
+  total_amount: number
+  status: string
+  created_at: string
+  products: {
+    name: string
+    price: number
+  }
+  users: {
+    full_name: string
+    email: string
+  }
 }
 
 interface AdminMessage {
@@ -75,6 +94,8 @@ interface Stats {
   pendingApplications: number
   pendingProducts: number
   newMessages: number
+  todayOrders: number
+  totalRevenue: number
 }
 
 export default function AdminPanel() {
@@ -89,12 +110,18 @@ export default function AdminPanel() {
     pendingApplications: 0,
     pendingProducts: 0,
     newMessages: 0,
+    todayOrders: 0,
+    totalRevenue: 0,
   })
   const [users, setUsers] = useState<User[]>([])
+  const [orders, setOrders] = useState<Order[]>([])
   const [adminMessages, setAdminMessages] = useState<AdminMessage[]>([])
   const [filteredUsers, setFilteredUsers] = useState<User[]>([])
+  const [filteredOrders, setFilteredOrders] = useState<Order[]>([])
   const [userFilter, setUserFilter] = useState("all")
+  const [orderFilter, setOrderFilter] = useState("all")
   const [searchQuery, setSearchQuery] = useState("")
+  const [orderSearchQuery, setOrderSearchQuery] = useState("")
   const [selectedMessage, setSelectedMessage] = useState<AdminMessage | null>(null)
   const [responseText, setResponseText] = useState("")
 
@@ -111,6 +138,10 @@ export default function AdminPanel() {
   useEffect(() => {
     filterUsers()
   }, [users, userFilter, searchQuery])
+
+  useEffect(() => {
+    filterOrders()
+  }, [orders, orderFilter, orderSearchQuery])
 
   const checkAdminAccess = async () => {
     try {
@@ -151,6 +182,8 @@ export default function AdminPanel() {
         applicationsResult,
         submissionsResult,
         messagesResult,
+        todayOrdersResult,
+        revenueResult,
       ] = await Promise.all([
         supabase.from("users").select("*", { count: "exact", head: true }),
         supabase.from("users").select("*", { count: "exact", head: true }).eq("is_verified_seller", true),
@@ -159,7 +192,14 @@ export default function AdminPanel() {
         supabase.from("seller_applications").select("*", { count: "exact", head: true }).eq("status", "pending"),
         supabase.from("product_submissions").select("*", { count: "exact", head: true }).eq("status", "pending"),
         supabase.from("admin_messages").select("*", { count: "exact", head: true }).eq("status", "pending"),
+        supabase
+          .from("orders")
+          .select("*", { count: "exact", head: true })
+          .gte("created_at", new Date().toISOString().split("T")[0]),
+        supabase.from("orders").select("total_amount").eq("status", "completed"),
       ])
+
+      const totalRevenue = revenueResult.data?.reduce((sum, order) => sum + order.total_amount, 0) || 0
 
       setStats({
         totalUsers: usersResult.count || 0,
@@ -169,12 +209,27 @@ export default function AdminPanel() {
         pendingApplications: applicationsResult.count || 0,
         pendingProducts: submissionsResult.count || 0,
         newMessages: messagesResult.count || 0,
+        todayOrders: todayOrdersResult.count || 0,
+        totalRevenue,
       })
 
       // Fetch users
       const { data: usersData } = await supabase.from("users").select("*").order("created_at", { ascending: false })
 
       setUsers(usersData || [])
+
+      // Fetch orders
+      const { data: ordersData } = await supabase
+        .from("orders")
+        .select(`
+          *,
+          products (name, price),
+          users (full_name, email)
+        `)
+        .order("created_at", { ascending: false })
+        .limit(100)
+
+      setOrders(ordersData || [])
 
       // Fetch admin messages
       const { data: messagesData } = await supabase
@@ -216,6 +271,28 @@ export default function AdminPanel() {
     }
 
     setFilteredUsers(filtered)
+  }
+
+  const filterOrders = () => {
+    let filtered = orders
+
+    // Filter by status
+    if (orderFilter !== "all") {
+      filtered = filtered.filter((order) => order.status === orderFilter)
+    }
+
+    // Filter by search query
+    if (orderSearchQuery) {
+      filtered = filtered.filter(
+        (order) =>
+          order.full_name?.toLowerCase().includes(orderSearchQuery.toLowerCase()) ||
+          order.phone?.includes(orderSearchQuery) ||
+          order.products?.name?.toLowerCase().includes(orderSearchQuery.toLowerCase()) ||
+          order.id.includes(orderSearchQuery),
+      )
+    }
+
+    setFilteredOrders(filtered)
   }
 
   const handleMessageAction = async (messageId: string, action: "approve" | "reject", response?: string) => {
@@ -290,6 +367,20 @@ export default function AdminPanel() {
     }
   }
 
+  const updateOrderStatus = async (orderId: string, newStatus: string) => {
+    try {
+      const { error } = await supabase.from("orders").update({ status: newStatus }).eq("id", orderId)
+
+      if (error) throw error
+
+      toast.success("Buyurtma holati yangilandi")
+      fetchData()
+    } catch (error) {
+      console.error("Error updating order status:", error)
+      toast.error("Xatolik yuz berdi")
+    }
+  }
+
   const sendMessage = async (userId: string, message: string) => {
     try {
       // Create a system message
@@ -333,6 +424,56 @@ export default function AdminPanel() {
     window.URL.revokeObjectURL(url)
   }
 
+  const exportOrders = () => {
+    const csvContent = [
+      ["ID", "Mijoz", "Telefon", "Mahsulot", "Miqdor", "Summa", "Holat", "Sana"].join(","),
+      ...filteredOrders.map((order) =>
+        [
+          order.id.slice(-8),
+          order.full_name || "",
+          order.phone || "",
+          order.products?.name || "",
+          order.quantity,
+          order.total_amount,
+          order.status,
+          new Date(order.created_at).toLocaleDateString(),
+        ].join(","),
+      ),
+    ].join("\n")
+
+    const blob = new Blob([csvContent], { type: "text/csv" })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = "orders.csv"
+    a.click()
+    window.URL.revokeObjectURL(url)
+  }
+
+  const formatPrice = (price: number) => {
+    return new Intl.NumberFormat("uz-UZ").format(price) + " so'm"
+  }
+
+  const getStatusBadge = (status: string) => {
+    const statusConfig = {
+      pending: { variant: "secondary" as const, text: "Kutilmoqda" },
+      processing: { variant: "default" as const, text: "Jarayonda" },
+      completed: { variant: "default" as const, text: "Bajarilgan" },
+      cancelled: { variant: "destructive" as const, text: "Bekor qilingan" },
+    }
+
+    const config = statusConfig[status as keyof typeof statusConfig] || {
+      variant: "secondary" as const,
+      text: status,
+    }
+
+    return (
+      <Badge variant={config.variant} className="text-xs">
+        {config.text}
+      </Badge>
+    )
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -349,7 +490,7 @@ export default function AdminPanel() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
         <Card className="card-beautiful">
           <CardContent className="p-4 text-center">
             <Users className="h-8 w-8 text-blue-600 mx-auto mb-2" />
@@ -380,33 +521,108 @@ export default function AdminPanel() {
         </Card>
         <Card className="card-beautiful">
           <CardContent className="p-4 text-center">
-            <Clock className="h-8 w-8 text-yellow-600 mx-auto mb-2" />
-            <div className="text-2xl font-bold">{stats.pendingApplications}</div>
-            <div className="text-sm text-gray-600">Arizalar</div>
-          </CardContent>
-        </Card>
-        <Card className="card-beautiful">
-          <CardContent className="p-4 text-center">
-            <AlertTriangle className="h-8 w-8 text-red-600 mx-auto mb-2" />
-            <div className="text-2xl font-bold">{stats.pendingProducts}</div>
-            <div className="text-sm text-gray-600">Tasdiqlash</div>
-          </CardContent>
-        </Card>
-        <Card className="card-beautiful">
-          <CardContent className="p-4 text-center">
-            <MessageSquare className="h-8 w-8 text-indigo-600 mx-auto mb-2" />
-            <div className="text-2xl font-bold">{stats.newMessages}</div>
-            <div className="text-sm text-gray-600">Xabarlar</div>
+            <TrendingUp className="h-8 w-8 text-emerald-600 mx-auto mb-2" />
+            <div className="text-lg font-bold">{formatPrice(stats.totalRevenue)}</div>
+            <div className="text-sm text-gray-600">Jami daromad</div>
           </CardContent>
         </Card>
       </div>
 
-      <Tabs defaultValue="messages" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-3">
+      <Tabs defaultValue="orders" className="space-y-6">
+        <TabsList className="grid w-full grid-cols-5">
+          <TabsTrigger value="orders">Buyurtmalar ({stats.totalOrders})</TabsTrigger>
           <TabsTrigger value="messages">Xabarlar ({stats.newMessages})</TabsTrigger>
           <TabsTrigger value="users">Foydalanuvchilar</TabsTrigger>
           <TabsTrigger value="ads">Reklamalar</TabsTrigger>
+          <TabsTrigger value="analytics">Analitika</TabsTrigger>
         </TabsList>
+
+        {/* Orders Tab */}
+        <TabsContent value="orders" className="space-y-6">
+          <Card className="card-beautiful">
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ShoppingCart className="h-5 w-5" />
+                  Buyurtmalar
+                </div>
+                <Button onClick={exportOrders} variant="outline" size="sm">
+                  <Download className="h-4 w-4 mr-2" />
+                  Export
+                </Button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {/* Filters */}
+              <div className="flex flex-col sm:flex-row gap-4 mb-6">
+                <div className="flex-1">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                    <Input
+                      placeholder="Buyurtma qidirish..."
+                      value={orderSearchQuery}
+                      onChange={(e) => setOrderSearchQuery(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                </div>
+                <Select value={orderFilter} onValueChange={setOrderFilter}>
+                  <SelectTrigger className="w-48">
+                    <SelectValue placeholder="Holat bo'yicha filter" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Barchasi</SelectItem>
+                    <SelectItem value="pending">Kutilmoqda</SelectItem>
+                    <SelectItem value="processing">Jarayonda</SelectItem>
+                    <SelectItem value="completed">Bajarilgan</SelectItem>
+                    <SelectItem value="cancelled">Bekor qilingan</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Orders List */}
+              <div className="space-y-4">
+                {filteredOrders.map((order) => (
+                  <Card key={order.id} className="border">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          <div>
+                            <h3 className="font-semibold">#{order.id.slice(-8)}</h3>
+                            <p className="text-sm text-gray-600">{order.full_name}</p>
+                            <p className="text-sm text-gray-600">{order.phone}</p>
+                          </div>
+                          <div>
+                            <p className="font-medium">{order.products?.name}</p>
+                            <p className="text-sm text-gray-600">Miqdor: {order.quantity}</p>
+                            <p className="text-sm font-bold text-green-600">{formatPrice(order.total_amount)}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {getStatusBadge(order.status)}
+                          <Select value={order.status} onValueChange={(value) => updateOrderStatus(order.id, value)}>
+                            <SelectTrigger className="w-32">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="pending">Kutilmoqda</SelectItem>
+                              <SelectItem value="processing">Jarayonda</SelectItem>
+                              <SelectItem value="completed">Bajarilgan</SelectItem>
+                              <SelectItem value="cancelled">Bekor qilingan</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Button size="sm" variant="outline" onClick={() => window.open(`tel:${order.phone}`)}>
+                            <Phone className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* Messages Tab */}
         <TabsContent value="messages" className="space-y-6">
@@ -516,14 +732,6 @@ export default function AdminPanel() {
                                   >
                                     <Phone className="h-4 w-4 mr-1" />
                                     Qo'ng'iroq
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => window.open(`sms:${message.data?.phone}`)}
-                                  >
-                                    <MessageCircle className="h-4 w-4 mr-1" />
-                                    SMS
                                   </Button>
                                 </>
                               ) : (
@@ -684,14 +892,41 @@ export default function AdminPanel() {
 
         {/* Ads Tab */}
         <TabsContent value="ads">
-          <Card className="card-beautiful">
-            <CardHeader>
-              <CardTitle>Reklama boshqaruvi</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-gray-600">Reklama boshqaruvi tez orada qo'shiladi...</p>
-            </CardContent>
-          </Card>
+          <AdsManagement />
+        </TabsContent>
+
+        {/* Analytics Tab */}
+        <TabsContent value="analytics" className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <Card className="card-beautiful">
+              <CardContent className="p-6 text-center">
+                <TrendingUp className="h-12 w-12 text-green-600 mx-auto mb-4" />
+                <div className="text-3xl font-bold text-green-600">{formatPrice(stats.totalRevenue)}</div>
+                <div className="text-gray-600">Jami daromad</div>
+              </CardContent>
+            </Card>
+            <Card className="card-beautiful">
+              <CardContent className="p-6 text-center">
+                <ShoppingCart className="h-12 w-12 text-blue-600 mx-auto mb-4" />
+                <div className="text-3xl font-bold text-blue-600">{stats.todayOrders}</div>
+                <div className="text-gray-600">Bugungi buyurtmalar</div>
+              </CardContent>
+            </Card>
+            <Card className="card-beautiful">
+              <CardContent className="p-6 text-center">
+                <Users className="h-12 w-12 text-purple-600 mx-auto mb-4" />
+                <div className="text-3xl font-bold text-purple-600">{stats.totalUsers}</div>
+                <div className="text-gray-600">Jami foydalanuvchilar</div>
+              </CardContent>
+            </Card>
+            <Card className="card-beautiful">
+              <CardContent className="p-6 text-center">
+                <Package className="h-12 w-12 text-orange-600 mx-auto mb-4" />
+                <div className="text-3xl font-bold text-orange-600">{stats.totalProducts}</div>
+                <div className="text-gray-600">Jami mahsulotlar</div>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
       </Tabs>
     </div>

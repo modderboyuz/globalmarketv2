@@ -10,7 +10,19 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { MessageSquare, Send, ArrowLeft, Package, Clock } from "lucide-react"
+import {
+  MessageSquare,
+  Send,
+  ArrowLeft,
+  Package,
+  Clock,
+  CheckCircle,
+  XCircle,
+  Phone,
+  MessageCircle,
+  User,
+  MapPin,
+} from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 
@@ -31,13 +43,14 @@ interface Conversation {
   buyer: {
     id: string
     full_name: string
-    avatar_url: string
+    phone: string
   }
   seller: {
     id: string
     full_name: string
     company_name: string
-    avatar_url: string
+    phone: string
+    is_verified_seller: boolean
   }
   last_message?: {
     message: string
@@ -52,11 +65,29 @@ interface Message {
   sender_id: string
   message: string
   message_type: string
+  metadata: any
   is_read: boolean
   created_at: string
   sender: {
     full_name: string
-    avatar_url: string
+  }
+}
+
+interface OrderNotification {
+  id: string
+  order_id: string
+  seller_id: string
+  buyer_id: string
+  status: string
+  seller_response: string
+  created_at: string
+  orders: {
+    id: string
+    full_name: string
+    phone: string
+    address: string
+    quantity: number
+    total_amount: number
   }
 }
 
@@ -66,6 +97,7 @@ export default function MessagesPage() {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
+  const [orderNotifications, setOrderNotifications] = useState<OrderNotification[]>([])
   const [newMessage, setNewMessage] = useState("")
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
@@ -88,7 +120,7 @@ export default function MessagesPage() {
 
   useEffect(() => {
     if (user) {
-      // Set up real-time subscription for new messages
+      // Set up real-time subscription
       const channel = supabase
         .channel("messages")
         .on(
@@ -97,12 +129,23 @@ export default function MessagesPage() {
             event: "INSERT",
             schema: "public",
             table: "messages",
-            filter: selectedConversation ? `conversation_id=eq.${selectedConversation.id}` : undefined,
           },
           (payload) => {
-            if (payload.new && selectedConversation?.id === payload.new.conversation_id) {
+            if (selectedConversation?.id === payload.new.conversation_id) {
               fetchMessages(selectedConversation.id)
             }
+            fetchConversations(user.id)
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "order_notifications",
+          },
+          () => {
+            fetchOrderNotifications(user.id)
             fetchConversations(user.id)
           },
         )
@@ -126,7 +169,7 @@ export default function MessagesPage() {
       }
 
       setUser(currentUser)
-      await fetchConversations(currentUser.id)
+      await Promise.all([fetchConversations(currentUser.id), fetchOrderNotifications(currentUser.id)])
     } catch (error) {
       console.error("Auth check error:", error)
       router.push("/login")
@@ -150,13 +193,14 @@ export default function MessagesPage() {
           buyer:users!conversations_buyer_id_fkey (
             id,
             full_name,
-            avatar_url
+            phone
           ),
           seller:users!conversations_seller_id_fkey (
             id,
             full_name,
             company_name,
-            avatar_url
+            phone,
+            is_verified_seller
           )
         `)
         .or(`buyer_id.eq.${userId},seller_id.eq.${userId}`)
@@ -196,8 +240,7 @@ export default function MessagesPage() {
         .select(`
           *,
           sender:users (
-            full_name,
-            avatar_url
+            full_name
           )
         `)
         .eq("conversation_id", conversationId)
@@ -208,6 +251,32 @@ export default function MessagesPage() {
     } catch (error) {
       console.error("Error fetching messages:", error)
       toast.error("Xabarlarni olishda xatolik")
+    }
+  }
+
+  const fetchOrderNotifications = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("order_notifications")
+        .select(`
+          *,
+          orders (
+            id,
+            full_name,
+            phone,
+            address,
+            quantity,
+            total_amount
+          )
+        `)
+        .eq("seller_id", userId)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false })
+
+      if (error) throw error
+      setOrderNotifications(data || [])
+    } catch (error) {
+      console.error("Error fetching order notifications:", error)
     }
   }
 
@@ -252,6 +321,27 @@ export default function MessagesPage() {
     }
   }
 
+  const handleOrderResponse = async (notificationId: string, status: "approved" | "rejected", response?: string) => {
+    try {
+      const { error } = await supabase
+        .from("order_notifications")
+        .update({
+          status,
+          seller_response: response || "",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", notificationId)
+
+      if (error) throw error
+
+      toast.success(status === "approved" ? "Buyurtma tasdiqlandi!" : "Buyurtma rad etildi!")
+      await fetchOrderNotifications(user.id)
+    } catch (error) {
+      console.error("Error handling order response:", error)
+      toast.error("Xatolik yuz berdi")
+    }
+  }
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }
@@ -261,21 +351,6 @@ export default function MessagesPage() {
       hour: "2-digit",
       minute: "2-digit",
     })
-  }
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString)
-    const today = new Date()
-    const yesterday = new Date(today)
-    yesterday.setDate(yesterday.getDate() - 1)
-
-    if (date.toDateString() === today.toDateString()) {
-      return "Bugun"
-    } else if (date.toDateString() === yesterday.toDateString()) {
-      return "Kecha"
-    } else {
-      return date.toLocaleDateString("uz-UZ")
-    }
   }
 
   const formatPrice = (price: number) => {
@@ -305,10 +380,90 @@ export default function MessagesPage() {
               </div>
               <div>
                 <h1 className="text-4xl font-bold gradient-text">Xabarlar</h1>
-                <p className="text-gray-600 text-lg">Sotuvchilar bilan muloqot qiling</p>
+                <p className="text-gray-600 text-lg">Mijozlar va sotuvchilar bilan muloqot</p>
               </div>
             </div>
           </div>
+
+          {/* Order Notifications for Sellers */}
+          {orderNotifications.length > 0 && (
+            <div className="mb-8">
+              <h2 className="text-2xl font-bold mb-4">Yangi buyurtmalar</h2>
+              <div className="space-y-4">
+                {orderNotifications.map((notification) => (
+                  <Card key={notification.id} className="card-beautiful border-l-4 border-l-orange-500">
+                    <CardContent className="p-6">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-3">
+                            <Badge variant="secondary" className="bg-orange-100 text-orange-800">
+                              <Package className="h-3 w-3 mr-1" />
+                              Yangi buyurtma
+                            </Badge>
+                            <Badge variant="outline">
+                              <Clock className="h-3 w-3 mr-1" />
+                              Kutilmoqda
+                            </Badge>
+                          </div>
+
+                          <div className="space-y-2 text-sm">
+                            <div className="flex items-center gap-2">
+                              <User className="h-4 w-4 text-gray-500" />
+                              <span>
+                                <strong>Mijoz:</strong> {notification.orders.full_name}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Phone className="h-4 w-4 text-gray-500" />
+                              <span>
+                                <strong>Telefon:</strong> {notification.orders.phone}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <MapPin className="h-4 w-4 text-gray-500" />
+                              <span>
+                                <strong>Manzil:</strong> {notification.orders.address}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Package className="h-4 w-4 text-gray-500" />
+                              <span>
+                                <strong>Miqdor:</strong> {notification.orders.quantity} dona
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-lg font-bold text-green-600">
+                                {formatPrice(notification.orders.total_amount)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-2 ml-4">
+                          <Button
+                            size="sm"
+                            onClick={() => handleOrderResponse(notification.id, "approved")}
+                            className="bg-green-600 hover:bg-green-700"
+                          >
+                            <CheckCircle className="h-4 w-4 mr-1" />
+                            Rozi bo'lish
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => handleOrderResponse(notification.id, "rejected", "Mahsulot mavjud emas")}
+                          >
+                            <XCircle className="h-4 w-4 mr-1" />
+                            Rad etish
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[700px]">
             {/* Conversations List */}
@@ -323,7 +478,7 @@ export default function MessagesPage() {
                       <div className="text-center py-8 px-4">
                         <MessageSquare className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                         <p className="text-gray-600">Hali suhbatlar yo'q</p>
-                        <p className="text-sm text-gray-500 mt-2">Mahsulot sahifasida sotuvchi bilan bog'laning</p>
+                        <p className="text-sm text-gray-500 mt-2">Mahsulot sotib olganingizda suhbat boshlanadi</p>
                       </div>
                     ) : (
                       conversations.map((conversation) => {
@@ -340,7 +495,7 @@ export default function MessagesPage() {
                           >
                             <div className="flex items-start gap-3">
                               <Avatar className="w-12 h-12">
-                                <AvatarImage src={otherUser.avatar_url || "/placeholder.svg"} />
+                                <AvatarImage src="/placeholder-user.jpg" />
                                 <AvatarFallback>
                                   {otherUser.full_name?.charAt(0) || otherUser.company_name?.charAt(0) || "U"}
                                 </AvatarFallback>
@@ -409,14 +564,7 @@ export default function MessagesPage() {
                       </Button>
 
                       <Avatar className="w-10 h-10">
-                        <AvatarImage
-                          src={
-                            (selectedConversation.buyer_id === user?.id
-                              ? selectedConversation.seller
-                              : selectedConversation.buyer
-                            ).avatar_url || "/placeholder.svg"
-                          }
-                        />
+                        <AvatarImage src="/placeholder-user.jpg" />
                         <AvatarFallback>
                           {(selectedConversation.buyer_id === user?.id
                             ? selectedConversation.seller
@@ -437,9 +585,25 @@ export default function MessagesPage() {
                         </div>
                       </div>
 
-                      <Badge variant="secondary" className="text-xs">
-                        {selectedConversation.status === "active" ? "Faol" : "Yopiq"}
-                      </Badge>
+                      {/* Contact buttons for approved orders */}
+                      {selectedConversation.buyer_id !== user?.id && (
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => window.open(`tel:${selectedConversation.buyer.phone}`)}
+                          >
+                            <Phone className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => window.open(`sms:${selectedConversation.buyer.phone}`)}
+                          >
+                            <MessageCircle className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   </CardHeader>
 
@@ -458,6 +622,12 @@ export default function MessagesPage() {
                               }`}
                             >
                               <p className="text-sm">{message.message}</p>
+                              {message.metadata && message.message_type === "order_notification" && (
+                                <div className="mt-2 text-xs opacity-75">
+                                  <p>Miqdor: {message.metadata.quantity}</p>
+                                  <p>Summa: {formatPrice(message.metadata.total_amount)}</p>
+                                </div>
+                              )}
                             </div>
                             <div className={`flex items-center gap-1 mt-1 ${isOwn ? "justify-end" : "justify-start"}`}>
                               <Clock className="h-3 w-3 text-gray-400" />

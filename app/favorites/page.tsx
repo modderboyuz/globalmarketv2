@@ -20,7 +20,7 @@ interface FavoriteProduct {
     price: number
     image_url: string
     stock_quantity: number
-    rating: number
+    average_rating: number
     order_count: number
     categories: {
       name_uz: string
@@ -77,7 +77,7 @@ export default function FavoritesPage() {
             price,
             image_url,
             stock_quantity,
-            rating,
+            average_rating,
             order_count,
             categories (
               name_uz,
@@ -268,7 +268,7 @@ export default function FavoritesPage() {
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-1">
                           <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                          <span className="text-sm font-medium">{favorite.products.rating}</span>
+                          <span className="text-sm font-medium">{favorite.products.average_rating}</span>
                           <span className="text-sm text-gray-500">({favorite.products.order_count})</span>
                         </div>
                         <span className="text-xs text-gray-500">Qo'shilgan: {formatDate(favorite.created_at)}</span>
