@@ -1,0 +1,415 @@
+"use client"
+
+import { useState, useEffect } from "react"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Bot, Send, RefreshCw, CheckCircle, Clock, Users, MessageSquare, Settings, ExternalLink } from "lucide-react"
+import { toast } from "sonner"
+
+interface BotInfo {
+  id: number
+  is_bot: boolean
+  first_name: string
+  username: string
+  can_join_groups: boolean
+  can_read_all_group_messages: boolean
+  supports_inline_queries: boolean
+}
+
+interface Order {
+  id: string
+  full_name: string
+  phone: string
+  total_amount: number
+  status: string
+  created_at: string
+  books: {
+    title: string
+    author: string
+  }
+}
+
+export default function BotControlPage() {
+  const [botInfo, setBotInfo] = useState<BotInfo | null>(null)
+  const [webhookInfo, setWebhookInfo] = useState<any>(null)
+  const [orders, setOrders] = useState<Order[]>([])
+  const [loading, setLoading] = useState(false)
+  const [chatId, setChatId] = useState("")
+  const [message, setMessage] = useState("")
+
+  useEffect(() => {
+    fetchBotInfo()
+    fetchOrders()
+  }, [])
+
+  const fetchBotInfo = async () => {
+    try {
+      const response = await fetch("/api/bot/start")
+      const data = await response.json()
+
+      if (data.success) {
+        setBotInfo(data.bot)
+        setWebhookInfo(data.webhook)
+      }
+    } catch (error) {
+      toast.error("Bot ma'lumotlarini olishda xatolik")
+    }
+  }
+
+  const fetchOrders = async () => {
+    try {
+      const response = await fetch("/api/bot/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_orders" }),
+      })
+      const data = await response.json()
+
+      if (data.success) {
+        setOrders(data.orders || [])
+      }
+    } catch (error) {
+      toast.error("Buyurtmalarni olishda xatolik")
+    }
+  }
+
+  const sendTestMessage = async () => {
+    if (!chatId || !message) {
+      toast.error("Chat ID va xabarni kiriting")
+      return
+    }
+
+    setLoading(true)
+    try {
+      const response = await fetch("/api/bot/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "send_message",
+          data: { chatId: Number.parseInt(chatId), message },
+        }),
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        toast.success("Xabar yuborildi!")
+        setMessage("")
+      } else {
+        toast.error("Xabar yuborishda xatolik")
+      }
+    } catch (error) {
+      toast.error("Xabar yuborishda xatolik")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const updateOrderStatus = async (orderId: string, status: string) => {
+    try {
+      const response = await fetch("/api/bot/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update_order",
+          data: { orderId, status },
+        }),
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        toast.success("Buyurtma holati yangilandi!")
+        fetchOrders()
+      } else {
+        toast.error("Xatolik yuz berdi")
+      }
+    } catch (error) {
+      toast.error("Xatolik yuz berdi")
+    }
+  }
+
+  const notifyAdmins = async (orderId: string) => {
+    try {
+      const response = await fetch("/api/bot/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "notify_admins",
+          data: { orderId },
+        }),
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        toast.success("Adminlarga xabar yuborildi!")
+      } else {
+        toast.error("Xatolik yuz berdi")
+      }
+    } catch (error) {
+      toast.error("Xatolik yuz berdi")
+    }
+  }
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString("uz-UZ", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  }
+
+  const formatPrice = (price: number) => {
+    return new Intl.NumberFormat("uz-UZ").format(price) + " so'm"
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="container mx-auto px-4 py-8">
+        <div className="max-w-6xl mx-auto">
+          <div className="mb-8">
+            <h1 className="text-3xl font-bold gradient-text mb-2 flex items-center gap-2">
+              <Bot className="h-8 w-8" />
+              Telegram Bot Boshqaruv Paneli
+            </h1>
+            <p className="text-muted-foreground">GlobalMarket Telegram botini boshqarish va monitoring qilish</p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Bot Ma'lumotlari */}
+            <div className="lg:col-span-1 space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Settings className="h-5 w-5" />
+                    Bot Ma'lumotlari
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {botInfo ? (
+                    <>
+                      <div>
+                        <p className="text-sm font-medium">Bot Nomi</p>
+                        <p className="text-sm text-muted-foreground">{botInfo.first_name}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium">Username</p>
+                        <p className="text-sm text-muted-foreground">@{botInfo.username}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium">Bot ID</p>
+                        <p className="text-sm text-muted-foreground">{botInfo.id}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={botInfo.is_bot ? "default" : "destructive"}>
+                          {botInfo.is_bot ? "Faol" : "Faol emas"}
+                        </Badge>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-center py-4">
+                      <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-2" />
+                      <p className="text-sm text-muted-foreground">Yuklanmoqda...</p>
+                    </div>
+                  )}
+
+                  <div className="pt-4 border-t">
+                    <Button onClick={fetchBotInfo} variant="outline" size="sm" className="w-full bg-transparent">
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Yangilash
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Webhook Ma'lumotlari */}
+              {webhookInfo && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Webhook Holati</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      <div>
+                        <p className="text-sm font-medium">URL</p>
+                        <p className="text-xs text-muted-foreground break-all">{webhookInfo.url || "O'rnatilmagan"}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium">Kutilayotgan yangilanishlar</p>
+                        <p className="text-sm text-muted-foreground">{webhookInfo.pending_update_count || 0}</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Test Xabar */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <MessageSquare className="h-5 w-5" />
+                    Test Xabar
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium">Chat ID</label>
+                    <Input placeholder="123456789" value={chatId} onChange={(e) => setChatId(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Xabar</label>
+                    <Textarea
+                      placeholder="Test xabar..."
+                      value={message}
+                      onChange={(e) => setMessage(e.target.value)}
+                      rows={3}
+                    />
+                  </div>
+                  <Button onClick={sendTestMessage} disabled={loading} className="w-full btn-primary">
+                    {loading ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+                    Yuborish
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Buyurtmalar */}
+            <div className="lg:col-span-2">
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2">
+                      <Clock className="h-5 w-5" />
+                      Kutilayotgan Buyurtmalar
+                    </CardTitle>
+                    <Button onClick={fetchOrders} variant="outline" size="sm">
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Yangilash
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {orders.length === 0 ? (
+                    <div className="text-center py-8">
+                      <CheckCircle className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                      <p className="text-muted-foreground">Yangi buyurtmalar yo'q</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {orders.map((order) => (
+                        <div key={order.id} className="border rounded-lg p-4">
+                          <div className="flex items-start justify-between mb-3">
+                            <div>
+                              <h3 className="font-semibold">#{order.id.slice(-8)}</h3>
+                              <p className="text-sm text-muted-foreground">{formatDate(order.created_at)}</p>
+                            </div>
+                            <Badge variant="secondary">
+                              <Clock className="h-3 w-3 mr-1" />
+                              Kutilmoqda
+                            </Badge>
+                          </div>
+
+                          <div className="space-y-2 mb-4">
+                            <div>
+                              <p className="text-sm font-medium">{order.books.title}</p>
+                              <p className="text-xs text-muted-foreground">{order.books.author}</p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4 text-sm">
+                              <div>
+                                <span className="font-medium">Mijoz:</span> {order.full_name}
+                              </div>
+                              <div>
+                                <span className="font-medium">Telefon:</span> {order.phone}
+                              </div>
+                            </div>
+                            <div className="text-sm">
+                              <span className="font-medium">Summa:</span> {formatPrice(order.total_amount)}
+                            </div>
+                          </div>
+
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => updateOrderStatus(order.id, "processing")}
+                            >
+                              🔄 Jarayonda
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => updateOrderStatus(order.id, "completed")}
+                            >
+                              ✅ Bajarildi
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => notifyAdmins(order.id)}>
+                              📢 Adminlarga xabar
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+
+          {/* Foydali Havolalar */}
+          <Card className="mt-8">
+            <CardHeader>
+              <CardTitle>Foydali Havolalar</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <Button variant="outline" asChild>
+                  <a href="https://t.me/globalmarketshopbot" target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    Botga o'tish
+                  </a>
+                </Button>
+                <Button variant="outline" asChild>
+                  <a href="/admin" target="_blank" rel="noopener noreferrer">
+                    <Users className="mr-2 h-4 w-4" />
+                    Admin Panel
+                  </a>
+                </Button>
+                <Button variant="outline" asChild>
+                  <a href="/webhook-setup" target="_blank" rel="noopener noreferrer">
+                    <Settings className="mr-2 h-4 w-4" />
+                    Webhook Sozlash
+                  </a>
+                </Button>
+                <Button variant="outline" asChild>
+                  <a href="/api/webhook/telegram" target="_blank" rel="noopener noreferrer">
+                    <Bot className="mr-2 h-4 w-4" />
+                    Webhook Test
+                  </a>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* API Ma'lumotlari */}
+          <Alert className="mt-8">
+            <Bot className="h-4 w-4" />
+            <AlertDescription>
+              <strong>Bot API Endpoint:</strong> <code>/api/bot/start</code>
+              <br />
+              <strong>Webhook Endpoint:</strong> <code>/api/webhook/telegram</code>
+              <br />
+              <strong>Bot Control Panel:</strong> <code>/bot-control</code>
+            </AlertDescription>
+          </Alert>
+        </div>
+      </div>
+    </div>
+  )
+}
