@@ -395,9 +395,17 @@ async function showCategoryProducts(chatId: number, categorySlug: string, page =
     const { data: products, error } = await supabase
       .from("products")
       .select(`
-        *,
-        categories!inner (name_uz, icon),
-        users (full_name, company_name, username)
+        id,
+        name,
+        price,
+        stock_quantity,
+        average_rating,
+        view_count,
+        order_count,
+        like_count,
+        image_url,
+        categories:category_id (name_uz, icon),
+        sellers:seller_id (username)
       `)
       .eq("category_id", category.id)
       .eq("is_active", true)
@@ -459,9 +467,17 @@ async function handleProductSearch(chatId: number, query: string) {
     const { data: products, error } = await supabase
       .from("products")
       .select(`
-        *,
-        categories (name_uz, icon),
-        users (full_name, company_name, username)
+        id,
+        name,
+        price,
+        stock_quantity,
+        average_rating,
+        view_count,
+        order_count,
+        like_count,
+        image_url,
+        categories:category_id (name_uz, icon),
+        sellers:seller_id (username)
       `)
       .or(`name.ilike.%${query}%,description.ilike.%${query}%,author.ilike.%${query}%,brand.ilike.%${query}%`)
       .eq("is_active", true)
@@ -522,9 +538,19 @@ async function showProductDetails(chatId: number, productId: string) {
     const { data: product, error } = await supabase
       .from("products")
       .select(`
-        *,
-        categories (name_uz, icon),
-        users (full_name, company_name, username)
+        id,
+        name,
+        description,
+        price,
+        stock_quantity,
+        average_rating,
+        view_count,
+        like_count,
+        image_url,
+        has_delivery,
+        delivery_price,
+        categories:category_id (name_uz, icon),
+        sellers:seller_id (username, company_name)
       `)
       .eq("id", productId)
       .single()
@@ -544,23 +570,25 @@ async function showProductDetails(chatId: number, productId: string) {
     message += `💰 *Narx:* ${formatPrice(product.price)}\n`
     message += `📊 *Mavjud:* ${product.stock_quantity} dona\n`
     message += `⭐ *Reyting:* ${product.average_rating}/5\n`
-    message += `🛒 *Buyurtmalar:* ${product.order_count} marta\n`
     message += `👀 *Ko'rishlar:* ${(product.view_count || 0) + 1}\n`
     message += `❤️ *Yoqtirishlar:* ${product.like_count || 0}\n`
     message += `🏷️ *Kategoriya:* ${product.categories.icon} ${product.categories.name_uz}\n`
-    message += `🏪 *Sotuvchi:* @${product.users.username}\n\n`
+    if (product.sellers) {
+      message += `🏪 *Sotuvchi:* ${product.sellers.company_name ? `${product.sellers.company_name} (@${product.sellers.username})` : `@${product.sellers.username}`}\n`
+    }
+    message += `\n`
 
     if (product.description) {
       message += `📝 *Tavsif:*\n${product.description}\n\n`
     }
 
+    if (product.brand) {
+      message += `🏷️ *Brend:* ${product.brand}\n`
+    }
     if (product.author) {
       message += `✍️ *Muallif:* ${product.author}\n`
     }
 
-    if (product.brand) {
-      message += `🏷️ *Brend:* ${product.brand}\n`
-    }
 
     if (product.has_delivery) {
       message += `🚚 *Yetkazib berish:* ${formatPrice(product.delivery_price || 0)}\n`
@@ -929,8 +957,15 @@ async function showUserOrders(chatId: number, telegramId: number) {
     const { data: orders, error } = await supabase
       .from("orders")
       .select(`
-        *,
-        products (name, price)
+        id,
+        full_name,
+        phone,
+        address,
+        quantity,
+        total_amount,
+        status,
+        created_at,
+        products:product_id (name, price)
       `)
       .like("anon_temp_id", `tg_${telegramId}_%`)
       .order("created_at", { ascending: false })
@@ -1120,8 +1155,15 @@ async function showPendingOrders(chatId: number) {
     const { data: orders, error } = await supabase
       .from("orders")
       .select(`
-        *,
-        products (name, price)
+        id,
+        full_name,
+        phone,
+        address,
+        quantity,
+        total_amount,
+        status,
+        created_at,
+        products:product_id (name, price)
       `)
       .eq("status", "pending")
       .order("created_at", { ascending: false })
@@ -1188,8 +1230,14 @@ async function showAdminMessages(chatId: number) {
     const { data: messages, error } = await supabase
       .from("admin_messages")
       .select(`
-        *,
-        users (full_name, phone, username)
+        id,
+        type,
+        title,
+        content,
+        data,
+        status,
+        created_at,
+        users:created_by (full_name, phone, username)
       `)
       .eq("status", "pending")
       .order("created_at", { ascending: false })
@@ -1365,8 +1413,14 @@ async function notifyAdminsNewOrder(orderId: string) {
     const { data: order, error: orderError } = await supabase
       .from("orders")
       .select(`
-        *,
-        products (name, price)
+        id,
+        full_name,
+        phone,
+        address,
+        quantity,
+        total_amount,
+        created_at,
+        products:product_id (name, price)
       `)
       .eq("id", orderId)
       .single()
@@ -1469,8 +1523,8 @@ async function notifyCustomerStatusChange(orderId: string, status: string) {
     const { data: order, error } = await supabase
       .from("orders")
       .select(`
-        *,
-        products (name),
+        id,
+        products:product_id (name),
         users (telegram_id)
       `)
       .eq("id", orderId)
