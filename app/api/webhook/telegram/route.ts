@@ -304,7 +304,7 @@ async function sendWelcomeMessage(chatId: number, firstName: string, isAdmin: bo
     ],
   }
 
-  await sendTelegramMessage(chatId, message, { reply_markup: { inline_keyboard: keyboard.inline_keyboard } })
+  await sendTelegramMessage(chatId, message, { reply_markup: keyboard })
 }
 
 async function sendAdminPanel(chatId: number) {
@@ -331,7 +331,7 @@ async function sendAdminPanel(chatId: number) {
   await sendTelegramMessage(
     chatId,
     message,
-    { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+    { reply_markup: keyboard },
     "Markdown",
   )
 }
@@ -365,7 +365,7 @@ async function showCategories(chatId: number) {
     await sendTelegramMessage(
       chatId,
       message,
-      { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+      { reply_markup: keyboard },
       "Markdown",
     )
   } catch (error) {
@@ -453,7 +453,7 @@ async function showCategoryProducts(chatId: number, categorySlug: string, page =
     await sendTelegramMessage(
       chatId,
       message,
-      { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+      { reply_markup: keyboard },
       "Markdown",
     )
   } catch (error) {
@@ -524,7 +524,7 @@ async function handleProductSearch(chatId: number, query: string) {
     await sendTelegramMessage(
       chatId,
       message,
-      { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+      { reply_markup: keyboard },
       "Markdown",
     )
   } catch (error) {
@@ -604,7 +604,7 @@ async function showProductDetails(chatId: number, productId: string) {
     // Send photo if available
     if (product.image_url && product.image_url !== "/placeholder.svg" && !product.image_url.includes("placeholder")) {
       try {
-        await sendTelegramPhoto(chatId, product.image_url, message, keyboard, "Markdown")
+        await sendTelegramPhoto(chatId, product.image_url, message, { reply_markup: keyboard }, "Markdown")
       } catch (photoError) {
         // If photo fails, send text message
         await sendTelegramMessage(
@@ -803,7 +803,7 @@ async function completeOrder(chatId: number, userId: number, session: any) {
     await sendTelegramMessage(
       chatId,
       message,
-      { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+      { reply_markup: keyboard },
       "Markdown",
     )
 
@@ -1001,7 +1001,7 @@ async function showUserOrders(chatId: number, telegramId: number) {
     await sendTelegramMessage(
       chatId,
       message,
-      { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+      { reply_markup: keyboard },
       "Markdown",
     )
   } catch (error) {
@@ -1023,7 +1023,7 @@ async function showAboutMarket(chatId: number) {
   await sendTelegramMessage(
     chatId,
     message,
-    { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+    { reply_markup: keyboard },
     "Markdown",
   )
 }
@@ -1041,7 +1041,7 @@ async function sendWebAdminPanel(chatId: number) {
   await sendTelegramMessage(
     chatId,
     message,
-    { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+    { reply_markup: keyboard },
     "Markdown",
   )
 }
@@ -1216,7 +1216,7 @@ async function showPendingOrders(chatId: number) {
       }
 
       await sendTelegramMessage(chatId, `Buyurtma #${order.id.slice(-8)} uchun amal tanlang:`, {
-        reply_markup: { inline_keyboard: keyboard.inline_keyboard },
+        reply_markup: keyboard,
       })
     }
   } catch (error) {
@@ -1463,7 +1463,7 @@ async function notifyAdminsNewOrder(orderId: string) {
           await sendTelegramMessage(
             admin.telegram_id,
             message,
-            { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+            { reply_markup: keyboard },
             "Markdown",
           )
           console.log(`✅ Admin @${admin.username} ga xabar yuborildi`)
@@ -1654,7 +1654,7 @@ async function answerCallbackQuery(callbackQueryId: string, text?: string) {
     const response = await fetch(`${BOT_API_URL}/answerCallbackQuery`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.JSON.stringify(payload),
     })
 
     const result = await response.json()
