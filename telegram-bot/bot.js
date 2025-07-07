@@ -131,7 +131,7 @@ bot.on("callback_query", async (callbackQuery) => {
     await showCategoryProducts(chatId, categorySlug, Number.parseInt(page))
   } else if (data.startsWith("search_page_")) {
     const [, , page, query] = data.split("_")
-    await showSearchResults(chatId, query, Number.parseInt(page))
+    await showSearchResults(chatId, decodeURIComponent(query), Number.parseInt(page))
   } else if (data.startsWith("search_product_")) {
     const productId = data.replace("search_product_", "")
     await showProductDetails(chatId, productId)
@@ -253,7 +253,7 @@ async function sendMainMenu(chatId, isAdmin, firstName) {
     },
   }
 
-  await bot.sendMessage(chatId, message, { parse_mode: "Markdown", ...keyboard })
+  await bot.sendMessage(chatId, message, keyboard)
 }
 
 async function sendAdminPanel(chatId) {
