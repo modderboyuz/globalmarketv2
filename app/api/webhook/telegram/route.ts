@@ -62,7 +62,7 @@ async function handleMessage(message: any) {
   // Check if user is admin
   const isAdmin = await checkAdminStatus(userId)
 
-  // Handle text messages
+  // Handle commands
   if (text?.startsWith("/start")) {
     const startParam = text.replace("/start", "").trim()
 
@@ -95,13 +95,25 @@ async function handleMessage(message: any) {
         await handleOrderInput(chatId, userId, text, session)
       } else if (session.state === "contact_message") {
         await handleContactMessage(chatId, userId, text)
+      } else if (session.state === "searching") {
+        await handleProductSearch(chatId, text)
+        userSessions.delete(userId)
+      } else if (session.state === "broadcast_message" && isAdmin) {
+        await handleBroadcastMessage(chatId, userId, text)
+        userSessions.delete(userId)
       }
     } else {
-      // Unknown command
-      await sendTelegramMessage(
-        chatId,
-        "❓ Noma'lum buyruq. Yordam uchun /help yuboring.\n\n📋 Mavjud buyruqlar:\n/start - Bosh menyu\n/categories - Kategoriyalar\n/myorders - Buyurtmalarim\n/help - Yordam",
-      )
+      // Check if it's a contact message (not a command)
+      if (!text.startsWith("/")) {
+        // This is a regular message, treat as contact
+        await handleContactMessage(chatId, userId, text)
+      } else {
+        // Unknown command
+        await sendTelegramMessage(
+          chatId,
+          "❓ Noma'lum buyruq. Yordam uchun /help yuboring.\n\n📋 Mavjud buyruqlar:\n/start - Bosh menyu\n/categories - Kategoriyalar\n/myorders - Buyurtmalarim\n/help - Yordam",
+        )
+      }
     }
   }
 }
@@ -125,7 +137,8 @@ async function handleCallbackQuery(callbackQuery: any) {
   } else if (data === "categories") {
     await showCategories(chatId)
   } else if (data === "search") {
-    await openWebApp(chatId, "search")
+    await sendTelegramMessage(chatId, "🔍 Mahsulot nomini yozing:")
+    userSessions.set(userId, { state: "searching" })
   } else if (data === "about") {
     await showAboutMarket(chatId)
   } else if (data === "contact") {
@@ -144,10 +157,12 @@ async function handleCallbackQuery(callbackQuery: any) {
       await showAdminMessages(chatId)
     } else if (data === "admin_stats") {
       await showStats(chatId)
-    } else if (data === "admin_sell_requests") {
-      await showSellRequests(chatId)
     } else if (data === "admin_users") {
       await showUsers(chatId)
+    } else if (data === "admin_broadcast") {
+      await startBroadcastMessage(chatId, userId)
+    } else if (data === "admin_panel_web") {
+      await sendWebAdminPanel(chatId)
     }
   }
 
@@ -180,24 +195,11 @@ async function handleCallbackQuery(callbackQuery: any) {
     const [action, orderId] = data.split("_order_")
     await handleOrderAction(chatId, callbackQuery.id, orderId, action, callbackQuery.message.message_id)
   }
-
-  // Handle sell request actions (admin only)
-  if (isAdmin && data.includes("_sell_")) {
-    const [action, requestId] = data.split("_sell_")
-    await handleSellRequestAction(chatId, callbackQuery.id, requestId, action)
-  }
-
-  // Handle message actions (admin only)
-  if (isAdmin && data.includes("_msg_")) {
-    const [action, messageId] = data.split("_msg_")
-    await handleMessageAction(chatId, callbackQuery.id, messageId, action)
-  }
 }
 
 async function checkUserRegistration(telegramId: number): Promise<boolean> {
   try {
     const { data: user } = await supabase.from("users").select("id, phone").eq("telegram_id", telegramId).single()
-
     return !!(user && user.phone && !user.phone.includes("temp"))
   } catch (error) {
     return false
@@ -269,125 +271,6 @@ async function handleContactShare(chatId: number, userId: number, contact: any, 
   }
 }
 
-async function handleProductStart(chatId: number, userId: number, startParam: string) {
-  try {
-    // Parse parameters: category_name&product_id=xxx
-    const params = startParam.split("&")
-    let productId = ""
-
-    for (const param of params) {
-      if (param.startsWith("product_id=")) {
-        productId = param.replace("product_id=", "")
-        break
-      }
-    }
-
-    if (!productId) {
-      await sendWelcomeMessage(chatId, "Foydalanuvchi", false)
-      return
-    }
-
-    await showProductDetails(chatId, productId)
-  } catch (error) {
-    console.error("Error handling product start:", error)
-    await sendWelcomeMessage(chatId, "Foydalanuvchi", false)
-  }
-}
-
-async function openWebApp(chatId: number, type: string) {
-  const webAppUrl = `${process.env.NEXT_PUBLIC_SITE_URL || "https://globalmarketshop.netlify.app"}/telegram-webapp?type=${type}`
-
-  const keyboard = {
-    inline_keyboard: [
-      [
-        {
-          text: "🔍 Qidirish oynasini ochish",
-          web_app: {
-            url: webAppUrl,
-          },
-        },
-      ],
-      [{ text: "🔙 Bosh menyu", callback_data: "back_to_main" }],
-    ],
-  }
-
-  await sendTelegramMessage(
-    chatId,
-    "🔍 *Mahsulot qidirish*\n\nQuyidagi tugma orqali qidirish oynasini oching:",
-    keyboard,
-    "Markdown",
-  )
-}
-
-async function startContactMessage(chatId: number, userId: number) {
-  userSessions.set(userId, { state: "contact_message" })
-
-  await sendTelegramMessage(
-    chatId,
-    "💬 *Murojaat yuborish*\n\nXabaringizni yozing. Biz sizga tez orada javob beramiz:",
-    {
-      inline_keyboard: [[{ text: "❌ Bekor qilish", callback_data: "back_to_main" }]],
-    },
-    "Markdown",
-  )
-}
-
-async function handleContactMessage(chatId: number, userId: number, message: string) {
-  try {
-    // Get user info
-    const { data: user } = await supabase
-      .from("users")
-      .select("full_name, phone, username")
-      .eq("telegram_id", userId)
-      .single()
-
-    // Create contact message
-    const { error } = await supabase.from("contact_messages").insert({
-      user_id: null,
-      full_name: user?.full_name || "Telegram foydalanuvchi",
-      phone: user?.phone || "Noma'lum",
-      email: `telegram_${userId}@temp.com`,
-      message_type: "general",
-      subject: "Telegram bot orqali murojaat",
-      message: message,
-      status: "new",
-    })
-
-    if (error) throw error
-
-    // Create admin message
-    await supabase.from("admin_messages").insert({
-      type: "contact",
-      title: "Telegram bot orqali murojaat",
-      content: message,
-      data: {
-        telegram_id: userId,
-        username: user?.username,
-        phone: user?.phone,
-        full_name: user?.full_name,
-      },
-      status: "pending",
-      created_by: user?.id || null,
-    })
-
-    // Notify admins
-    await notifyAdminsNewMessage("contact", "Yangi murojaat", message, user)
-
-    await sendTelegramMessage(
-      chatId,
-      "✅ Murojaatingiz muvaffaqiyatli yuborildi!\n\nBiz sizga tez orada javob beramiz.",
-      {
-        inline_keyboard: [[{ text: "🔙 Bosh menyu", callback_data: "back_to_main" }]],
-      },
-    )
-
-    userSessions.delete(userId)
-  } catch (error) {
-    console.error("Error handling contact message:", error)
-    await sendTelegramMessage(chatId, "❌ Xatolik yuz berdi. Iltimos, qayta urinib ko'ring.")
-  }
-}
-
 async function checkAdminStatus(telegramId: number): Promise<boolean> {
   try {
     const { data: user } = await supabase.from("users").select("is_admin").eq("telegram_id", telegramId).single()
@@ -395,78 +278,6 @@ async function checkAdminStatus(telegramId: number): Promise<boolean> {
   } catch (error) {
     console.error("Admin status tekshirishda xatolik:", error)
     return false
-  }
-}
-
-async function handleWebsiteConnection(chatId: number, userId: number, startParam: string) {
-  try {
-    const params = new URLSearchParams(startParam.replace("website&", ""))
-    const email = params.get("email")
-
-    if (!email) {
-      await sendTelegramMessage(chatId, "❌ Email manzil topilmadi. Iltimos, websaytdan qayta urinib ko'ring.")
-      return
-    }
-
-    const { data, error } = await supabase.rpc("connect_telegram_to_user", {
-      p_email: email,
-      p_telegram_id: userId,
-    })
-
-    if (error || !data.success) {
-      await sendTelegramMessage(
-        chatId,
-        "❌ Hisobni ulashda xatolik yuz berdi. Email manzil to'g'ri ekanligini tekshiring.",
-      )
-      return
-    }
-
-    await sendTelegramMessage(
-      chatId,
-      `✅ *Muvaffaqiyat!*\n\nTelegram hisobingiz websaytga ulandi!\n\n👤 Username: @${data.username}\n📧 Email: ${email}\n\n🌐 Endi websaytdagi barcha yangilanishlarni Telegram orqali olasiz!`,
-      {
-        inline_keyboard: [
-          [
-            { text: "🌐 Websaytga o'tish", url: "https://globalmarketshop.netlify.app" },
-            { text: "📋 Buyurtmalarim", callback_data: "my_orders" },
-          ],
-          [{ text: "🔙 Bosh menyu", callback_data: "back_to_main" }],
-        ],
-      },
-      "Markdown",
-    )
-  } catch (error) {
-    console.error("Website connection error:", error)
-    await sendTelegramMessage(chatId, "❌ Texnik xatolik yuz berdi. Iltimos, keyinroq urinib ko'ring.")
-  }
-}
-
-async function handleWebsiteConnectionRequest(chatId: number, userId: number) {
-  const { data: user } = await supabase.from("users").select("email, username").eq("telegram_id", userId).single()
-
-  if (!user?.email || user.email.includes("@temp.com")) {
-    await sendTelegramMessage(
-      chatId,
-      "🌐 *Websaytga ulash*\n\nWebsaytga ulanish uchun avval ro'yxatdan o'ting:\n\n1. Quyidagi havolaga o'ting\n2. Ro'yxatdan o'ting yoki kiring\n3. Profilingizda 'Telegram botga ulash' tugmasini bosing",
-      {
-        inline_keyboard: [
-          [{ text: "🌐 Websaytga o'tish", url: "https://globalmarketshop.netlify.app/register" }],
-          [{ text: "🔙 Orqaga", callback_data: "back_to_main" }],
-        ],
-      },
-      "Markdown",
-    )
-  } else {
-    await sendTelegramMessage(
-      chatId,
-      `✅ Sizning hisobingiz allaqachon ulangan!\n\n👤 Username: @${user.username}\n📧 Email: ${user.email}`,
-      {
-        inline_keyboard: [
-          [{ text: "🌐 Websaytga o'tish", url: "https://globalmarketshop.netlify.app" }],
-          [{ text: "🔙 Orqaga", callback_data: "back_to_main" }],
-        ],
-      },
-    )
   }
 }
 
@@ -493,11 +304,11 @@ async function sendWelcomeMessage(chatId: number, firstName: string, isAdmin: bo
     ],
   }
 
-  await sendTelegramMessage(chatId, message, keyboard)
+  await sendTelegramMessage(chatId, message, { reply_markup: { inline_keyboard: keyboard.inline_keyboard } })
 }
 
 async function sendAdminPanel(chatId: number) {
-  const message = `👑 *Admin Panel*\n\nTizimni boshqarish va nazorat qilish\n\n📊 Statistika va hisobotlar\n📋 Buyurtmalarni boshqarish\n💬 Xabarlarni ko'rish\n📦 Mahsulot so'rovlari\n👥 Foydalanuvchilar`
+  const message = `👑 *Admin Panel*\n\nTizimni boshqarish va nazorat qilish\n\n📊 Statistika va hisobotlar\n📋 Buyurtmalarni boshqarish\n💬 Xabarlarni ko'rish\n👥 Foydalanuvchilar\n📢 Xabar tarqatish`
 
   const keyboard = {
     inline_keyboard: [
@@ -506,23 +317,23 @@ async function sendAdminPanel(chatId: number) {
         { text: "💬 Xabarlar", callback_data: "admin_messages" },
       ],
       [
-        { text: "📦 Sotish so'rovlari", callback_data: "admin_sell_requests" },
         { text: "👥 Foydalanuvchilar", callback_data: "admin_users" },
+        { text: "📊 Statistika", callback_data: "admin_stats" },
       ],
       [
-        { text: "📊 Statistika", callback_data: "admin_stats" },
-        { text: "🔙 Bosh menyu", callback_data: "back_to_main" },
+        { text: "📢 Xabar tarqatish", callback_data: "admin_broadcast" },
+        { text: "🌐 Web Admin", callback_data: "admin_panel_web" },
       ],
+      [{ text: "🔙 Bosh menyu", callback_data: "back_to_main" }],
     ],
   }
 
-  await sendTelegramMessage(chatId, message, keyboard, "Markdown")
-}
-
-async function sendHelpMessage(chatId: number) {
-  const message = `❓ *Yordam*\n\n*Mavjud buyruqlar:*\n/start - Bosh menyu\n/categories - Kategoriyalar\n/myorders - Buyurtmalarim\n/help - Yordam\n\n*Admin buyruqlari:*\n/admin - Admin panel\n/orders - Barcha buyurtmalar\n\n*Bot imkoniyatlari:*\n🛒 Mahsulot sotib olish\n🔍 Mahsulot qidirish (Web App)\n📋 Buyurtmalarni kuzatish\n🏪 Market haqida ma'lumot\n💬 Murojaat yuborish\n🌐 Websaytga ulanish`
-
-  await sendTelegramMessage(chatId, message, null, "Markdown")
+  await sendTelegramMessage(
+    chatId,
+    message,
+    { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+    "Markdown",
+  )
 }
 
 async function showCategories(chatId: number) {
@@ -551,7 +362,12 @@ async function showCategories(chatId: number) {
       ],
     }
 
-    await sendTelegramMessage(chatId, message, keyboard, "Markdown")
+    await sendTelegramMessage(
+      chatId,
+      message,
+      { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+      "Markdown",
+    )
   } catch (error) {
     console.error("Error showing categories:", error)
     await sendTelegramMessage(chatId, "❌ Kategoriyalarni olishda xatolik.")
@@ -575,7 +391,7 @@ async function showCategoryProducts(chatId: number, categorySlug: string, page =
       return
     }
 
-    // Get products in this category
+    // Get products in this category with proper joins
     const { data: products, error } = await supabase
       .from("products")
       .select(`
@@ -587,14 +403,16 @@ async function showCategoryProducts(chatId: number, categorySlug: string, page =
       .eq("is_active", true)
       .eq("is_approved", true)
       .gt("stock_quantity", 0)
-      .order("order_count", { ascending: false })
+      .order("popularity_score", { ascending: false })
       .range(offset, offset + limit - 1)
 
     if (error) throw error
 
     if (!products || products.length === 0) {
       await sendTelegramMessage(chatId, `❌ "${category.name_uz}" kategoriyasida mahsulotlar topilmadi.`, {
-        inline_keyboard: [[{ text: "🔙 Kategoriyalarga qaytish", callback_data: "categories" }]],
+        reply_markup: {
+          inline_keyboard: [[{ text: "🔙 Kategoriyalarga qaytish", callback_data: "categories" }]],
+        },
       })
       return
     }
@@ -624,10 +442,78 @@ async function showCategoryProducts(chatId: number, categorySlug: string, page =
       ],
     }
 
-    await sendTelegramMessage(chatId, message, keyboard, "Markdown")
+    await sendTelegramMessage(
+      chatId,
+      message,
+      { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+      "Markdown",
+    )
   } catch (error) {
     console.error("Error showing category products:", error)
     await sendTelegramMessage(chatId, "❌ Mahsulotlarni olishda xatolik.")
+  }
+}
+
+async function handleProductSearch(chatId: number, query: string) {
+  try {
+    const { data: products, error } = await supabase
+      .from("products")
+      .select(`
+        *,
+        categories (name_uz, icon),
+        users (full_name, company_name, username)
+      `)
+      .or(`name.ilike.%${query}%,description.ilike.%${query}%,author.ilike.%${query}%,brand.ilike.%${query}%`)
+      .eq("is_active", true)
+      .eq("is_approved", true)
+      .gt("stock_quantity", 0)
+      .order("popularity_score", { ascending: false })
+      .limit(10)
+
+    if (error) throw error
+
+    if (!products || products.length === 0) {
+      await sendTelegramMessage(
+        chatId,
+        `❌ "${query}" bo'yicha mahsulotlar topilmadi.\n\nBoshqa nom bilan qidirib ko'ring.`,
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "🔍 Qayta qidirish", callback_data: "search" }],
+              [{ text: "🔙 Bosh menyu", callback_data: "back_to_main" }],
+            ],
+          },
+        },
+      )
+      return
+    }
+
+    const message = `🔍 *"${query}" bo'yicha natijalar*\n\n${products.length} ta mahsulot topildi:\n\nMahsulotni tanlang:`
+
+    const keyboard = {
+      inline_keyboard: [
+        ...products.map((product) => [
+          {
+            text: `${product.name} - ${formatPrice(product.price)}`,
+            callback_data: `product_${product.id}`,
+          },
+        ]),
+        [
+          { text: "🔍 Qayta qidirish", callback_data: "search" },
+          { text: "🔙 Bosh menyu", callback_data: "back_to_main" },
+        ],
+      ],
+    }
+
+    await sendTelegramMessage(
+      chatId,
+      message,
+      { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+      "Markdown",
+    )
+  } catch (error) {
+    console.error("Error handling product search:", error)
+    await sendTelegramMessage(chatId, "❌ Qidirishda xatolik yuz berdi.")
   }
 }
 
@@ -648,11 +534,19 @@ async function showProductDetails(chatId: number, productId: string) {
       return
     }
 
+    // Update view count
+    await supabase
+      .from("products")
+      .update({ view_count: (product.view_count || 0) + 1 })
+      .eq("id", productId)
+
     let message = `📦 *${product.name}*\n\n`
     message += `💰 *Narx:* ${formatPrice(product.price)}\n`
     message += `📊 *Mavjud:* ${product.stock_quantity} dona\n`
     message += `⭐ *Reyting:* ${product.average_rating}/5\n`
     message += `🛒 *Buyurtmalar:* ${product.order_count} marta\n`
+    message += `👀 *Ko'rishlar:* ${(product.view_count || 0) + 1}\n`
+    message += `❤️ *Yoqtirishlar:* ${product.like_count || 0}\n`
     message += `🏷️ *Kategoriya:* ${product.categories.icon} ${product.categories.name_uz}\n`
     message += `🏪 *Sotuvchi:* @${product.users.username}\n\n`
 
@@ -685,10 +579,20 @@ async function showProductDetails(chatId: number, productId: string) {
         await sendTelegramPhoto(chatId, product.image_url, message, keyboard, "Markdown")
       } catch (photoError) {
         // If photo fails, send text message
-        await sendTelegramMessage(chatId, message, keyboard, "Markdown")
+        await sendTelegramMessage(
+          chatId,
+          message,
+          { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+          "Markdown",
+        )
       }
     } else {
-      await sendTelegramMessage(chatId, message, keyboard, "Markdown")
+      await sendTelegramMessage(
+        chatId,
+        message,
+        { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+        "Markdown",
+      )
     }
   } catch (error) {
     console.error("Error showing product details:", error)
@@ -725,7 +629,9 @@ async function startOrderProcess(chatId: number, userId: number, productId: stri
       chatId,
       `🛒 *Buyurtma berish*\n\n📦 Mahsulot: ${product.name}\n💰 Narx: ${formatPrice(product.price)}\n\n❓ Nechta dona kerak? (1-${product.stock_quantity})`,
       {
-        inline_keyboard: [[{ text: "❌ Bekor qilish", callback_data: "back_to_main" }]],
+        reply_markup: {
+          inline_keyboard: [[{ text: "❌ Bekor qilish", callback_data: "back_to_main" }]],
+        },
       },
       "Markdown",
     )
@@ -830,14 +736,22 @@ async function completeOrder(chatId: number, userId: number, session: any) {
 
     if (error) throw error
 
-    // Update product stock
-    await supabase
+    // Update product stock and order count
+    const { data: currentProduct } = await supabase
       .from("products")
-      .update({
-        order_count: supabase.sql`order_count + ${session.quantity}`,
-        stock_quantity: supabase.sql`stock_quantity - ${session.quantity}`,
-      })
+      .select("order_count, stock_quantity")
       .eq("id", session.productId)
+      .single()
+
+    if (currentProduct) {
+      await supabase
+        .from("products")
+        .update({
+          order_count: (currentProduct.order_count || 0) + session.quantity,
+          stock_quantity: Math.max(0, (currentProduct.stock_quantity || 0) - session.quantity),
+        })
+        .eq("id", session.productId)
+    }
 
     let message = `✅ *Buyurtma muvaffaqiyatli qabul qilindi!*\n\n`
     message += `🆔 Buyurtma raqami: #${order.id.slice(-8)}\n`
@@ -858,7 +772,12 @@ async function completeOrder(chatId: number, userId: number, session: any) {
       ],
     }
 
-    await sendTelegramMessage(chatId, message, keyboard, "Markdown")
+    await sendTelegramMessage(
+      chatId,
+      message,
+      { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+      "Markdown",
+    )
 
     // Notify admins
     await notifyAdminsNewOrder(order.id)
@@ -869,6 +788,139 @@ async function completeOrder(chatId: number, userId: number, session: any) {
     console.error("Error completing order:", error)
     await sendTelegramMessage(chatId, "❌ Buyurtmani yaratishda xatolik yuz berdi. Qaytadan urinib ko'ring.")
     userSessions.delete(userId)
+  }
+}
+
+async function startContactMessage(chatId: number, userId: number) {
+  userSessions.set(userId, { state: "contact_message" })
+
+  await sendTelegramMessage(
+    chatId,
+    "💬 *Murojaat yuborish*\n\nXabaringizni yozing. Biz sizga tez orada javob beramiz:",
+    {
+      reply_markup: {
+        inline_keyboard: [[{ text: "❌ Bekor qilish", callback_data: "back_to_main" }]],
+      },
+    },
+    "Markdown",
+  )
+}
+
+async function handleContactMessage(chatId: number, userId: number, message: string) {
+  try {
+    // Get user info
+    const { data: user } = await supabase
+      .from("users")
+      .select("id, full_name, phone, username")
+      .eq("telegram_id", userId)
+      .single()
+
+    // Create admin message
+    const { error } = await supabase.from("admin_messages").insert({
+      type: "contact",
+      title: "Telegram bot orqali murojaat",
+      content: message,
+      data: {
+        telegram_id: userId,
+        username: user?.username,
+        phone: user?.phone,
+        full_name: user?.full_name,
+      },
+      status: "pending",
+      created_by: user?.id || null,
+    })
+
+    if (error) throw error
+
+    await sendTelegramMessage(
+      chatId,
+      "✅ Murojaatingiz muvaffaqiyatli yuborildi!\n\nBiz sizga tez orada javob beramiz.",
+      {
+        reply_markup: {
+          inline_keyboard: [[{ text: "🔙 Bosh menyu", callback_data: "back_to_main" }]],
+        },
+      },
+    )
+
+    // Notify admins
+    await notifyAdminsNewMessage("contact", "Yangi murojaat", message, user)
+
+    userSessions.delete(userId)
+  } catch (error) {
+    console.error("Error handling contact message:", error)
+    await sendTelegramMessage(chatId, "❌ Xatolik yuz berdi. Iltimos, qayta urinib ko'ring.")
+  }
+}
+
+async function startBroadcastMessage(chatId: number, userId: number) {
+  userSessions.set(userId, { state: "broadcast_message" })
+
+  await sendTelegramMessage(
+    chatId,
+    "📢 *Xabar tarqatish*\n\nBarcha foydalanuvchilarga yubormoqchi bo'lgan xabaringizni yozing:",
+    {
+      reply_markup: {
+        inline_keyboard: [[{ text: "❌ Bekor qilish", callback_data: "back_to_admin" }]],
+      },
+    },
+    "Markdown",
+  )
+}
+
+async function handleBroadcastMessage(chatId: number, userId: number, message: string) {
+  try {
+    // Get all users with telegram_id
+    const { data: users, error } = await supabase
+      .from("users")
+      .select("telegram_id, full_name")
+      .not("telegram_id", "is", null)
+
+    if (error) throw error
+
+    if (!users || users.length === 0) {
+      await sendTelegramMessage(chatId, "❌ Xabar yuborish uchun foydalanuvchilar topilmadi.")
+      return
+    }
+
+    let sentCount = 0
+    let failedCount = 0
+
+    const broadcastMessage = `📢 *GlobalMarket xabari*\n\n${message}\n\n---\n_Bu xabar barcha foydalanuvchilarga yuborildi_`
+
+    // Send to all users
+    for (const user of users) {
+      try {
+        await sendTelegramMessage(user.telegram_id, broadcastMessage, null, "Markdown")
+        sentCount++
+        // Add small delay to avoid rate limiting
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      } catch (error) {
+        console.error(`Failed to send to ${user.telegram_id}:`, error)
+        failedCount++
+      }
+    }
+
+    // Save broadcast record
+    await supabase.from("broadcast_messages").insert({
+      title: "Telegram broadcast",
+      content: message,
+      sender_id: userId,
+      target_audience: "all",
+      sent_count: sentCount,
+    })
+
+    await sendTelegramMessage(
+      chatId,
+      `✅ Xabar tarqatildi!\n\n📊 Statistika:\n• Yuborildi: ${sentCount}\n• Xatolik: ${failedCount}\n• Jami: ${users.length}`,
+      {
+        reply_markup: {
+          inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }]],
+        },
+      },
+    )
+  } catch (error) {
+    console.error("Error handling broadcast message:", error)
+    await sendTelegramMessage(chatId, "❌ Xabar tarqatishda xatolik yuz berdi.")
   }
 }
 
@@ -888,7 +940,9 @@ async function showUserOrders(chatId: number, telegramId: number) {
 
     if (!orders || orders.length === 0) {
       await sendTelegramMessage(chatId, "📭 Sizda buyurtmalar yo'q.", {
-        inline_keyboard: [[{ text: "🔙 Bosh menyu", callback_data: "back_to_main" }]],
+        reply_markup: {
+          inline_keyboard: [[{ text: "🔙 Bosh menyu", callback_data: "back_to_main" }]],
+        },
       })
       return
     }
@@ -909,7 +963,12 @@ async function showUserOrders(chatId: number, telegramId: number) {
       inline_keyboard: [[{ text: "🔙 Bosh menyu", callback_data: "back_to_main" }]],
     }
 
-    await sendTelegramMessage(chatId, message, keyboard, "Markdown")
+    await sendTelegramMessage(
+      chatId,
+      message,
+      { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+      "Markdown",
+    )
   } catch (error) {
     console.error("Error showing user orders:", error)
     await sendTelegramMessage(chatId, "❌ Buyurtmalarni olishda xatolik.")
@@ -926,7 +985,133 @@ async function showAboutMarket(chatId: number) {
     ],
   }
 
-  await sendTelegramMessage(chatId, message, keyboard, "Markdown")
+  await sendTelegramMessage(
+    chatId,
+    message,
+    { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+    "Markdown",
+  )
+}
+
+async function sendWebAdminPanel(chatId: number) {
+  const message = `🌐 *Web Admin Panel*\n\nTo'liq admin paneliga o'tish uchun quyidagi havolani bosing:\n\nU yerda siz barcha imkoniyatlardan foydalanishingiz mumkin:\n• Mahsulotlarni boshqarish\n• Foydalanuvchilarni ko'rish\n• Buyurtmalarni nazorat qilish\n• Statistikalarni ko'rish\n• Va boshqa ko'plab imkoniyatlar`
+
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: "🌐 Admin Panelga o'tish", url: "https://globalmarketshop.netlify.app/admin-panel" }],
+      [{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }],
+    ],
+  }
+
+  await sendTelegramMessage(
+    chatId,
+    message,
+    { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+    "Markdown",
+  )
+}
+
+async function handleWebsiteConnectionRequest(chatId: number, userId: number) {
+  const { data: user } = await supabase.from("users").select("email, username").eq("telegram_id", userId).single()
+
+  if (!user?.email || user.email.includes("@temp.com")) {
+    await sendTelegramMessage(
+      chatId,
+      "🌐 *Websaytga ulash*\n\nWebsaytga ulanish uchun avval ro'yxatdan o'ting:\n\n1. Quyidagi havolaga o'ting\n2. Ro'yxatdan o'ting yoki kiring\n3. Profilingizda 'Telegram botga ulash' tugmasini bosing",
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "🌐 Websaytga o'tish", url: "https://globalmarketshop.netlify.app/register" }],
+            [{ text: "🔙 Orqaga", callback_data: "back_to_main" }],
+          ],
+        },
+      },
+      "Markdown",
+    )
+  } else {
+    await sendTelegramMessage(
+      chatId,
+      `✅ Sizning hisobingiz allaqachon ulangan!\n\n👤 Username: @${user.username}\n📧 Email: ${user.email}`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "🌐 Websaytga o'tish", url: "https://globalmarketshop.netlify.app" }],
+            [{ text: "🔙 Orqaga", callback_data: "back_to_main" }],
+          ],
+        },
+      },
+    )
+  }
+}
+
+async function handleWebsiteConnection(chatId: number, userId: number, startParam: string) {
+  try {
+    const params = new URLSearchParams(startParam.replace("website&", ""))
+    const email = params.get("email")
+
+    if (!email) {
+      await sendTelegramMessage(chatId, "❌ Email manzil topilmadi. Iltimos, websaytdan qayta urinib ko'ring.")
+      return
+    }
+
+    const { data, error } = await supabase.rpc("connect_telegram_to_user", {
+      p_email: email,
+      p_telegram_id: userId,
+    })
+
+    if (error || !data.success) {
+      await sendTelegramMessage(
+        chatId,
+        "❌ Hisobni ulashda xatolik yuz berdi. Email manzil to'g'ri ekanligini tekshiring.",
+      )
+      return
+    }
+
+    await sendTelegramMessage(
+      chatId,
+      `✅ *Muvaffaqiyat!*\n\nTelegram hisobingiz websaytga ulandi!\n\n👤 Username: @${data.username}\n📧 Email: ${email}\n\n🌐 Endi websaytdagi barcha yangilanishlarni Telegram orqali olasiz!`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "🌐 Websaytga o'tish", url: "https://globalmarketshop.netlify.app" },
+              { text: "📋 Buyurtmalarim", callback_data: "my_orders" },
+            ],
+            [{ text: "🔙 Bosh menyu", callback_data: "back_to_main" }],
+          ],
+        },
+      },
+      "Markdown",
+    )
+  } catch (error) {
+    console.error("Website connection error:", error)
+    await sendTelegramMessage(chatId, "❌ Texnik xatolik yuz berdi. Iltimos, keyinroq urinib ko'ring.")
+  }
+}
+
+async function handleProductStart(chatId: number, userId: number, startParam: string) {
+  try {
+    // Parse parameters: category_name&product_id=xxx
+    const params = startParam.split("&")
+    let productId = ""
+
+    for (const param of params) {
+      if (param.startsWith("product_id=")) {
+        productId = param.replace("product_id=", "")
+        break
+      }
+    }
+
+    if (!productId) {
+      await sendWelcomeMessage(chatId, "Foydalanuvchi", false)
+      return
+    }
+
+    await showProductDetails(chatId, productId)
+  } catch (error) {
+    console.error("Error handling product start:", error)
+    await sendWelcomeMessage(chatId, "Foydalanuvchi", false)
+  }
 }
 
 // Admin functions
@@ -946,7 +1131,9 @@ async function showPendingOrders(chatId: number) {
 
     if (!orders || orders.length === 0) {
       await sendTelegramMessage(chatId, "📭 Yangi buyurtmalar yo'q.", {
-        inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }]],
+        reply_markup: {
+          inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }]],
+        },
       })
       return
     }
@@ -967,7 +1154,9 @@ async function showPendingOrders(chatId: number) {
       chatId,
       message,
       {
-        inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }]],
+        reply_markup: {
+          inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }]],
+        },
       },
       "Markdown",
     )
@@ -984,7 +1173,9 @@ async function showPendingOrders(chatId: number) {
         ],
       }
 
-      await sendTelegramMessage(chatId, `Buyurtma #${order.id.slice(-8)} uchun amal tanlang:`, keyboard)
+      await sendTelegramMessage(chatId, `Buyurtma #${order.id.slice(-8)} uchun amal tanlang:`, {
+        reply_markup: { inline_keyboard: keyboard.inline_keyboard },
+      })
     }
   } catch (error) {
     console.error("Error showing pending orders:", error)
@@ -1008,7 +1199,9 @@ async function showAdminMessages(chatId: number) {
 
     if (!messages || messages.length === 0) {
       await sendTelegramMessage(chatId, "📭 Yangi xabarlar yo'q.", {
-        inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }]],
+        reply_markup: {
+          inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }]],
+        },
       })
       return
     }
@@ -1029,89 +1222,15 @@ async function showAdminMessages(chatId: number) {
       chatId,
       message,
       {
-        inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }]],
+        reply_markup: {
+          inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }]],
+        },
       },
       "Markdown",
     )
-
-    // Send action buttons for each message
-    for (const msg of messages) {
-      const keyboard = {
-        inline_keyboard: [
-          [
-            { text: "✅ Javob berildi", callback_data: `respond_msg_${msg.id}` },
-            { text: "❌ Yopish", callback_data: `close_msg_${msg.id}` },
-          ],
-        ],
-      }
-
-      await sendTelegramMessage(chatId, `Xabar #${msg.id.slice(-8)} uchun amal tanlang:`, keyboard)
-    }
   } catch (error) {
     console.error("Error showing admin messages:", error)
     await sendTelegramMessage(chatId, "❌ Xabarlarni olishda xatolik.")
-  }
-}
-
-async function showSellRequests(chatId: number) {
-  try {
-    const { data: requests, error } = await supabase
-      .from("sell_requests")
-      .select(`
-        *,
-        users (full_name, username, phone),
-        categories (name_uz, icon)
-      `)
-      .eq("status", "pending")
-      .order("created_at", { ascending: false })
-      .limit(10)
-
-    if (error) throw error
-
-    if (!requests || requests.length === 0) {
-      await sendTelegramMessage(chatId, "📭 Yangi sotish so'rovlari yo'q.", {
-        inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }]],
-      })
-      return
-    }
-
-    let message = "📦 *Yangi sotish so'rovlari:*\n\n"
-
-    for (const request of requests) {
-      message += `🆔 *#${request.id.slice(-8)}*\n`
-      message += `📦 ${request.product_name}\n`
-      message += `💰 ${formatPrice(request.price)}\n`
-      message += `👤 @${request.users?.username || "noma'lum"}\n`
-      message += `📞 ${request.contact_phone}\n`
-      message += `📅 ${formatDate(request.created_at)}\n`
-      message += `━━━━━━━━━━━━━━━━━━━━\n\n`
-    }
-
-    await sendTelegramMessage(
-      chatId,
-      message,
-      {
-        inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }]],
-      },
-      "Markdown",
-    )
-
-    // Send action buttons for each request
-    for (const request of requests) {
-      const keyboard = {
-        inline_keyboard: [
-          [
-            { text: "✅ Tasdiqlash", callback_data: `approve_sell_${request.id}` },
-            { text: "❌ Rad etish", callback_data: `reject_sell_${request.id}` },
-          ],
-        ],
-      }
-
-      await sendTelegramMessage(chatId, `So'rov #${request.id.slice(-8)} uchun amal tanlang:`, keyboard)
-    }
-  } catch (error) {
-    console.error("Error showing sell requests:", error)
-    await sendTelegramMessage(chatId, "❌ Sotish so'rovlarini olishda xatolik.")
   }
 }
 
@@ -1132,7 +1251,9 @@ async function showUsers(chatId: number) {
       chatId,
       message,
       {
-        inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }]],
+        reply_markup: {
+          inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }]],
+        },
       },
       "Markdown",
     )
@@ -1166,7 +1287,9 @@ async function showStats(chatId: number) {
       chatId,
       message,
       {
-        inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }]],
+        reply_markup: {
+          inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "back_to_admin" }]],
+        },
       },
       "Markdown",
     )
@@ -1174,6 +1297,12 @@ async function showStats(chatId: number) {
     console.error("Error showing stats:", error)
     await sendTelegramMessage(chatId, "❌ Statistikani olishda xatolik.")
   }
+}
+
+async function sendHelpMessage(chatId: number) {
+  const message = `❓ *Yordam*\n\n*Mavjud buyruqlar:*\n/start - Bosh menyu\n/categories - Kategoriyalar\n/myorders - Buyurtmalarim\n/help - Yordam\n\n*Admin buyruqlari:*\n/admin - Admin panel\n/orders - Barcha buyurtmalar\n\n*Bot imkoniyatlari:*\n🛒 Mahsulot sotib olish\n🔍 Mahsulot qidirish (Web App)\n📋 Buyurtmalarni kuzatish\n🏪 Market haqida ma'lumot\n💬 Murojaat yuborish\n🌐 Websaytga ulanish`
+
+  await sendTelegramMessage(chatId, message, null, "Markdown")
 }
 
 async function handleOrderAction(
@@ -1228,88 +1357,6 @@ async function handleOrderAction(
   }
 }
 
-async function handleSellRequestAction(chatId: number, callbackQueryId: string, requestId: string, action: string) {
-  try {
-    let status = ""
-    let statusText = ""
-
-    switch (action) {
-      case "approve":
-        status = "approved"
-        statusText = "tasdiqlandi"
-        break
-      case "reject":
-        status = "rejected"
-        statusText = "rad etildi"
-        break
-      default:
-        await answerCallbackQuery(callbackQueryId, "Noma'lum amal!")
-        return
-    }
-
-    // Update sell request via API
-    const response = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL}/api/sell-product`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: requestId,
-        status,
-        admin_notes: `Telegram bot orqali ${statusText}`,
-      }),
-    })
-
-    if (!response.ok) {
-      throw new Error("Failed to update sell request")
-    }
-
-    await answerCallbackQuery(callbackQueryId, `So'rov ${statusText}!`)
-
-    console.log(`✅ Sell request ${requestId} ${statusText}`)
-  } catch (error) {
-    console.error("Error handling sell request action:", error)
-    await answerCallbackQuery(callbackQueryId, "Xatolik yuz berdi!")
-  }
-}
-
-async function handleMessageAction(chatId: number, callbackQueryId: string, messageId: string, action: string) {
-  try {
-    let status = ""
-    let statusText = ""
-
-    switch (action) {
-      case "respond":
-        status = "responded"
-        statusText = "javob berildi"
-        break
-      case "close":
-        status = "closed"
-        statusText = "yopildi"
-        break
-      default:
-        await answerCallbackQuery(callbackQueryId, "Noma'lum amal!")
-        return
-    }
-
-    const { error } = await supabase
-      .from("admin_messages")
-      .update({
-        status: status,
-        admin_response: `Telegram bot orqali ${statusText}`,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", messageId)
-
-    if (error) throw error
-
-    await answerCallbackQuery(callbackQueryId, `Xabar ${statusText}!`)
-
-    console.log(`✅ Message ${messageId} ${statusText}`)
-  } catch (error) {
-    console.error("Error handling message action:", error)
-    await answerCallbackQuery(callbackQueryId, "Xatolik yuz berdi!")
-  }
-}
-
 async function notifyAdminsNewOrder(orderId: string) {
   try {
     console.log(`📢 Adminlarga yangi buyurtma haqida xabar: ${orderId}`)
@@ -1359,7 +1406,12 @@ async function notifyAdminsNewOrder(orderId: string) {
     if (admins && admins.length > 0) {
       for (const admin of admins) {
         try {
-          await sendTelegramMessage(admin.telegram_id, message, keyboard, "Markdown")
+          await sendTelegramMessage(
+            admin.telegram_id,
+            message,
+            { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+            "Markdown",
+          )
           console.log(`✅ Admin @${admin.username} ga xabar yuborildi`)
         } catch (error) {
           console.error(`❌ Admin ${admin.telegram_id} ga xabar yuborishda xatolik:`, error)
@@ -1442,14 +1494,14 @@ async function notifyCustomerStatusChange(orderId: string, status: string) {
       message += `\n😔 Buyurtmangiz bekor qilindi. Ma'lumot uchun qo'ng'iroq qiling.`
     }
 
-    // Send to customer
+    // Send to customer if they have telegram_id
     if (order.users && order.users.telegram_id) {
       await sendTelegramMessage(order.users.telegram_id, message, null, "Markdown")
       console.log(`📤 Mijozga xabar yuborildi: ${order.users.telegram_id}`)
     } else if (order.anon_temp_id && order.anon_temp_id.startsWith("tg_")) {
       // Anonymous Telegram order
       const telegramId = order.anon_temp_id.split("_")[1]
-      await sendTelegramMessage(telegramId, message, null, "Markdown")
+      await sendTelegramMessage(Number.parseInt(telegramId), message, null, "Markdown")
       console.log(`📤 Anonim mijozga xabar yuborildi: ${telegramId}`)
     }
   } catch (error) {
@@ -1457,7 +1509,8 @@ async function notifyCustomerStatusChange(orderId: string, status: string) {
   }
 }
 
-async function sendTelegramMessage(chatId: number, text: string, keyboard?: any, parseMode?: string) {
+// Utility functions
+async function sendTelegramMessage(chatId: number, text: string, replyMarkup?: any, parseMode?: string) {
   try {
     const payload: any = {
       chat_id: chatId,
@@ -1468,36 +1521,41 @@ async function sendTelegramMessage(chatId: number, text: string, keyboard?: any,
       payload.parse_mode = parseMode
     }
 
-    if (keyboard) {
-      payload.reply_markup = JSON.stringify(keyboard)
+    if (replyMarkup) {
+      payload.reply_markup = replyMarkup
     }
 
     const response = await fetch(`${BOT_API_URL}/sendMessage`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     })
 
-    if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(`Telegram API error: ${response.statusText} - ${JSON.stringify(errorData)}`)
+    const result = await response.json()
+
+    if (!result.ok) {
+      console.error("Telegram API error:", result)
+      throw new Error(result.description || "Telegram API error")
     }
 
-    const result = await response.json()
-    console.log(`📤 Message sent to ${chatId}`)
     return result
   } catch (error) {
-    console.error("Error sending Telegram message:", error)
+    console.error("Error sending telegram message:", error)
+    throw error
   }
 }
 
-async function sendTelegramPhoto(chatId: number, photo: string, caption: string, keyboard?: any, parseMode?: string) {
+async function sendTelegramPhoto(
+  chatId: number,
+  photoUrl: string,
+  caption: string,
+  replyMarkup?: any,
+  parseMode?: string,
+) {
   try {
     const payload: any = {
       chat_id: chatId,
-      photo: photo,
+      photo: photoUrl,
       caption: caption,
     }
 
@@ -1505,68 +1563,82 @@ async function sendTelegramPhoto(chatId: number, photo: string, caption: string,
       payload.parse_mode = parseMode
     }
 
-    if (keyboard) {
-      payload.reply_markup = JSON.stringify(keyboard)
+    if (replyMarkup) {
+      payload.reply_markup = replyMarkup
     }
 
     const response = await fetch(`${BOT_API_URL}/sendPhoto`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     })
 
-    if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(`Telegram API error: ${response.statusText} - ${JSON.stringify(errorData)}`)
+    const result = await response.json()
+
+    if (!result.ok) {
+      console.error("Telegram photo API error:", result)
+      throw new Error(result.description || "Telegram photo API error")
     }
 
-    const result = await response.json()
-    console.log(`📤 Photo sent to ${chatId}`)
     return result
   } catch (error) {
-    console.error("Error sending Telegram photo:", error)
+    console.error("Error sending telegram photo:", error)
     throw error
   }
 }
 
-async function answerCallbackQuery(callbackQueryId: string, text: string) {
+async function answerCallbackQuery(callbackQueryId: string, text?: string) {
   try {
-    await fetch(`${BOT_API_URL}/answerCallbackQuery`, {
+    const payload: any = {
+      callback_query_id: callbackQueryId,
+    }
+
+    if (text) {
+      payload.text = text
+    }
+
+    const response = await fetch(`${BOT_API_URL}/answerCallbackQuery`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        callback_query_id: callbackQueryId,
-        text: text,
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     })
+
+    const result = await response.json()
+    return result
   } catch (error) {
     console.error("Error answering callback query:", error)
   }
 }
 
-async function editMessage(chatId: number, messageId: number, text: string) {
+async function editMessage(chatId: number, messageId: number, text: string, replyMarkup?: any, parseMode?: string) {
   try {
-    await fetch(`${BOT_API_URL}/editMessageText`, {
+    const payload: any = {
+      chat_id: chatId,
+      message_id: messageId,
+      text: text,
+    }
+
+    if (parseMode) {
+      payload.parse_mode = parseMode
+    }
+
+    if (replyMarkup) {
+      payload.reply_markup = replyMarkup
+    }
+
+    const response = await fetch(`${BOT_API_URL}/editMessageText`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        chat_id: chatId,
-        message_id: messageId,
-        text: text,
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     })
+
+    const result = await response.json()
+    return result
   } catch (error) {
     console.error("Error editing message:", error)
   }
 }
 
-// Utility functions
 function formatPrice(price: number): string {
   return new Intl.NumberFormat("uz-UZ").format(price) + " so'm"
 }
@@ -1583,32 +1655,35 @@ function formatDate(dateString: string): string {
 }
 
 function getStatusEmoji(status: string): string {
-  const emojis = {
+  const emojis: Record<string, string> = {
     pending: "⏳",
     processing: "🔄",
     completed: "✅",
     cancelled: "❌",
   }
-  return emojis[status as keyof typeof emojis] || "❓"
+  return emojis[status] || "❓"
 }
 
 function getStatusText(status: string): string {
-  const texts = {
+  const texts: Record<string, string> = {
     pending: "Kutilmoqda",
     processing: "Tayyorlanmoqda",
     completed: "Bajarilgan",
     cancelled: "Bekor qilingan",
   }
-  return texts[status as keyof typeof texts] || "Noma'lum"
+  return texts[status] || "Noma'lum"
 }
 
 function getMessageTypeText(type: string): string {
-  const types = {
+  const types: Record<string, string> = {
     seller_application: "Sotuvchi arizasi",
     product_approval: "Mahsulot tasdiqlash",
     contact: "Murojaat",
     book_request: "Kitob so'rovi",
     sell_request: "Mahsulot sotish so'rovi",
   }
-  return types[type as keyof typeof types] || "Xabar"
+  return types[type] || "Xabar"
 }
+
+// Export functions for external use
+export { notifyAdminsNewOrder, notifyAdminsNewMessage }
