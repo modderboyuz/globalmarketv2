@@ -15,9 +15,8 @@ export async function GET() {
 
     return NextResponse.json({
       success: true,
-      bot_info: botInfo.result,
-      webhook_info: webhookInfo.result,
-      api_url: BOT_API_URL.replace(TELEGRAM_BOT_TOKEN, "***"),
+      bot: botInfo.result,
+      webhook: webhookInfo.result,
       timestamp: new Date().toISOString(),
     })
   } catch (error) {
@@ -46,9 +45,9 @@ export async function POST(request: NextRequest) {
       const result = await response.json()
 
       return NextResponse.json({
-        success: response.ok,
-        message: response.ok ? "Webhook set successfully" : "Failed to set webhook",
-        data: result,
+        success: result.ok,
+        message: result.description,
+        result: result.result,
       })
     } else if (action === "delete_webhook") {
       const response = await fetch(`${BOT_API_URL}/deleteWebhook`, {
@@ -58,15 +57,14 @@ export async function POST(request: NextRequest) {
       const result = await response.json()
 
       return NextResponse.json({
-        success: response.ok,
-        message: response.ok ? "Webhook deleted successfully" : "Failed to delete webhook",
-        data: result,
+        success: result.ok,
+        message: result.description,
       })
     }
 
     return NextResponse.json({ error: "Invalid action" }, { status: 400 })
   } catch (error) {
     console.error("Error managing webhook:", error)
-    return NextResponse.json({ error: "Server error" }, { status: 500 })
+    return NextResponse.json({ error: "Failed to manage webhook" }, { status: 500 })
   }
 }

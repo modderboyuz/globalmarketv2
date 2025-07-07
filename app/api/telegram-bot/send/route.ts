@@ -30,17 +30,18 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify(payload),
     })
 
-    const result = await response.json()
-
     if (!response.ok) {
-      console.error("Telegram API error:", result)
-      return NextResponse.json({ error: "Failed to send message", details: result }, { status: 500 })
+      const errorData = await response.json()
+      console.error("Telegram API error:", errorData)
+      return NextResponse.json({ error: "Failed to send message", details: errorData }, { status: 500 })
     }
+
+    const result = await response.json()
+    console.log(`📤 Message sent to ${chat_id}`)
 
     return NextResponse.json({
       success: true,
-      message: "Message sent successfully",
-      data: result,
+      result,
     })
   } catch (error) {
     console.error("API error:", error)
@@ -52,10 +53,6 @@ export async function GET() {
   return NextResponse.json({
     message: "Telegram Bot Send API",
     bot_token: TELEGRAM_BOT_TOKEN.slice(0, 10) + "...",
-    endpoints: {
-      send: "POST /api/telegram-bot/send",
-      info: "GET /api/telegram-bot/info",
-      webhook: "POST /api/telegram-bot/webhook",
-    },
+    status: "active",
   })
 }

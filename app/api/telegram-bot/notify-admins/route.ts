@@ -9,7 +9,11 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { type, title, message, data } = body
 
-    // Get all admin users with telegram_id
+    if (!type || !title || !message) {
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
+    }
+
+    // Get all admins with telegram_id
     const { data: admins, error } = await supabase
       .from("users")
       .select("telegram_id, username, full_name")
@@ -25,12 +29,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ message: "No admins with Telegram found" })
     }
 
+    // Send notification to each admin
     const results = []
-
-    // Send message to each admin
     for (const admin of admins) {
       try {
-        const telegramMessage = `🔔 *${title}*\n\n${message}\n\n📅 ${new Date().toLocaleString("uz-UZ")}`
+        const telegramMessage = `🔔 *${getTypeEmoji(type)} ${title}*\n\n${message}`
 
         const response = await fetch(`${BOT_API_URL}/sendMessage`, {
           method: "POST",
@@ -45,29 +48,15 @@ export async function POST(request: NextRequest) {
         })
 
         if (response.ok) {
-          results.push({
-            admin_id: admin.telegram_id,
-            username: admin.username,
-            status: "sent",
-          })
+          results.push({ admin: admin.username, status: "sent" })
           console.log(`✅ Notification sent to admin @${admin.username}`)
         } else {
           const errorData = await response.json()
-          results.push({
-            admin_id: admin.telegram_id,
-            username: admin.username,
-            status: "failed",
-            error: errorData,
-          })
+          results.push({ admin: admin.username, status: "failed", error: errorData })
           console.error(`❌ Failed to send to admin @${admin.username}:`, errorData)
         }
       } catch (error) {
-        results.push({
-          admin_id: admin.telegram_id,
-          username: admin.username,
-          status: "error",
-          error: error.message,
-        })
+        results.push({ admin: admin.username, status: "error", error: error.message })
         console.error(`❌ Error sending to admin @${admin.username}:`, error)
       }
     }
@@ -81,4 +70,16 @@ export async function POST(request: NextRequest) {
     console.error("API error:", error)
     return NextResponse.json({ error: "Server error" }, { status: 500 })
   }
+}
+
+function getTypeEmoji(type: string): string {
+  const emojis = {
+    sell_request: "📦",
+    contact: "💬",
+    order: "🛒",
+    user_registration: "👤",
+    product_approval: "✅",
+    seller_application: "🏪",
+  }
+  return emojis[type as keyof typeof emojis] || "📢"
 }
