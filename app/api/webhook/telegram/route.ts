@@ -610,7 +610,7 @@ async function showProductDetails(chatId: number, productId: string) {
         await sendTelegramMessage(
           chatId,
           message,
-          { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+          { reply_markup: keyboard },
           "Markdown",
         )
       }
@@ -618,7 +618,7 @@ async function showProductDetails(chatId: number, productId: string) {
       await sendTelegramMessage(
         chatId,
         message,
-        { reply_markup: { inline_keyboard: keyboard.inline_keyboard } },
+        { reply_markup: keyboard },
         "Markdown",
       )
     }
@@ -1654,7 +1654,7 @@ async function answerCallbackQuery(callbackQueryId: string, text?: string) {
     const response = await fetch(`${BOT_API_URL}/answerCallbackQuery`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.JSON.stringify(payload),
+      body: JSON.stringify(payload),
     })
 
     const result = await response.json()
