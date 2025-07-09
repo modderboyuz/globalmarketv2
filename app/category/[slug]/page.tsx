@@ -26,10 +26,10 @@ interface Product {
   product_type: string
   brand: string
   author: string
-  rating: number
+  average_rating: number
   has_delivery: boolean
   categories: {
-    name_uz: string
+    name: string
     icon: string
   }
   users: {
@@ -42,7 +42,7 @@ interface Product {
 
 interface Category {
   id: string
-  name_uz: string
+  name: string
   slug: string
   icon: string
   description: string
@@ -84,7 +84,7 @@ export default function CategoryPage() {
         .select(`
           *,
           categories (
-            name_uz,
+            name,
             icon
           ),
           users (
@@ -95,6 +95,8 @@ export default function CategoryPage() {
           )
         `)
         .eq("category_id", categoryData.id)
+        .eq("is_active", true)
+        .eq("is_approved", true)
         .gt("stock_quantity", 0)
 
       // Apply search filter
@@ -125,7 +127,7 @@ export default function CategoryPage() {
       // Apply sorting
       switch (sortBy) {
         case "popular":
-          query = query.order("order_count", { ascending: false })
+          query = query.order("popularity_score", { ascending: false })
           break
         case "price-low":
           query = query.order("price", { ascending: true })
@@ -134,13 +136,13 @@ export default function CategoryPage() {
           query = query.order("price", { ascending: false })
           break
         case "rating":
-          query = query.order("rating", { ascending: false })
+          query = query.order("average_rating", { ascending: false })
           break
         case "newest":
           query = query.order("created_at", { ascending: false })
           break
         default:
-          query = query.order("order_count", { ascending: false })
+          query = query.order("popularity_score", { ascending: false })
       }
 
       const { data: productsData, error: productsError } = await query.limit(50)
@@ -219,9 +221,9 @@ export default function CategoryPage() {
               <span className="text-2xl">{category.icon}</span>
             </div>
             <div>
-              <h1 className="text-4xl font-bold gradient-text">{category.name_uz}</h1>
+              <h1 className="text-4xl font-bold gradient-text">{category.name}</h1>
               <p className="text-gray-600 text-lg">
-                {category.description || `${category.name_uz} kategoriyasidagi mahsulotlar`}
+                {category.description || `${category.name} kategoriyasidagi mahsulotlar`}
               </p>
             </div>
           </div>
@@ -374,7 +376,7 @@ export default function CategoryPage() {
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-1">
                           <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                          <span className="text-sm font-medium">{product.rating}</span>
+                          <span className="text-sm font-medium">{product.average_rating}</span>
                           <span className="text-sm text-gray-500">({product.order_count})</span>
                         </div>
                         <span className="text-sm text-gray-500">{product.order_count} marta sotilgan</span>

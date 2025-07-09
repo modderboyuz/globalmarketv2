@@ -26,10 +26,10 @@ interface Product {
   product_type: string
   brand: string
   author: string
-  rating: number
+  average_rating: number
   has_delivery: boolean
   categories: {
-    name_uz: string
+    name: string
     icon: string
   }
   users: {
@@ -42,7 +42,7 @@ interface Product {
 
 interface Category {
   id: string
-  name_uz: string
+  name: string
   slug: string
   icon: string
 }
@@ -82,7 +82,7 @@ export default function ProductsPage() {
         .select(`
           *,
           categories (
-            name_uz,
+            name,
             icon
           ),
           users (
@@ -92,6 +92,8 @@ export default function ProductsPage() {
             seller_rating
           )
         `)
+        .eq("is_active", true)
+        .eq("is_approved", true)
         .gt("stock_quantity", 0)
 
       // Apply category filter
@@ -130,7 +132,7 @@ export default function ProductsPage() {
       // Apply sorting
       switch (sortBy) {
         case "popular":
-          query = query.order("order_count", { ascending: false })
+          query = query.order("popularity_score", { ascending: false })
           break
         case "price-low":
           query = query.order("price", { ascending: true })
@@ -139,13 +141,13 @@ export default function ProductsPage() {
           query = query.order("price", { ascending: false })
           break
         case "rating":
-          query = query.order("rating", { ascending: false })
+          query = query.order("average_rating", { ascending: false })
           break
         case "newest":
           query = query.order("created_at", { ascending: false })
           break
         default:
-          query = query.order("order_count", { ascending: false })
+          query = query.order("popularity_score", { ascending: false })
       }
 
       const { data, error } = await query.limit(50)
@@ -211,7 +213,7 @@ export default function ProductsPage() {
                 <SelectItem value="all">Barcha kategoriyalar</SelectItem>
                 {categories.map((category) => (
                   <SelectItem key={category.id} value={category.slug}>
-                    {category.icon} {category.name_uz}
+                    {category.icon} {category.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -295,7 +297,7 @@ export default function ProductsPage() {
                       {/* Badges */}
                       <div className="absolute top-3 left-3 flex flex-col gap-2">
                         <Badge className="badge-beautiful border-blue-200 text-blue-700">
-                          {product.categories?.icon} {product.categories?.name_uz}
+                          {product.categories?.icon} {product.categories?.name}
                         </Badge>
                         {product.users?.is_verified_seller && (
                           <Badge className="badge-beautiful border-green-200 text-green-700">
@@ -361,7 +363,7 @@ export default function ProductsPage() {
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-1">
                           <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                          <span className="text-sm font-medium">{product.rating}</span>
+                          <span className="text-sm font-medium">{product.average_rating}</span>
                           <span className="text-sm text-gray-500">({product.order_count})</span>
                         </div>
                         <span className="text-sm text-gray-500">{product.order_count} marta sotilgan</span>
