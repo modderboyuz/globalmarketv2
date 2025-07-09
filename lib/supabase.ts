@@ -14,3 +14,6 @@ export const getSupabaseClient = () => {
   }
   return supabaseClient
 }
+
+// Re-export createClient so other modules can import it directly
+export { createClient }

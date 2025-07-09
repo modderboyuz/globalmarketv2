@@ -8,7 +8,6 @@ import Link from "next/link"
 import Image from "next/image"
 import { AdBanner } from "@/components/layout/ad-banner"
 import { BookCategorySection } from "@/components/home/book-category-section"
-import { PopularBooksCarousel } from "@/components/home/popular-books-carousel"
 
 interface Product {
   id: string
@@ -53,7 +52,7 @@ async function fetchData() {
       .from("products")
       .select(`
         *,
-        seller:users(full_name, company_name, is_verified_seller)
+        seller:users!products_seller_id_fkey(full_name, company_name, is_verified_seller)
       `)
       .eq("is_active", true)
       .eq("is_approved", true)
@@ -70,7 +69,7 @@ async function fetchData() {
       .from("products")
       .select(`
         *,
-        seller:users(full_name, company_name, is_verified_seller)
+        seller:users!products_seller_id_fkey(full_name, company_name, is_verified_seller)
       `)
       .eq("is_active", true)
       .eq("is_approved", true)
@@ -86,8 +85,8 @@ async function fetchData() {
       .from("products")
       .select(`
         *,
-        seller:users(full_name, company_name, is_verified_seller),
-        category:categories(name, slug)
+        seller:users!products_seller_id_fkey(full_name, company_name, is_verified_seller),
+        category:categories!products_category_id_fkey(name, slug)
       `)
       .eq("is_active", true)
       .eq("is_approved", true)
@@ -104,8 +103,8 @@ async function fetchData() {
       .from("products")
       .select(`
         *,
-        seller:users(full_name, company_name, is_verified_seller),
-        category:categories(name, slug)
+        seller:users!products_seller_id_fkey(full_name, company_name, is_verified_seller),
+        category:categories!products_category_id_fkey(name, slug)
       `)
       .eq("is_active", true)
       .eq("is_approved", true)
@@ -233,26 +232,11 @@ export default async function HomePage() {
       {/* Ad Banner */}
       <AdBanner />
 
-      {/* Filter Buttons */}
-      <div className="container mx-auto px-4 py-4 sm:py-6">
-        <div className="flex flex-wrap gap-2 sm:gap-4 justify-center">
-          <Button variant="outline" className="bg-white text-xs sm:text-sm">
-            🛡️ Arzon va kafolatli
-          </Button>
-          <Button variant="outline" className="bg-white text-xs sm:text-sm">
-            🔥 Eng mashhurlari
-          </Button>
-          <Button variant="outline" className="bg-white text-xs sm:text-sm">
-            👑 Top sotuvchilar
-          </Button>
-        </div>
-      </div>
-
       {/* Categories */}
       {data.categories.length > 0 && (
         <section className="container mx-auto px-4 py-6 sm:py-8">
-          <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Kategoriyalar</h2>
-          <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+          <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">📂 Kategoriyalar</h2>
+          <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
             {data.categories.map((category) => (
               <CategoryCard key={category.id} category={category} />
             ))}
@@ -264,7 +248,7 @@ export default async function HomePage() {
       {data.featuredProducts.length > 0 && (
         <section className="container mx-auto px-4 py-6 sm:py-8">
           <div className="flex items-center justify-between mb-4 sm:mb-6">
-            <h2 className="text-xl sm:text-2xl font-bold">Tavsiya etilgan mahsulotlar</h2>
+            <h2 className="text-xl sm:text-2xl font-bold">⭐ Tavsiya etilgan mahsulotlar</h2>
             <Link href="/products">
               <Button variant="outline" size="sm">
                 Barchasini ko'rish
@@ -283,30 +267,6 @@ export default async function HomePage() {
       <Suspense fallback={<div>Loading books...</div>}>
         <BookCategorySection />
       </Suspense>
-
-      {/* Popular Books Carousel */}
-      <Suspense fallback={<div>Loading popular books...</div>}>
-        <PopularBooksCarousel />
-      </Suspense>
-
-      {/* Books */}
-      {data.books.length > 0 && (
-        <section className="container mx-auto px-4 py-6 sm:py-8">
-          <div className="flex items-center justify-between mb-4 sm:mb-6">
-            <h2 className="text-xl sm:text-2xl font-bold">📚 Kitoblar</h2>
-            <Link href="/category/kitoblar">
-              <Button variant="outline" size="sm">
-                Barcha kitoblar
-              </Button>
-            </Link>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-            {data.books.map((product) => (
-              <ProductCard key={product.id} product={product} />
-            ))}
-          </div>
-        </section>
-      )}
 
       {/* Other Products */}
       {data.otherProducts.length > 0 && (
@@ -350,7 +310,7 @@ export default async function HomePage() {
       <section className="bg-white py-12 sm:py-16">
         <div className="container mx-auto px-4">
           <div className="text-center mb-8 sm:mb-12">
-            <h2 className="text-2xl sm:text-3xl font-bold mb-4">Biz bilan bog'laning</h2>
+            <h2 className="text-2xl sm:text-3xl font-bold mb-4">📞 Biz bilan bog'laning</h2>
             <p className="text-gray-600 max-w-2xl mx-auto text-sm sm:text-base">
               Savollaringiz bormi? Biz sizga yordam berishga tayyormiz. Quyidagi usullar orqali biz bilan
               bog'lanishingiz mumkin.
@@ -361,7 +321,7 @@ export default async function HomePage() {
             <Card>
               <CardContent className="p-4 sm:p-6 text-center">
                 <Phone className="h-8 w-8 sm:h-12 sm:w-12 text-blue-600 mx-auto mb-4" />
-                <h3 className="font-semibold mb-2">Telefon</h3>
+                <h3 className="font-semibold mb-2">📱 Telefon</h3>
                 <p className="text-gray-600 text-sm sm:text-base">+998 95 865 75 00</p>
                 <Button className="mt-4" size="sm">
                   Qo'ng'iroq qilish
@@ -372,7 +332,7 @@ export default async function HomePage() {
             <Card>
               <CardContent className="p-4 sm:p-6 text-center">
                 <Mail className="h-8 w-8 sm:h-12 sm:w-12 text-blue-600 mx-auto mb-4" />
-                <h3 className="font-semibold mb-2">Email</h3>
+                <h3 className="font-semibold mb-2">📧 Email</h3>
                 <p className="text-gray-600 text-sm sm:text-base">info@globalmarket.uz</p>
                 <Button className="mt-4 bg-transparent" size="sm" variant="outline">
                   Email yuborish
@@ -383,7 +343,7 @@ export default async function HomePage() {
             <Card>
               <CardContent className="p-4 sm:p-6 text-center">
                 <MapPin className="h-8 w-8 sm:h-12 sm:w-12 text-blue-600 mx-auto mb-4" />
-                <h3 className="font-semibold mb-2">Manzil</h3>
+                <h3 className="font-semibold mb-2">📍 Manzil</h3>
                 <p className="text-gray-600 text-sm sm:text-base">Qashqadaryo viloyati, G'uzor tumani</p>
                 <Button className="mt-4 bg-transparent" size="sm" variant="outline">
                   Xaritada ko'rish

@@ -119,9 +119,9 @@ export default function SellerLayout({ children }: SellerLayoutProps) {
             </Button>
             <h1 className="text-lg font-semibold">Sotuvchi paneli</h1>
           </div>
-          <Button variant="ghost" size="sm" onClick={switchToCustomer}>
+          <Button variant="ghost" size="sm" onClick={switchToCustomer} className="text-blue-600">
             <ArrowLeft className="h-4 w-4 mr-2" />
-            Mijoz rejimi
+            Mijozga o'tish
           </Button>
         </div>
       </div>
@@ -203,7 +203,7 @@ export default function SellerLayout({ children }: SellerLayoutProps) {
             <div className="p-4 border-t border-gray-200 space-y-2">
               <Button variant="outline" className="w-full justify-start bg-transparent" onClick={switchToCustomer}>
                 <ArrowLeft className="h-4 w-4 mr-2" />
-                Mijoz rejimi
+                Mijozga o'tish
               </Button>
               <Button variant="ghost" className="w-full justify-start text-red-600" onClick={handleLogout}>
                 <LogOut className="h-4 w-4 mr-2" />
@@ -229,9 +229,13 @@ export default function SellerLayout({ children }: SellerLayoutProps) {
                 </h1>
                 <p className="text-gray-600">Biznesingizni boshqaring va rivojlantiring</p>
               </div>
-              <Button variant="outline" onClick={switchToCustomer}>
+              <Button
+                variant="outline"
+                onClick={switchToCustomer}
+                className="text-blue-600 border-blue-200 bg-transparent"
+              >
                 <ArrowLeft className="h-4 w-4 mr-2" />
-                Mijoz rejimiga o'tish
+                Mijozga o'tish
               </Button>
             </div>
           </div>
