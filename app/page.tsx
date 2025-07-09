@@ -1,28 +1,14 @@
-"use client"
-
-import type React from "react"
-
-import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
-import Image from "next/image"
-import { Card, CardContent } from "@/components/ui/card"
+import { Suspense } from "react"
+import { createSupabaseClient } from "@/lib/supabase-server"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import {
-  ShoppingCart,
-  Star,
-  Heart,
-  Award,
-  TrendingUp,
-  Users,
-  ChevronRight,
-  DollarSign,
-  Crown,
-  Store,
-} from "lucide-react"
-import { supabase } from "@/lib/supabase"
-import { toast } from "sonner"
+import { Star, Heart, ShoppingCart, Phone, MapPin, Mail } from "lucide-react"
+import Link from "next/link"
+import Image from "next/image"
 import { AdBanner } from "@/components/layout/ad-banner"
+import { BookCategorySection } from "@/components/home/book-category-section"
+import { PopularBooksCarousel } from "@/components/home/popular-books-carousel"
 
 interface Product {
   id: string
@@ -30,14 +16,10 @@ interface Product {
   description: string
   price: number
   image_url: string
-  stock_quantity: number
   average_rating: number
+  like_count: number
   order_count: number
-  categories: {
-    name: string
-    icon: string
-  }
-  users: {
+  seller: {
     full_name: string
     company_name: string
     is_verified_seller: boolean
@@ -49,475 +31,368 @@ interface Category {
   name: string
   slug: string
   icon: string
-  description: string
 }
 
-interface Seller {
-  id: string
-  full_name: string
-  company_name: string
-  is_verified_seller: boolean
-  seller_rating: number
-  total_sales: number
-  avatar_url: string
+async function fetchData() {
+  const supabase = createSupabaseClient()
+
+  try {
+    // Fetch categories
+    const { data: categories, error: categoriesError } = await supabase
+      .from("categories")
+      .select("*")
+      .eq("is_active", true)
+      .order("sort_order")
+
+    if (categoriesError) {
+      console.error("Categories error:", categoriesError)
+    }
+
+    // Fetch featured products
+    const { data: featuredProducts, error: featuredError } = await supabase
+      .from("products")
+      .select(`
+        *,
+        seller:users(full_name, company_name, is_verified_seller)
+      `)
+      .eq("is_active", true)
+      .eq("is_approved", true)
+      .eq("is_featured", true)
+      .order("popularity_score", { ascending: false })
+      .limit(8)
+
+    if (featuredError) {
+      console.error("Featured products error:", featuredError)
+    }
+
+    // Fetch popular products
+    const { data: popularProducts, error: popularError } = await supabase
+      .from("products")
+      .select(`
+        *,
+        seller:users(full_name, company_name, is_verified_seller)
+      `)
+      .eq("is_active", true)
+      .eq("is_approved", true)
+      .order("popularity_score", { ascending: false })
+      .limit(12)
+
+    if (popularError) {
+      console.error("Popular products error:", popularError)
+    }
+
+    // Fetch books specifically
+    const { data: books, error: booksError } = await supabase
+      .from("products")
+      .select(`
+        *,
+        seller:users(full_name, company_name, is_verified_seller),
+        category:categories(name, slug)
+      `)
+      .eq("is_active", true)
+      .eq("is_approved", true)
+      .eq("product_type", "book")
+      .order("created_at", { ascending: false })
+      .limit(8)
+
+    if (booksError) {
+      console.error("Books error:", booksError)
+    }
+
+    // Fetch other products (non-books)
+    const { data: otherProducts, error: otherError } = await supabase
+      .from("products")
+      .select(`
+        *,
+        seller:users(full_name, company_name, is_verified_seller),
+        category:categories(name, slug)
+      `)
+      .eq("is_active", true)
+      .eq("is_approved", true)
+      .neq("product_type", "book")
+      .order("created_at", { ascending: false })
+      .limit(8)
+
+    if (otherError) {
+      console.error("Other products error:", otherError)
+    }
+
+    return {
+      categories: categories || [],
+      featuredProducts: featuredProducts || [],
+      popularProducts: popularProducts || [],
+      books: books || [],
+      otherProducts: otherProducts || [],
+    }
+  } catch (error) {
+    console.error("Database error:", error)
+    return {
+      categories: [],
+      featuredProducts: [],
+      popularProducts: [],
+      books: [],
+      otherProducts: [],
+    }
+  }
 }
 
-export default function HomePage() {
-  const router = useRouter()
-  const [user, setUser] = useState<any>(null)
-  const [cheapProducts, setCheapProducts] = useState<Product[]>([])
-  const [popularProducts, setPopularProducts] = useState<Product[]>([])
-  const [bookProducts, setBookProducts] = useState<Product[]>([])
-  const [otherProducts, setOtherProducts] = useState<Product[]>([])
-  const [topSellers, setTopSellers] = useState<Seller[]>([])
-  const [searchQuery, setSearchQuery] = useState("")
-  const [loading, setLoading] = useState(true)
-  const [favorites, setFavorites] = useState<string[]>([])
-  const [activeFilter, setActiveFilter] = useState<"cheap" | "popular" | "sellers">("cheap")
-
-  useEffect(() => {
-    checkAuth()
-    fetchData()
-  }, [])
-
-  const checkAuth = async () => {
-    try {
-      const {
-        data: { user: currentUser },
-      } = await supabase.auth.getUser()
-      setUser(currentUser)
-
-      if (currentUser) {
-        fetchFavorites(currentUser.id)
-      }
-    } catch (error) {
-      console.error("Auth check error:", error)
-    }
-  }
-
-  const fetchData = async () => {
-    try {
-      // Fetch cheap products (arzon mahsulotlar)
-      const { data: cheapData, error: cheapError } = await supabase
-        .from("products")
-        .select(`
-          *,
-          categories (name, icon),
-          users (full_name, company_name, is_verified_seller)
-        `)
-        .eq("is_active", true)
-        .eq("is_approved", true)
-        .gt("stock_quantity", 0)
-        .order("price", { ascending: true })
-        .limit(8)
-
-      if (cheapError) throw cheapError
-      setCheapProducts(shuffleArray(cheapData || []))
-
-      // Fetch popular products (mashhur mahsulotlar)
-      const { data: popularData, error: popularError } = await supabase
-        .from("products")
-        .select(`
-          *,
-          categories (name, icon),
-          users (full_name, company_name, is_verified_seller)
-        `)
-        .eq("is_active", true)
-        .eq("is_approved", true)
-        .gt("stock_quantity", 0)
-        .order("popularity_score", { ascending: false })
-        .limit(8)
-
-      if (popularError) throw popularError
-      setPopularProducts(shuffleArray(popularData || []))
-
-      // Fetch books (kitoblar kategoriyasidan)
-      const { data: booksData, error: booksError } = await supabase
-        .from("products")
-        .select(`
-          *,
-          categories!inner (name, icon),
-          users (full_name, company_name, is_verified_seller)
-        `)
-        .eq("categories.slug", "kitoblar")
-        .eq("is_active", true)
-        .eq("is_approved", true)
-        .gt("stock_quantity", 0)
-        .order("order_count", { ascending: false })
-        .limit(8)
-
-      if (booksError) throw booksError
-      setBookProducts(shuffleArray(booksData || []))
-
-      // Fetch other random products
-      const { data: otherData, error: otherError } = await supabase
-        .from("products")
-        .select(`
-          *,
-          categories (name, icon),
-          users (full_name, company_name, is_verified_seller)
-        `)
-        .eq("is_active", true)
-        .eq("is_approved", true)
-        .gt("stock_quantity", 0)
-        .order("created_at", { ascending: false })
-        .limit(12)
-
-      if (otherError) throw otherError
-      setOtherProducts(shuffleArray(otherData || []))
-
-      // Fetch top sellers
-      const { data: sellersData, error: sellersError } = await supabase
-        .from("users")
-        .select("id, full_name, company_name, is_verified_seller, seller_rating, total_sales, avatar_url")
-        .eq("is_verified_seller", true)
-        .order("seller_rating", { ascending: false })
-        .limit(6)
-
-      if (sellersError) throw sellersError
-      setTopSellers(sellersData || [])
-    } catch (error) {
-      console.error("Error fetching data:", error)
-      toast.error("Ma'lumotlarni yuklashda xatolik")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const shuffleArray = (array: any[]) => {
-    const shuffled = [...array]
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1))
-      ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
-    }
-    return shuffled
-  }
-
-  const fetchFavorites = async (userId: string) => {
-    try {
-      const { data, error } = await supabase.from("favorites").select("product_id").eq("user_id", userId)
-
-      if (error) throw error
-      setFavorites(data?.map((fav) => fav.product_id) || [])
-    } catch (error) {
-      console.error("Error fetching favorites:", error)
-    }
-  }
-
-  const toggleFavorite = async (productId: string) => {
-    if (!user) {
-      toast.error("Sevimlilar uchun tizimga kiring")
-      router.push("/login")
-      return
-    }
-
-    try {
-      const isFavorite = favorites.includes(productId)
-
-      if (isFavorite) {
-        const { error } = await supabase.from("favorites").delete().eq("user_id", user.id).eq("product_id", productId)
-
-        if (error) throw error
-        setFavorites(favorites.filter((id) => id !== productId))
-        toast.success("Sevimlilardan olib tashlandi")
-      } else {
-        const { error } = await supabase.from("favorites").insert({
-          user_id: user.id,
-          product_id: productId,
-        })
-
-        if (error) throw error
-        setFavorites([...favorites, productId])
-        toast.success("Sevimlilarga qo'shildi")
-      }
-    } catch (error) {
-      console.error("Error toggling favorite:", error)
-      toast.error("Xatolik yuz berdi")
-    }
-  }
-
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (searchQuery.trim()) {
-      router.push(`/search?q=${encodeURIComponent(searchQuery.trim())}`)
-    }
-  }
-
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat("uz-UZ").format(price) + " so'm"
-  }
-
-  const getCurrentProducts = () => {
-    switch (activeFilter) {
-      case "cheap":
-        return cheapProducts
-      case "popular":
-        return popularProducts
-      case "sellers":
-        return topSellers
-      default:
-        return cheapProducts
-    }
-  }
-
-  const renderProductCard = (product: Product) => (
-    <Card
-      key={product.id}
-      className="card-hover cursor-pointer group overflow-hidden"
-      onClick={() => router.push(`/product/${product.id}`)}
-    >
-      <CardContent className="p-0">
-        <div className="relative aspect-square bg-gray-100 overflow-hidden">
-          <Image
-            src={product.image_url || "/placeholder.svg?height=300&width=300"}
-            alt={product.name}
-            fill
-            className="object-cover group-hover:scale-110 transition-transform duration-500"
-          />
-
-          <div className="absolute top-3 left-3 flex flex-col gap-2">
-            <Badge className="badge-beautiful border-blue-200 text-blue-700">
-              {product.categories?.icon} {product.categories?.name}
-            </Badge>
-            {product.users?.is_verified_seller && (
-              <Badge className="badge-beautiful border-green-200 text-green-700">
-                <Award className="h-3 w-3 mr-1" />
-                Tasdiqlangan
-              </Badge>
-            )}
-          </div>
-
-          <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-            <Button
-              size="icon"
-              variant="secondary"
-              className={`rounded-full bg-white/90 backdrop-blur-sm border-2 border-white/50 hover:bg-white ${
-                favorites.includes(product.id) ? "text-red-500" : "text-gray-600"
-              }`}
-              onClick={(e) => {
-                e.stopPropagation()
-                toggleFavorite(product.id)
-              }}
-            >
-              <Heart className={`h-4 w-4 ${favorites.includes(product.id) ? "fill-current" : ""}`} />
-            </Button>
-          </div>
-
-          {product.stock_quantity < 10 && product.stock_quantity > 0 && (
-            <div className="absolute bottom-3 left-3">
-              <Badge variant="destructive" className="text-xs">
-                Kam qoldi: {product.stock_quantity}
-              </Badge>
-            </div>
-          )}
-        </div>
-
-        <div className="p-4">
-          <div className="mb-2">
-            <h3 className="font-semibold text-lg line-clamp-2 group-hover:text-blue-600 transition-colors duration-300">
-              {product.name}
-            </h3>
-          </div>
-
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-              <span className="text-white text-xs font-bold">
-                {product.users?.company_name?.charAt(0) || product.users?.full_name?.charAt(0) || "G"}
-              </span>
-            </div>
-            <span className="text-sm text-gray-600">
-              {product.users?.company_name || product.users?.full_name || "GlobalMarket"}
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-1">
-              <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-              <span className="text-sm font-medium">{product.average_rating}</span>
-              <span className="text-sm text-gray-500">({product.order_count})</span>
-            </div>
-            <div className="flex items-center gap-1 text-green-600">
-              <TrendingUp className="h-3 w-3" />
-              <span className="text-xs">Mashhur</span>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div className="text-xl font-bold text-blue-600">{formatPrice(product.price)}</div>
+function ProductCard({ product }: { product: Product }) {
+  return (
+    <Link href={`/product/${product.id}`}>
+      <Card className="group hover:shadow-lg transition-shadow duration-200 cursor-pointer">
+        <CardContent className="p-3 sm:p-4">
+          <div className="relative aspect-square mb-3 overflow-hidden rounded-lg bg-gray-100">
+            <Image
+              src={product.image_url || "/placeholder.svg?height=200&width=200"}
+              alt={product.name}
+              fill
+              className="object-cover group-hover:scale-105 transition-transform duration-200"
+            />
             <Button
               size="sm"
-              className="bg-blue-600 hover:bg-blue-700 px-3 py-1 text-sm"
-              onClick={(e) => {
-                e.stopPropagation()
-                router.push(`/product/${product.id}`)
-              }}
+              variant="ghost"
+              className="absolute top-2 right-2 h-6 w-6 sm:h-8 sm:w-8 p-0 bg-white/80 hover:bg-white"
             >
-              <ShoppingCart className="h-4 w-4 mr-1" />
-              Sotib olish
+              <Heart className="h-3 w-3 sm:h-4 sm:w-4" />
             </Button>
           </div>
-        </div>
-      </CardContent>
-    </Card>
-  )
 
-  const renderSellerCard = (seller: Seller) => (
-    <Card
-      key={seller.id}
-      className="card-hover cursor-pointer group"
-      onClick={() => router.push(`/seller/${seller.id}`)}
-    >
-      <CardContent className="p-6 text-center">
-        <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xl font-bold">
-          {seller.company_name?.charAt(0) || seller.full_name?.charAt(0) || "S"}
-        </div>
-        <h3 className="font-semibold text-gray-800 group-hover:text-blue-600 transition-colors duration-300 mb-2">
-          {seller.company_name || seller.full_name}
-        </h3>
-        <div className="flex items-center justify-center gap-1 mb-2">
-          <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-          <span className="text-sm font-medium">{seller.seller_rating}</span>
-        </div>
-        <p className="text-sm text-gray-500">{seller.total_sales} ta sotilgan</p>
-        {seller.is_verified_seller && (
-          <Badge className="mt-2 badge-beautiful border-green-200 text-green-700">
-            <Award className="h-3 w-3 mr-1" />
-            Tasdiqlangan
-          </Badge>
-        )}
-      </CardContent>
-    </Card>
-  )
+          <div className="space-y-2">
+            <h3 className="font-medium text-xs sm:text-sm line-clamp-2 group-hover:text-blue-600 transition-colors">
+              {product.name}
+            </h3>
 
-  if (loading) {
-    return (
-      <div className="page-container">
-        <div className="container mx-auto px-4 py-8">
-          <div className="animate-pulse space-y-8">
-            <div className="h-64 bg-gray-200 rounded-2xl"></div>
-            <div className="h-16 bg-gray-200 rounded-2xl"></div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {[...Array(8)].map((_, i) => (
-                <div key={i} className="h-80 bg-gray-200 rounded-2xl"></div>
-              ))}
+            <div className="flex items-center gap-1">
+              <div className="flex items-center">
+                {[...Array(5)].map((_, i) => (
+                  <Star
+                    key={i}
+                    className={`h-2 w-2 sm:h-3 sm:w-3 ${
+                      i < Math.floor(product.average_rating) ? "fill-yellow-400 text-yellow-400" : "text-gray-300"
+                    }`}
+                  />
+                ))}
+              </div>
+              <span className="text-xs text-gray-500">({product.order_count})</span>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-sm sm:text-lg text-blue-600">{product.price.toLocaleString()} so'm</span>
+              <div className="flex items-center gap-1 text-xs text-gray-500">
+                <Heart className="h-2 w-2 sm:h-3 sm:w-3" />
+                {product.like_count}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-600 truncate">
+                {product.seller?.company_name || product.seller?.full_name}
+              </span>
+              {product.seller?.is_verified_seller && (
+                <Badge variant="secondary" className="text-xs">
+                  ✓
+                </Badge>
+              )}
+            </div>
+
+            <div className="flex gap-1 sm:gap-2 pt-2">
+              <Button size="sm" className="flex-1 text-xs">
+                <ShoppingCart className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                <span className="hidden sm:inline">Sotib olish</span>
+                <span className="sm:hidden">Sotish</span>
+              </Button>
+              <Button size="sm" variant="outline" className="px-2 bg-transparent">
+                <Heart className="h-3 w-3 sm:h-4 sm:w-4" />
+              </Button>
             </div>
           </div>
-        </div>
-      </div>
-    )
-  }
+        </CardContent>
+      </Card>
+    </Link>
+  )
+}
+
+function CategoryCard({ category }: { category: Category }) {
+  return (
+    <Link href={`/category/${category.slug}`}>
+      <Card className="hover:shadow-md transition-shadow cursor-pointer">
+        <CardContent className="p-4 sm:p-6 text-center">
+          <div className="text-2xl sm:text-4xl mb-2 sm:mb-3">{category.icon}</div>
+          <h3 className="font-medium text-xs sm:text-sm">{category.name}</h3>
+        </CardContent>
+      </Card>
+    </Link>
+  )
+}
+
+export default async function HomePage() {
+  const data = await fetchData()
 
   return (
-    <div className="page-container">
-      <div className="container mx-auto px-4 py-4">
-        {/* Ad Banner - Larger and closer to top */}
-        <div className="mb-6">
-          <div className="h-48 md:h-64 lg:h-80">
-            <AdBanner />
-          </div>
-        </div>
+    <div className="min-h-screen bg-gray-50">
+      {/* Ad Banner */}
+      <AdBanner />
 
-        {/* Filter Buttons */}
-        <div className="flex justify-center gap-4 mb-8">
-          <Button
-            variant={activeFilter === "cheap" ? "default" : "outline"}
-            onClick={() => setActiveFilter("cheap")}
-            className="flex items-center gap-2 px-6 py-3 rounded-2xl"
-          >
-            <DollarSign className="h-5 w-5" />
-            Arzon va kafolatli
+      {/* Filter Buttons */}
+      <div className="container mx-auto px-4 py-4 sm:py-6">
+        <div className="flex flex-wrap gap-2 sm:gap-4 justify-center">
+          <Button variant="outline" className="bg-white text-xs sm:text-sm">
+            🛡️ Arzon va kafolatli
           </Button>
-          <Button
-            variant={activeFilter === "popular" ? "default" : "outline"}
-            onClick={() => setActiveFilter("popular")}
-            className="flex items-center gap-2 px-6 py-3 rounded-2xl"
-          >
-            <Crown className="h-5 w-5" />
-            Eng mashhurlari
+          <Button variant="outline" className="bg-white text-xs sm:text-sm">
+            🔥 Eng mashhurlari
           </Button>
-          <Button
-            variant={activeFilter === "sellers" ? "default" : "outline"}
-            onClick={() => setActiveFilter("sellers")}
-            className="flex items-center gap-2 px-6 py-3 rounded-2xl"
-          >
-            <Store className="h-5 w-5" />
-            Top sotuvchilar
+          <Button variant="outline" className="bg-white text-xs sm:text-sm">
+            👑 Top sotuvchilar
           </Button>
-        </div>
-
-        {/* Dynamic Content Based on Filter */}
-        <div className="mb-12">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-bold text-gray-800">
-              {activeFilter === "cheap" && "Arzon va kafolatli mahsulotlar"}
-              {activeFilter === "popular" && "Eng mashhur mahsulotlar"}
-              {activeFilter === "sellers" && "Top sotuvchilar"}
-            </h2>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {activeFilter === "sellers"
-              ? topSellers.map(renderSellerCard)
-              : getCurrentProducts().map(renderProductCard)}
-          </div>
-        </div>
-
-        {/* Books Section */}
-        <div className="mb-12">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-bold text-gray-800">📚 Kitoblar</h2>
-            <Button variant="outline" onClick={() => router.push("/category/kitoblar")}>
-              Barchasini ko'rish
-              <ChevronRight className="h-4 w-4 ml-2" />
-            </Button>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {bookProducts.map(renderProductCard)}
-          </div>
-        </div>
-
-        {/* Other Products Section */}
-        <div className="mb-12">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-bold text-gray-800">Boshqa mahsulotlar</h2>
-            <Button variant="outline" onClick={() => router.push("/products")}>
-              Barchasini ko'rish
-              <ChevronRight className="h-4 w-4 ml-2" />
-            </Button>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {otherProducts.map(renderProductCard)}
-          </div>
-        </div>
-
-        {/* Contact Section */}
-        <div className="text-center bg-gradient-to-r from-blue-50 to-purple-50 rounded-3xl p-8 md:p-12">
-          <h2 className="text-3xl md:text-4xl font-bold gradient-text mb-4">Bizga murojaat qiling!</h2>
-          <p className="text-xl text-gray-600 mb-8 max-w-2xl mx-auto">
-            Savollaringiz bormi? Yordam kerakmi? Biz bilan bog'laning!
-          </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button
-              size="lg"
-              className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-2xl"
-              onClick={() => router.push("/contact")}
-            >
-              <Users className="h-5 w-5 mr-2" />
-              Murojaat qilish
-            </Button>
-            <Button
-              size="lg"
-              variant="outline"
-              className="border-2 border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white px-8 py-3 rounded-2xl bg-transparent"
-              onClick={() => window.open("tel:+998958657500")}
-            >
-              📞 Qo'ng'iroq qilish
-            </Button>
-          </div>
         </div>
       </div>
+
+      {/* Categories */}
+      {data.categories.length > 0 && (
+        <section className="container mx-auto px-4 py-6 sm:py-8">
+          <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Kategoriyalar</h2>
+          <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+            {data.categories.map((category) => (
+              <CategoryCard key={category.id} category={category} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Featured Products */}
+      {data.featuredProducts.length > 0 && (
+        <section className="container mx-auto px-4 py-6 sm:py-8">
+          <div className="flex items-center justify-between mb-4 sm:mb-6">
+            <h2 className="text-xl sm:text-2xl font-bold">Tavsiya etilgan mahsulotlar</h2>
+            <Link href="/products">
+              <Button variant="outline" size="sm">
+                Barchasini ko'rish
+              </Button>
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+            {data.featuredProducts.map((product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Books Section */}
+      <Suspense fallback={<div>Loading books...</div>}>
+        <BookCategorySection />
+      </Suspense>
+
+      {/* Popular Books Carousel */}
+      <Suspense fallback={<div>Loading popular books...</div>}>
+        <PopularBooksCarousel />
+      </Suspense>
+
+      {/* Books */}
+      {data.books.length > 0 && (
+        <section className="container mx-auto px-4 py-6 sm:py-8">
+          <div className="flex items-center justify-between mb-4 sm:mb-6">
+            <h2 className="text-xl sm:text-2xl font-bold">📚 Kitoblar</h2>
+            <Link href="/category/kitoblar">
+              <Button variant="outline" size="sm">
+                Barcha kitoblar
+              </Button>
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+            {data.books.map((product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Other Products */}
+      {data.otherProducts.length > 0 && (
+        <section className="container mx-auto px-4 py-6 sm:py-8">
+          <div className="flex items-center justify-between mb-4 sm:mb-6">
+            <h2 className="text-xl sm:text-2xl font-bold">🛍️ Boshqa mahsulotlar</h2>
+            <Link href="/products">
+              <Button variant="outline" size="sm">
+                Barchasini ko'rish
+              </Button>
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+            {data.otherProducts.map((product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Popular Products */}
+      {data.popularProducts.length > 0 && (
+        <section className="container mx-auto px-4 py-6 sm:py-8">
+          <div className="flex items-center justify-between mb-4 sm:mb-6">
+            <h2 className="text-xl sm:text-2xl font-bold">🔥 Mashhur mahsulotlar</h2>
+            <Link href="/products?sort=popular">
+              <Button variant="outline" size="sm">
+                Barchasini ko'rish
+              </Button>
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+            {data.popularProducts.map((product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Contact Section */}
+      <section className="bg-white py-12 sm:py-16">
+        <div className="container mx-auto px-4">
+          <div className="text-center mb-8 sm:mb-12">
+            <h2 className="text-2xl sm:text-3xl font-bold mb-4">Biz bilan bog'laning</h2>
+            <p className="text-gray-600 max-w-2xl mx-auto text-sm sm:text-base">
+              Savollaringiz bormi? Biz sizga yordam berishga tayyormiz. Quyidagi usullar orqali biz bilan
+              bog'lanishingiz mumkin.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-8">
+            <Card>
+              <CardContent className="p-4 sm:p-6 text-center">
+                <Phone className="h-8 w-8 sm:h-12 sm:w-12 text-blue-600 mx-auto mb-4" />
+                <h3 className="font-semibold mb-2">Telefon</h3>
+                <p className="text-gray-600 text-sm sm:text-base">+998 95 865 75 00</p>
+                <Button className="mt-4" size="sm">
+                  Qo'ng'iroq qilish
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-4 sm:p-6 text-center">
+                <Mail className="h-8 w-8 sm:h-12 sm:w-12 text-blue-600 mx-auto mb-4" />
+                <h3 className="font-semibold mb-2">Email</h3>
+                <p className="text-gray-600 text-sm sm:text-base">info@globalmarket.uz</p>
+                <Button className="mt-4 bg-transparent" size="sm" variant="outline">
+                  Email yuborish
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-4 sm:p-6 text-center">
+                <MapPin className="h-8 w-8 sm:h-12 sm:w-12 text-blue-600 mx-auto mb-4" />
+                <h3 className="font-semibold mb-2">Manzil</h3>
+                <p className="text-gray-600 text-sm sm:text-base">Qashqadaryo viloyati, G'uzor tumani</p>
+                <Button className="mt-4 bg-transparent" size="sm" variant="outline">
+                  Xaritada ko'rish
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </section>
     </div>
   )
 }

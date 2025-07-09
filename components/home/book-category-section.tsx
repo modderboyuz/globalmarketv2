@@ -34,10 +34,19 @@ export function BookCategorySection({ category }: BookCategorySectionProps) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetchBooks()
-  }, [category.id])
+    if (category?.id) {
+      fetchBooks()
+    } else {
+      setLoading(false)
+    }
+  }, [category?.id])
 
   const fetchBooks = async () => {
+    if (!category?.id) {
+      setLoading(false)
+      return
+    }
+
     try {
       const { data, error } = await supabase
         .from("books")
@@ -61,6 +70,11 @@ export function BookCategorySection({ category }: BookCategorySectionProps) {
 
   const handleBookClick = (bookId: string) => {
     router.push(`/book/${bookId}`)
+  }
+
+  // Return null if category is not provided
+  if (!category) {
+    return null
   }
 
   if (loading) {
@@ -95,7 +109,7 @@ export function BookCategorySection({ category }: BookCategorySectionProps) {
           <div className="icon-container">
             <BookOpen className="h-6 w-6" />
           </div>
-          <h2 className="text-2xl md:text-3xl font-bold gradient-text">{category.name_uz}</h2>
+          <h2 className="text-2xl md:text-3xl font-bold gradient-text">{category.name_uz || "Kategoriya"}</h2>
         </div>
         <Button
           variant="outline"

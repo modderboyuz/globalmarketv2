@@ -38,6 +38,7 @@ import {
   BookOpen,
   PenTool,
   Phone,
+  BarChart3,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { AuthModal } from "@/components/auth/auth-modal"
@@ -45,7 +46,7 @@ import { toast } from "sonner"
 
 interface Category {
   id: string
-  name_uz: string
+  name: string
   slug: string
   icon: string
 }
@@ -80,6 +81,7 @@ export function Header() {
         setUser(session?.user)
         if (session?.user) {
           fetchCartCount(session.user.id)
+          fetchUserData(session.user.id)
         }
       } else if (event === "SIGNED_OUT") {
         setUser(null)
@@ -96,9 +98,8 @@ export function Header() {
         data: { user: currentUser },
       } = await supabase.auth.getUser()
 
-      setUser(currentUser)
-
       if (currentUser) {
+        await fetchUserData(currentUser.id)
         await fetchCartCount(currentUser.id)
       }
     } catch (error) {
@@ -108,10 +109,18 @@ export function Header() {
     }
   }
 
+  const fetchUserData = async (userId: string) => {
+    try {
+      const { data: userData } = await supabase.from("users").select("*").eq("id", userId).single()
+      setUser(userData)
+    } catch (error) {
+      console.error("Error fetching user data:", error)
+    }
+  }
+
   const fetchCartCount = async (userId: string) => {
     try {
       const { count } = await supabase.from("cart").select("*", { count: "exact", head: true }).eq("user_id", userId)
-
       setCartCount(count || 0)
     } catch (error) {
       console.error("Error fetching cart count:", error)
@@ -121,7 +130,6 @@ export function Header() {
   const fetchCategories = async () => {
     try {
       const { data, error } = await supabase.from("categories").select("*").order("sort_order").limit(6)
-
       if (error) throw error
       setCategories(data || [])
     } catch (error) {
@@ -242,22 +250,22 @@ export function Header() {
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" className="relative h-8 w-8 rounded-full">
                       <Avatar className="h-8 w-8">
-                        <AvatarImage
-                          src={user.user_metadata?.avatar_url || "/placeholder.svg"}
-                          alt={user.user_metadata?.full_name}
-                        />
+                        <AvatarImage src={user.avatar_url || "/placeholder.svg"} alt={user.full_name} />
                         <AvatarFallback className="bg-gradient-to-br from-blue-500 to-purple-600 text-white">
-                          {user.user_metadata?.full_name?.charAt(0) || user.email?.charAt(0) || "U"}
+                          {user.full_name?.charAt(0) || user.email?.charAt(0) || "U"}
                         </AvatarFallback>
                       </Avatar>
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent className="w-56" align="end" forceMount>
                     <div className="flex flex-col space-y-1 p-2">
-                      <p className="text-sm font-medium leading-none">
-                        {user.user_metadata?.full_name || "Foydalanuvchi"}
-                      </p>
+                      <p className="text-sm font-medium leading-none">{user.full_name || "Foydalanuvchi"}</p>
                       <p className="text-xs leading-none text-muted-foreground">{user.email}</p>
+                      {user.is_verified_seller && (
+                        <Badge variant="default" className="text-xs w-fit bg-green-500">
+                          Tasdiqlangan sotuvchi
+                        </Badge>
+                      )}
                     </div>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => router.push("/profile")}>
@@ -277,14 +285,23 @@ export function Header() {
                       <span>Xabarlar</span>
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => router.push("/become-seller")}>
-                      <Store className="mr-2 h-4 w-4" />
-                      <span>Sotuvchi bo'lish</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => router.push("/sell-product")}>
-                      <Plus className="mr-2 h-4 w-4" />
-                      <span>Mahsulot qo'shish</span>
-                    </DropdownMenuItem>
+                    {user.is_verified_seller ? (
+                      <DropdownMenuItem onClick={() => router.push("/seller/dashboard")}>
+                        <BarChart3 className="mr-2 h-4 w-4" />
+                        <span>Sotuvchi paneli</span>
+                      </DropdownMenuItem>
+                    ) : (
+                      <DropdownMenuItem onClick={() => router.push("/become-seller")}>
+                        <Store className="mr-2 h-4 w-4" />
+                        <span>Sotuvchi bo'lish</span>
+                      </DropdownMenuItem>
+                    )}
+                    {!user.is_verified_seller && (
+                      <DropdownMenuItem onClick={() => router.push("/sell-product")}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        <span>Mahsulot qo'shish</span>
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => router.push("/contact")}>
                       <MessageSquare className="mr-2 h-4 w-4" />
@@ -336,7 +353,7 @@ export function Header() {
                                 className="block select-none space-y-1 rounded-md p-3 leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
                               >
                                 <div className="text-sm font-medium leading-none">
-                                  {category.icon} {category.name_uz}
+                                  {category.icon} {category.name}
                                 </div>
                               </Link>
                             </NavigationMenuLink>
@@ -388,7 +405,7 @@ export function Header() {
                                 className="block select-none space-y-1 rounded-md p-3 leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
                               >
                                 <div className="text-sm font-medium leading-none">
-                                  {category.icon} {category.name_uz}
+                                  {category.icon} {category.name}
                                 </div>
                               </Link>
                             </NavigationMenuLink>
