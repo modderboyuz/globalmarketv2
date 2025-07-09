@@ -5,7 +5,7 @@ import type React from "react"
 import { useState, useEffect } from "react"
 import Link from "next/link"
 import { useRouter, usePathname } from "next/navigation"
-import { createClient } from "@/lib/supabase"
+import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -45,26 +45,54 @@ interface AppUser {
   avatar_url?: string
   role: string
   is_seller: boolean
+  is_verified_seller: boolean
+  is_admin: boolean
   type: string
+}
+
+interface CompanyInfo {
+  name: string
+  logo_url: string
+  favicon_url: string
 }
 
 export function Header() {
   const [user, setUser] = useState<AppUser | null>(null)
+  const [company, setCompany] = useState<CompanyInfo | null>(null)
   const [cartCount, setCartCount] = useState(0)
   const [searchQuery, setSearchQuery] = useState("")
   const [isOpen, setIsOpen] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
-  const supabase = createClient()
 
   const isSellerRoute = pathname?.startsWith("/seller")
 
   useEffect(() => {
     checkUser()
+    fetchCompanyInfo()
+  }, [])
+
+  useEffect(() => {
     if (user) {
       fetchCartCount()
     }
   }, [user])
+
+  const fetchCompanyInfo = async () => {
+    try {
+      const { data } = await supabase.from("company").select("name, logo_url, favicon_url").single()
+      if (data) {
+        setCompany(data)
+        // Update favicon
+        const favicon = document.querySelector("link[rel='icon']") as HTMLLinkElement
+        if (favicon && data.favicon_url) {
+          favicon.href = data.favicon_url
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching company info:", error)
+    }
+  }
 
   const checkUser = async () => {
     try {
@@ -73,7 +101,6 @@ export function Header() {
       } = await supabase.auth.getSession()
       if (session?.user) {
         const { data: userData } = await supabase.from("users").select("*").eq("id", session.user.id).single()
-
         setUser(userData)
       }
     } catch (error) {
@@ -139,11 +166,15 @@ export function Header() {
         <div className="flex h-16 items-center justify-between">
           {/* Logo */}
           <Link href="/" className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-sm">GM</span>
-            </div>
+            {company?.logo_url ? (
+              <img src={company.logo_url || "/placeholder.svg"} alt={company.name} className="h-8 w-auto" />
+            ) : (
+              <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
+                <span className="text-white font-bold text-sm">GM</span>
+              </div>
+            )}
             <span className="font-bold text-xl bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-              GlobalMarket
+              {company?.name || "GlobalMarket"}
             </span>
           </Link>
 
@@ -199,7 +230,7 @@ export function Header() {
           {/* Right Side Actions */}
           <div className="flex items-center space-x-4">
             {/* Mode Switch Buttons */}
-            {user?.is_seller && (
+            {user?.is_verified_seller && (
               <div className="hidden md:flex">
                 {!isSellerRoute ? (
                   <Button
@@ -267,9 +298,10 @@ export function Header() {
                         <Badge variant="secondary" className="text-xs">
                           {user.type === "email" ? "📧 Email" : "📱 Telegram"}
                         </Badge>
-                        {user.is_seller && (
+                        {user.is_verified_seller && (
                           <Badge variant="outline" className="text-xs">
-                            🏪 Sotuvchi
+                            <Store className="h-3 w-3 mr-1" />
+                            Sotuvchi
                           </Badge>
                         )}
                       </div>
@@ -279,7 +311,7 @@ export function Header() {
 
                   <DropdownMenuItem asChild>
                     <Link href="/profile" className="flex items-center">
-                      <Menu className="mr-2 h-4 w-4" />
+                      <Settings className="mr-2 h-4 w-4" />
                       <span>Profil</span>
                     </Link>
                   </DropdownMenuItem>
@@ -302,7 +334,7 @@ export function Header() {
                     </>
                   )}
 
-                  {user.role === "admin" && (
+                  {user.is_admin && (
                     <DropdownMenuItem asChild>
                       <Link href="/admin-panel" className="flex items-center">
                         <Settings className="mr-2 h-4 w-4" />
@@ -359,7 +391,7 @@ export function Header() {
                   </form>
 
                   {/* Mode Switch - Mobile */}
-                  {user?.is_seller && (
+                  {user?.is_verified_seller && (
                     <div className="border-b pb-4">
                       {!isSellerRoute ? (
                         <Button

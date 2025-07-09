@@ -31,13 +31,14 @@ import {
   Send,
   Award,
   Store,
-  TrendingUp,
   Eye,
   Clock,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 import { AdsManagement } from "./ads-management"
+import { ProductsManagement } from "./products-management"
+import { CategoriesManagement } from "./categories-management"
 
 interface User {
   id: string
@@ -524,12 +525,13 @@ export default function AdminPanel() {
       </div>
 
       <Tabs defaultValue="messages" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="messages">Xabarlar ({stats.unreadMessages})</TabsTrigger>
-          <TabsTrigger value="orders">Buyurtmalar ({stats.totalOrders})</TabsTrigger>
+          <TabsTrigger value="orders">Buyurtmalar</TabsTrigger>
           <TabsTrigger value="users">Foydalanuvchilar</TabsTrigger>
+          <TabsTrigger value="products">Mahsulotlar</TabsTrigger>
+          <TabsTrigger value="categories">Kategoriyalar</TabsTrigger>
           <TabsTrigger value="ads">Reklamalar</TabsTrigger>
-          <TabsTrigger value="analytics">Analitika</TabsTrigger>
         </TabsList>
 
         {/* Messages Tab */}
@@ -574,7 +576,7 @@ export default function AdminPanel() {
               </div>
 
               {/* Messages List */}
-              <div className="space-y-4">
+              <div className="space-y-4 max-h-[600px] overflow-y-auto">
                 {filteredMessages.length === 0 ? (
                   <div className="text-center py-8">
                     <MessageSquare className="h-16 w-16 text-gray-300 mx-auto mb-4" />
@@ -696,7 +698,7 @@ export default function AdminPanel() {
               </div>
 
               {/* Orders List */}
-              <div className="space-y-4">
+              <div className="space-y-4 max-h-[600px] overflow-y-auto">
                 {filteredOrders.map((order) => (
                   <Card key={order.id} className="border">
                     <CardContent className="p-4">
@@ -782,7 +784,7 @@ export default function AdminPanel() {
               </div>
 
               {/* Users List */}
-              <div className="space-y-4">
+              <div className="space-y-4 max-h-[600px] overflow-y-auto">
                 {filteredUsers.map((userData) => (
                   <Card key={userData.id} className="border">
                     <CardContent className="p-4">
@@ -856,43 +858,19 @@ export default function AdminPanel() {
           </Card>
         </TabsContent>
 
+        {/* Products Tab */}
+        <TabsContent value="products">
+          <ProductsManagement />
+        </TabsContent>
+
+        {/* Categories Tab */}
+        <TabsContent value="categories">
+          <CategoriesManagement />
+        </TabsContent>
+
         {/* Ads Tab */}
         <TabsContent value="ads">
           <AdsManagement />
-        </TabsContent>
-
-        {/* Analytics Tab */}
-        <TabsContent value="analytics" className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <Card className="card-beautiful">
-              <CardContent className="p-6 text-center">
-                <TrendingUp className="h-12 w-12 text-green-600 mx-auto mb-4" />
-                <div className="text-3xl font-bold text-green-600">{formatPrice(stats.totalRevenue)}</div>
-                <div className="text-gray-600">Jami daromad</div>
-              </CardContent>
-            </Card>
-            <Card className="card-beautiful">
-              <CardContent className="p-6 text-center">
-                <ShoppingCart className="h-12 w-12 text-blue-600 mx-auto mb-4" />
-                <div className="text-3xl font-bold text-blue-600">{stats.todayOrders}</div>
-                <div className="text-gray-600">Bugungi buyurtmalar</div>
-              </CardContent>
-            </Card>
-            <Card className="card-beautiful">
-              <CardContent className="p-6 text-center">
-                <Users className="h-12 w-12 text-purple-600 mx-auto mb-4" />
-                <div className="text-3xl font-bold text-purple-600">{stats.totalUsers}</div>
-                <div className="text-gray-600">Jami foydalanuvchilar</div>
-              </CardContent>
-            </Card>
-            <Card className="card-beautiful">
-              <CardContent className="p-6 text-center">
-                <Package className="h-12 w-12 text-orange-600 mx-auto mb-4" />
-                <div className="text-3xl font-bold text-orange-600">{stats.totalProducts}</div>
-                <div className="text-gray-600">Jami mahsulotlar</div>
-              </CardContent>
-            </Card>
-          </div>
         </TabsContent>
       </Tabs>
 

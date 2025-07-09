@@ -1,6 +1,6 @@
 "use client"
 
-import { createSupabaseClient } from "@/lib/supabase-server"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Star, Heart, ShoppingCart, Search, Filter } from "lucide-react"
 import Link from "next/link"
 import Image from "next/image"
+import { supabase } from "@/lib/supabase"
 
 interface Product {
   id: string
@@ -26,107 +27,16 @@ interface Product {
     is_verified_seller: boolean
   }
   category: {
-    name_uz: string
+    name: string
     slug: string
   }
 }
 
 interface Category {
   id: string
-  name_uz: string
+  name: string
   slug: string
   icon: string
-}
-
-async function fetchData(searchParams: any) {
-  const supabase = createSupabaseClient()
-
-  try {
-    // Build query with correct column names
-    let query = supabase
-      .from("products")
-      .select(`
-        *,
-        seller:users!products_seller_id_fkey(full_name, company_name, is_verified_seller),
-        category:categories!products_category_id_fkey(name_uz, slug)
-      `)
-      .eq("is_active", true)
-      .eq("is_approved", true)
-
-    // Apply filters
-    if (searchParams.category) {
-      const { data: categoryData } = await supabase
-        .from("categories")
-        .select("id")
-        .eq("slug", searchParams.category)
-        .single()
-
-      if (categoryData) {
-        query = query.eq("category_id", categoryData.id)
-      }
-    }
-
-    if (searchParams.search) {
-      query = query.or(`name.ilike.%${searchParams.search}%,description.ilike.%${searchParams.search}%`)
-    }
-
-    if (searchParams.min_price) {
-      query = query.gte("price", Number.parseInt(searchParams.min_price))
-    }
-
-    if (searchParams.max_price) {
-      query = query.lte("price", Number.parseInt(searchParams.max_price))
-    }
-
-    // Apply sorting
-    switch (searchParams.sort) {
-      case "price_asc":
-        query = query.order("price", { ascending: true })
-        break
-      case "price_desc":
-        query = query.order("price", { ascending: false })
-        break
-      case "popular":
-        query = query.order("order_count", { ascending: false })
-        break
-      case "rating":
-        query = query.order("average_rating", { ascending: false })
-        break
-      case "newest":
-        query = query.order("created_at", { ascending: false })
-        break
-      default:
-        query = query.order("order_count", { ascending: false })
-    }
-
-    const { data: products, error: productsError } = await query.limit(24)
-
-    if (productsError) {
-      console.error("Products error:", productsError)
-    }
-
-    // Fetch categories for filter
-    const { data: categories, error: categoriesError } = await supabase
-      .from("categories")
-      .select("*")
-      .eq("is_active", true)
-      .order("sort_order")
-
-    if (categoriesError) {
-      console.error("Categories error:", categoriesError)
-    }
-
-    return {
-      products: products || [],
-      categories: categories || [],
-    }
-  } catch (error) {
-    console.error("Database error:", error)
-    return {
-      products: [],
-      categories: [],
-    }
-  }
 }
 
 function ProductCard({ product }: { product: Product }) {
@@ -197,7 +107,7 @@ function ProductCard({ product }: { product: Product }) {
               )}
             </div>
 
-            <div className="text-xs text-gray-500">{product.category?.name_uz || "Kategoriya"}</div>
+            <div className="text-xs text-gray-500">{product.category?.name || "Kategoriya"}</div>
 
             <div className="flex gap-2 pt-2">
               <Button
@@ -232,12 +142,94 @@ function ProductCard({ product }: { product: Product }) {
   )
 }
 
-export default async function ProductsPage({
-  searchParams,
-}: {
-  searchParams: { [key: string]: string | string[] | undefined }
-}) {
-  const data = await fetchData(searchParams)
+export default function ProductsPage() {
+  const [products, setProducts] = useState<Product[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
+  const [loading, setLoading] = useState(true)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [selectedCategory, setSelectedCategory] = useState("all")
+  const [sortBy, setSortBy] = useState("popular")
+
+  useEffect(() => {
+    fetchData()
+  }, [])
+
+  const fetchData = async () => {
+    try {
+      // Fetch products
+      let query = supabase
+        .from("products")
+        .select(`
+          *,
+          seller:users!products_seller_id_fkey(full_name, company_name, is_verified_seller),
+          category:categories!products_category_id_fkey(name, slug)
+        `)
+        .eq("is_active", true)
+        .eq("is_approved", true)
+
+      // Apply sorting
+      switch (sortBy) {
+        case "price_asc":
+          query = query.order("price", { ascending: true })
+          break
+        case "price_desc":
+          query = query.order("price", { ascending: false })
+          break
+        case "popular":
+          query = query.order("order_count", { ascending: false })
+          break
+        case "rating":
+          query = query.order("average_rating", { ascending: false })
+          break
+        case "newest":
+          query = query.order("created_at", { ascending: false })
+          break
+        default:
+          query = query.order("order_count", { ascending: false })
+      }
+
+      const { data: productsData, error: productsError } = await query.limit(24)
+
+      if (productsError) {
+        console.error("Products error:", productsError)
+      } else {
+        setProducts(productsData || [])
+      }
+
+      // Fetch categories
+      const { data: categoriesData, error: categoriesError } = await supabase
+        .from("categories")
+        .select("*")
+        .eq("is_active", true)
+        .order("sort_order")
+
+      if (categoriesError) {
+        console.error("Categories error:", categoriesError)
+      } else {
+        setCategories(categoriesData || [])
+      }
+    } catch (error) {
+      console.error("Database error:", error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const filteredProducts = products.filter((product) => {
+    const matchesSearch =
+      product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      product.description?.toLowerCase().includes(searchQuery.toLowerCase())
+    const matchesCategory = selectedCategory === "all" || product.category?.slug === selectedCategory
+    return matchesSearch && matchesCategory
+  })
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -245,7 +237,7 @@ export default async function ProductsPage({
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-4">Barcha mahsulotlar</h1>
-          <p className="text-gray-600">{data.products.length} ta mahsulot topildi</p>
+          <p className="text-gray-600">{filteredProducts.length} ta mahsulot topildi</p>
         </div>
 
         {/* Filters */}
@@ -257,20 +249,21 @@ export default async function ProductsPage({
               <Input
                 placeholder="Mahsulot qidirish..."
                 className="pl-10"
-                defaultValue={searchParams.search as string}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
 
             {/* Category Filter */}
-            <Select defaultValue={(searchParams.category as string) || "all"}>
+            <Select value={selectedCategory} onValueChange={setSelectedCategory}>
               <SelectTrigger>
                 <SelectValue placeholder="Kategoriya tanlang" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Barcha kategoriyalar</SelectItem>
-                {data.categories.map((category) => (
+                {categories.map((category) => (
                   <SelectItem key={category.id} value={category.slug}>
-                    {category.icon} {category.name_uz}
+                    {category.icon} {category.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -278,12 +271,12 @@ export default async function ProductsPage({
 
             {/* Price Range */}
             <div className="flex gap-2">
-              <Input placeholder="Min narx" type="number" defaultValue={searchParams.min_price as string} />
-              <Input placeholder="Max narx" type="number" defaultValue={searchParams.max_price as string} />
+              <Input placeholder="Min narx" type="number" />
+              <Input placeholder="Max narx" type="number" />
             </div>
 
             {/* Sort */}
-            <Select defaultValue={(searchParams.sort as string) || "popular"}>
+            <Select value={sortBy} onValueChange={setSortBy}>
               <SelectTrigger>
                 <SelectValue placeholder="Saralash" />
               </SelectTrigger>
@@ -298,20 +291,29 @@ export default async function ProductsPage({
           </div>
 
           <div className="flex gap-2 mt-4">
-            <Button size="sm">
+            <Button size="sm" onClick={fetchData}>
               <Filter className="h-4 w-4 mr-2" />
               Filtrlarni qo'llash
             </Button>
-            <Button size="sm" variant="outline">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setSearchQuery("")
+                setSelectedCategory("all")
+                setSortBy("popular")
+                fetchData()
+              }}
+            >
               Tozalash
             </Button>
           </div>
         </div>
 
         {/* Products Grid */}
-        {data.products.length > 0 ? (
+        {filteredProducts.length > 0 ? (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
-            {data.products.map((product) => (
+            {filteredProducts.map((product) => (
               <ProductCard key={product.id} product={product} />
             ))}
           </div>
@@ -320,12 +322,20 @@ export default async function ProductsPage({
             <div className="text-6xl mb-4">🔍</div>
             <h3 className="text-xl font-semibold mb-2">Mahsulot topilmadi</h3>
             <p className="text-gray-600 mb-4">Qidiruv shartlaringizni o'zgartiring yoki boshqa kategoriyani tanlang</p>
-            <Button>Barcha mahsulotlarni ko'rish</Button>
+            <Button
+              onClick={() => {
+                setSearchQuery("")
+                setSelectedCategory("all")
+                fetchData()
+              }}
+            >
+              Barcha mahsulotlarni ko'rish
+            </Button>
           </div>
         )}
 
         {/* Load More */}
-        {data.products.length >= 24 && (
+        {filteredProducts.length >= 24 && (
           <div className="text-center mt-8">
             <Button variant="outline" size="lg">
               Ko'proq yuklash

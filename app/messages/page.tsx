@@ -487,7 +487,7 @@ export default function MessagesPage() {
 
   if (loading) {
     return (
-      <div className="page-container flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <MessageSquare className="h-8 w-8 animate-spin mx-auto mb-4" />
           <p>Yuklanmoqda...</p>
@@ -497,11 +497,11 @@ export default function MessagesPage() {
   }
 
   return (
-    <div className="page-container">
+    <div className="min-h-screen bg-gray-50">
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-7xl mx-auto">
-          {/* Header */}
-          <div className="mb-8">
+          {/* Fixed Header */}
+          <div className="mb-8 sticky top-20 bg-gray-50 z-10 pb-4">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
                 <MessageSquare className="h-6 w-6 text-white" />
@@ -514,7 +514,7 @@ export default function MessagesPage() {
           </div>
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-            <TabsList className="grid w-full grid-cols-2">
+            <TabsList className="grid w-full grid-cols-2 sticky top-36 bg-white z-10">
               <TabsTrigger value="conversations" className="flex items-center gap-2">
                 <MessageSquare className="h-4 w-4" />
                 Suhbatlar ({conversations.length})
@@ -529,11 +529,11 @@ export default function MessagesPage() {
 
             {/* Conversations Tab */}
             <TabsContent value="conversations" className="space-y-6">
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[700px]">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Conversations List */}
                 <div className="lg:col-span-1">
-                  <Card className="card-beautiful h-full">
-                    <CardHeader className="flex flex-row items-center justify-between">
+                  <Card className="card-beautiful h-[calc(100vh-300px)] flex flex-col">
+                    <CardHeader className="flex flex-row items-center justify-between flex-shrink-0 border-b">
                       <CardTitle>Suhbatlar</CardTitle>
                       <Dialog open={showCreateChat} onOpenChange={setShowCreateChat}>
                         <DialogTrigger asChild>
@@ -609,8 +609,8 @@ export default function MessagesPage() {
                         </DialogContent>
                       </Dialog>
                     </CardHeader>
-                    <CardContent className="p-0">
-                      <div className="space-y-2 max-h-[600px] overflow-y-auto">
+                    <CardContent className="p-0 flex-1 overflow-hidden">
+                      <div className="space-y-2 h-full overflow-y-auto">
                         {conversations.length === 0 ? (
                           <div className="text-center py-8 px-4">
                             <MessageSquare className="h-12 w-12 text-gray-400 mx-auto mb-4" />
@@ -690,8 +690,8 @@ export default function MessagesPage() {
                 {/* Chat Area */}
                 <div className="lg:col-span-2">
                   {selectedConversation ? (
-                    <Card className="card-beautiful h-full flex flex-col">
-                      {/* Chat Header */}
+                    <Card className="card-beautiful h-[calc(100vh-300px)] flex flex-col">
+                      {/* Fixed Chat Header */}
                       <CardHeader className="border-b border-gray-200 flex-shrink-0">
                         <div className="flex items-center gap-3">
                           <Button
@@ -748,7 +748,7 @@ export default function MessagesPage() {
                         </div>
                       </CardHeader>
 
-                      {/* Messages */}
+                      {/* Scrollable Messages */}
                       <div className="flex-1 overflow-y-auto p-4 space-y-4">
                         {messages.map((message) => {
                           const isOwn = message.sender_id === user?.id
@@ -788,7 +788,7 @@ export default function MessagesPage() {
 
                       {/* Reply indicator */}
                       {replyingTo && (
-                        <div className="px-4 py-2 bg-blue-50 border-t border-blue-200 flex items-center justify-between">
+                        <div className="px-4 py-2 bg-blue-50 border-t border-blue-200 flex items-center justify-between flex-shrink-0">
                           <div className="text-sm">
                             <p className="text-blue-600 font-medium">Javob: {replyingTo.sender.full_name}</p>
                             <p className="text-gray-600 truncate">{replyingTo.message}</p>
@@ -799,7 +799,7 @@ export default function MessagesPage() {
                         </div>
                       )}
 
-                      {/* Message Input */}
+                      {/* Fixed Message Input */}
                       <div className="border-t border-gray-200 p-4 flex-shrink-0">
                         <form onSubmit={sendMessage} className="flex gap-2">
                           <Input
@@ -816,7 +816,7 @@ export default function MessagesPage() {
                       </div>
                     </Card>
                   ) : (
-                    <Card className="card-beautiful h-full flex items-center justify-center">
+                    <Card className="card-beautiful h-[calc(100vh-300px)] flex items-center justify-center">
                       <div className="text-center">
                         <MessageSquare className="h-16 w-16 text-gray-400 mx-auto mb-4" />
                         <h3 className="text-xl font-semibold mb-2">Suhbatni tanlang</h3>
@@ -831,11 +831,11 @@ export default function MessagesPage() {
             {/* Admin Messages Tab */}
             {user?.is_admin && (
               <TabsContent value="admin" className="space-y-6">
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[700px]">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   {/* Admin Messages List */}
                   <div className="lg:col-span-1">
-                    <Card className="card-beautiful h-full">
-                      <CardHeader>
+                    <Card className="card-beautiful h-[calc(100vh-300px)] flex flex-col">
+                      <CardHeader className="border-b flex-shrink-0">
                         <CardTitle>Admin Xabarlar</CardTitle>
                         <div className="flex gap-2 flex-wrap">
                           <Button
@@ -868,8 +868,8 @@ export default function MessagesPage() {
                           </Button>
                         </div>
                       </CardHeader>
-                      <CardContent className="p-0">
-                        <div className="space-y-2 max-h-[600px] overflow-y-auto">
+                      <CardContent className="p-0 flex-1 overflow-hidden">
+                        <div className="space-y-2 h-full overflow-y-auto">
                           {filteredAdminMessages.length === 0 ? (
                             <div className="text-center py-8 px-4">
                               <MessageSquare className="h-12 w-12 text-gray-400 mx-auto mb-4" />
@@ -926,7 +926,7 @@ export default function MessagesPage() {
                   {/* Admin Message Detail */}
                   <div className="lg:col-span-2">
                     {selectedAdminMessage ? (
-                      <Card className="card-beautiful h-full flex flex-col">
+                      <Card className="card-beautiful h-[calc(100vh-300px)] flex flex-col">
                         <CardHeader className="border-b border-gray-200 flex-shrink-0">
                           <div className="flex items-center justify-between">
                             <div>
@@ -1054,7 +1054,7 @@ export default function MessagesPage() {
                         )}
                       </Card>
                     ) : (
-                      <Card className="card-beautiful h-full flex items-center justify-center">
+                      <Card className="card-beautiful h-[calc(100vh-300px)] flex items-center justify-center">
                         <div className="text-center">
                           <MessageCircle className="h-16 w-16 text-gray-400 mx-auto mb-4" />
                           <h3 className="text-xl font-semibold mb-2">Xabarni tanlang</h3>
