@@ -98,10 +98,10 @@ export default function ProductDetailPage() {
         .from("products")
         .select(`
           *,
-          categories (
+          categories!products_category_id_fkey (
             name_uz
           ),
-          users (
+          users!products_seller_id_fkey (
             full_name,
             is_verified_seller
           )
@@ -295,7 +295,7 @@ export default function ProductDetailPage() {
                 <div>
                   <div className="flex items-center gap-2 mb-3">
                     <Badge className="badge-beautiful border-blue-200 text-blue-700">
-                      {getProductTypeIcon(product.product_type)} {product.categories.name_uz}
+                      {getProductTypeIcon(product.product_type)} {product.categories?.name_uz || "Kategoriya"}
                     </Badge>
                     {product.users?.is_verified_seller && (
                       <Badge className="badge-beautiful border-green-200 text-green-700">
@@ -314,10 +314,10 @@ export default function ProductDetailPage() {
                     <div className="flex items-center space-x-1">
                       <Star className="h-5 w-5 fill-yellow-400 text-yellow-400" />
                       <span className="font-semibold">4.5</span>
-                      <span className="text-gray-500">({product.order_count} baho)</span>
+                      <span className="text-gray-500">({product.order_count || 0} baho)</span>
                     </div>
                     <Separator orientation="vertical" className="h-4" />
-                    <span className="text-gray-500">{product.order_count} marta sotilgan</span>
+                    <span className="text-gray-500">{product.order_count || 0} marta sotilgan</span>
                   </div>
 
                   <div className="text-4xl font-bold text-blue-600 mb-6">{formatPrice(product.price)}</div>

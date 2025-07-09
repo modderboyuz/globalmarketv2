@@ -1,5 +1,6 @@
 "use client"
-import { createClient } from "@/lib/supabase-server"
+
+import { createSupabaseClient } from "@/lib/supabase-server"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -25,36 +26,44 @@ interface Product {
     is_verified_seller: boolean
   }
   category: {
-    name: string
+    name_uz: string
     slug: string
   }
 }
 
 interface Category {
   id: string
-  name: string
+  name_uz: string
   slug: string
   icon: string
 }
 
 async function fetchData(searchParams: any) {
-  const supabase = createClient()
+  const supabase = createSupabaseClient()
 
   try {
-    // Build query
+    // Build query with correct column names
     let query = supabase
       .from("products")
       .select(`
         *,
-        seller:users(full_name, company_name, is_verified_seller),
-        category:categories(name, slug)
+        seller:users!products_seller_id_fkey(full_name, company_name, is_verified_seller),
+        category:categories!products_category_id_fkey(name_uz, slug)
       `)
       .eq("is_active", true)
       .eq("is_approved", true)
 
     // Apply filters
     if (searchParams.category) {
-      query = query.eq("category.slug", searchParams.category)
+      const { data: categoryData } = await supabase
+        .from("categories")
+        .select("id")
+        .eq("slug", searchParams.category)
+        .single()
+
+      if (categoryData) {
+        query = query.eq("category_id", categoryData.id)
+      }
     }
 
     if (searchParams.search) {
@@ -78,7 +87,7 @@ async function fetchData(searchParams: any) {
         query = query.order("price", { ascending: false })
         break
       case "popular":
-        query = query.order("popularity_score", { ascending: false })
+        query = query.order("order_count", { ascending: false })
         break
       case "rating":
         query = query.order("average_rating", { ascending: false })
@@ -87,7 +96,7 @@ async function fetchData(searchParams: any) {
         query = query.order("created_at", { ascending: false })
         break
       default:
-        query = query.order("popularity_score", { ascending: false })
+        query = query.order("order_count", { ascending: false })
     }
 
     const { data: products, error: productsError } = await query.limit(24)
@@ -161,24 +170,26 @@ function ProductCard({ product }: { product: Product }) {
                   <Star
                     key={i}
                     className={`h-3 w-3 ${
-                      i < Math.floor(product.average_rating) ? "fill-yellow-400 text-yellow-400" : "text-gray-300"
+                      i < Math.floor(product.average_rating || 0) ? "fill-yellow-400 text-yellow-400" : "text-gray-300"
                     }`}
                   />
                 ))}
               </div>
-              <span className="text-xs text-gray-500">({product.order_count})</span>
+              <span className="text-xs text-gray-500">({product.order_count || 0})</span>
             </div>
 
             <div className="flex items-center justify-between">
               <span className="font-bold text-lg text-blue-600">{product.price.toLocaleString()} so'm</span>
               <div className="flex items-center gap-1 text-xs text-gray-500">
                 <Heart className="h-4 w-4" />
-                {product.like_count}
+                {product.like_count || 0}
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-600">{product.seller?.company_name || product.seller?.full_name}</span>
+              <span className="text-xs text-gray-600">
+                {product.seller?.company_name || product.seller?.full_name || "Noma'lum sotuvchi"}
+              </span>
               {product.seller?.is_verified_seller && (
                 <Badge variant="secondary" className="text-xs">
                   ✓
@@ -186,7 +197,7 @@ function ProductCard({ product }: { product: Product }) {
               )}
             </div>
 
-            <div className="text-xs text-gray-500">{product.category?.name}</div>
+            <div className="text-xs text-gray-500">{product.category?.name_uz || "Kategoriya"}</div>
 
             <div className="flex gap-2 pt-2">
               <Button
@@ -259,7 +270,7 @@ export default async function ProductsPage({
                 <SelectItem value="all">Barcha kategoriyalar</SelectItem>
                 {data.categories.map((category) => (
                   <SelectItem key={category.id} value={category.slug}>
-                    {category.icon} {category.name}
+                    {category.icon} {category.name_uz}
                   </SelectItem>
                 ))}
               </SelectContent>
