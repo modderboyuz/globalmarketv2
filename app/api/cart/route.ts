@@ -1,138 +1,142 @@
-import { createSupabaseClient } from "@/lib/supabase-server"
 import { type NextRequest, NextResponse } from "next/server"
+import { supabase } from "@/lib/supabase"
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createSupabaseClient()
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
+    const body = await request.json()
+    const { productId, userId, quantity = 1 } = body
 
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    if (!productId || !userId) {
+      return NextResponse.json({ error: "Product ID va User ID talab qilinadi" }, { status: 400 })
     }
 
-    const { product_id, quantity = 1 } = await request.json()
-
-    if (!product_id) {
-      return NextResponse.json({ error: "Product ID is required" }, { status: 400 })
-    }
-
-    // Check if product exists and has stock
-    const { data: product, error: productError } = await supabase
-      .from("products")
-      .select("stock_quantity")
-      .eq("id", product_id)
+    // Ensure user exists in users table
+    const { data: existingUser, error: userCheckError } = await supabase
+      .from("users")
+      .select("id")
+      .eq("id", userId)
       .single()
 
-    if (productError || !product) {
-      return NextResponse.json({ error: "Product not found" }, { status: 404 })
+    if (userCheckError || !existingUser) {
+      // Create user record if it doesn't exist
+      const { data: authUser } = await supabase.auth.getUser()
+      if (authUser.user && authUser.user.id === userId) {
+        const { error: createUserError } = await supabase.from("users").insert({
+          id: userId,
+          email: authUser.user.email,
+          full_name: authUser.user.user_metadata?.full_name || "",
+          phone: authUser.user.user_metadata?.phone || "",
+          address: authUser.user.user_metadata?.address || "",
+        })
+
+        if (createUserError) {
+          console.error("Error creating user:", createUserError)
+          return NextResponse.json({ error: "Foydalanuvchi yaratishda xatolik" }, { status: 500 })
+        }
+      }
     }
 
-    if (product.stock_quantity < quantity) {
-      return NextResponse.json({ error: "Insufficient stock" }, { status: 400 })
-    }
-
-    // Add to cart or update quantity
-    const { data, error } = await supabase
+    // Check if item already exists in cart_items
+    const { data: existingItem, error: checkError } = await supabase
       .from("cart_items")
-      .upsert(
-        {
-          user_id: user.id,
-          product_id,
-          quantity,
-        },
-        {
-          onConflict: "user_id,product_id",
-        },
-      )
-      .select()
+      .select("*")
+      .eq("user_id", userId)
+      .eq("product_id", productId)
+      .single()
 
-    if (error) {
-      console.error("Cart add error:", error)
-      return NextResponse.json({ error: "Failed to add to cart" }, { status: 500 })
+    if (checkError && checkError.code !== "PGRST116") {
+      throw checkError
     }
 
-    return NextResponse.json({ success: true, data })
+    if (existingItem) {
+      // Update quantity
+      const { data, error } = await supabase
+        .from("cart_items")
+        .update({
+          quantity: existingItem.quantity + quantity,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existingItem.id)
+        .select()
+        .single()
+
+      if (error) throw error
+      return NextResponse.json({ success: true, cartItem: data })
+    } else {
+      // Add new item
+      const { data, error } = await supabase
+        .from("cart_items")
+        .insert({
+          user_id: userId,
+          product_id: productId,
+          quantity: quantity,
+        })
+        .select()
+        .single()
+
+      if (error) throw error
+      return NextResponse.json({ success: true, cartItem: data })
+    }
   } catch (error) {
-    console.error("Cart POST error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    console.error("Cart API Error:", error)
+    return NextResponse.json({ error: "Savatga qo'shishda xatolik" }, { status: 500 })
   }
 }
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createSupabaseClient()
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
+    const { searchParams } = new URL(request.url)
+    const userId = searchParams.get("userId")
 
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    if (!userId) {
+      return NextResponse.json({ error: "User ID talab qilinadi" }, { status: 400 })
     }
 
-    const { data: cartItems, error } = await supabase
+    const { data, error } = await supabase
       .from("cart_items")
       .select(`
         *,
         products (
           id,
-          title,
+          name,
           price,
           image_url,
           stock_quantity,
-          users (
-            id,
-            full_name,
-            company_name
-          )
+          product_type,
+          brand,
+          author,
+          has_delivery,
+          delivery_price
         )
       `)
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
 
-    if (error) {
-      console.error("Cart fetch error:", error)
-      return NextResponse.json({ error: "Failed to fetch cart" }, { status: 500 })
-    }
+    if (error) throw error
 
-    return NextResponse.json({ cartItems })
+    return NextResponse.json({ success: true, items: data || [] })
   } catch (error) {
-    console.error("Cart API error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    console.error("Cart GET Error:", error)
+    return NextResponse.json({ error: "Savatcha ma'lumotlarini olishda xatolik" }, { status: 500 })
   }
 }
 
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = createSupabaseClient()
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
     const { searchParams } = new URL(request.url)
-    const product_id = searchParams.get("product_id")
+    const itemId = searchParams.get("itemId")
+    const userId = searchParams.get("userId")
 
-    if (!product_id) {
-      return NextResponse.json({ error: "Product ID is required" }, { status: 400 })
+    if (!itemId || !userId) {
+      return NextResponse.json({ error: "Item ID va User ID talab qilinadi" }, { status: 400 })
     }
 
-    const { error } = await supabase.from("cart_items").delete().eq("user_id", user.id).eq("product_id", product_id)
+    const { error } = await supabase.from("cart_items").delete().eq("id", itemId).eq("user_id", userId)
 
-    if (error) {
-      console.error("Cart delete error:", error)
-      return NextResponse.json({ error: "Failed to remove from cart" }, { status: 500 })
-    }
+    if (error) throw error
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error("Cart DELETE error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    console.error("Cart DELETE Error:", error)
+    return NextResponse.json({ error: "Mahsulotni o'chirishda xatolik" }, { status: 500 })
   }
 }

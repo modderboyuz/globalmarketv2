@@ -30,6 +30,7 @@ import {
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
+import Link from "next/link"
 
 interface Product {
   id: string
@@ -49,6 +50,8 @@ interface Product {
   users: {
     full_name: string
     is_verified_seller: boolean
+    company_name: string
+    id: string
   }
 }
 
@@ -103,7 +106,9 @@ export default function ProductDetailPage() {
           ),
           users!products_seller_id_fkey (
             full_name,
-            is_verified_seller
+            is_verified_seller,
+            company_name,
+            id
           )
         `)
         .eq("id", productId)
@@ -331,7 +336,11 @@ export default function ProductDetailPage() {
                       <span className="text-white font-bold">{product.users?.full_name?.charAt(0) || "?"}</span>
                     </div>
                     <div>
-                      <p className="font-medium">{product.users?.full_name || "Noma'lum sotuvchi"}</p>
+                      <p className="font-medium">
+                        <Link href={`/seller/${product.users.id}`}>
+                          {product.users?.full_name || "Noma'lum sotuvchi"}
+                        </Link>
+                      </p>
                       {product.users?.is_verified_seller && (
                         <p className="text-sm text-green-600 flex items-center gap-1">
                           <Award className="h-3 w-3" />

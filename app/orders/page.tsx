@@ -1,479 +1,588 @@
 "use client"
-
-import { useEffect, useState } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
+import { Progress } from "@/components/ui/progress"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Textarea } from "@/components/ui/textarea"
-import { Star, Package, Clock, CheckCircle, XCircle, AlertTriangle, RotateCcw } from "lucide-react"
-import { useRouter, useSearchParams } from "next/navigation"
+  ShoppingCart,
+  Package,
+  Truck,
+  CheckCircle,
+  XCircle,
+  Star,
+  AlertTriangle,
+  RefreshCw,
+  Phone,
+  MapPin,
+  User,
+} from "lucide-react"
+import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
+import NotificationPopup from "@/components/notifications/notification-popup"
 
 interface Order {
   id: string
-  quantity: number
-  total_price: number
-  status: string
+  full_name: string
+  phone: string
   address: string
-  stage: number
+  quantity: number
+  total_amount: number
+  status: string
   is_agree: boolean
   is_client_went: boolean | null
   is_client_claimed: boolean | null
+  pickup_address: string | null
+  seller_notes: string | null
+  client_notes: string | null
   created_at: string
   products: {
     id: string
-    title: string
-    price: number
+    name: string
     image_url: string
+    price: number
+    product_type: string
+    brand: string
+    author: string
+    has_delivery: boolean
+    delivery_price: number
+    seller_id: string
     users: {
-      id: string
       full_name: string
       company_name: string
+      phone: string
     }
-  }
-  users: {
-    id: string
-    full_name: string
-    phone: string
-    email: string
   }
 }
 
+interface Review {
+  rating: number
+  comment: string
+}
+
 export default function OrdersPage() {
+  const router = useRouter()
+  const [user, setUser] = useState<any>(null)
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
-  const [actionLoading, setActionLoading] = useState<string | null>(null)
-  const [reviewDialog, setReviewDialog] = useState<Order | null>(null)
-  const [complaintDialog, setComplaintDialog] = useState<Order | null>(null)
-  const [confirmDialog, setConfirmDialog] = useState<{ order: Order; action: string; countdown?: number } | null>(null)
-  const [rating, setRating] = useState(5)
-  const [comment, setComment] = useState("")
-  const [complaintText, setComplaintText] = useState("")
-
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const highlightOrderId = searchParams.get("highlight")
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
+  const [showReviewDialog, setShowReviewDialog] = useState(false)
+  const [showComplaintDialog, setShowComplaintDialog] = useState(false)
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false)
+  const [confirmAction, setConfirmAction] = useState<string>("")
+  const [confirmTimer, setConfirmTimer] = useState(0)
+  const [review, setReview] = useState<Review>({ rating: 5, comment: "" })
+  const [complaintType, setComplaintType] = useState("")
+  const [complaintDescription, setComplaintDescription] = useState("")
+  const [actionNotes, setActionNotes] = useState("")
 
   useEffect(() => {
-    fetchOrders()
+    checkUser()
   }, [])
 
-  const fetchOrders = async () => {
+  useEffect(() => {
+    let interval: NodeJS.Timeout
+    if (confirmTimer > 0) {
+      interval = setInterval(() => {
+        setConfirmTimer((prev) => prev - 1)
+      }, 1000)
+    }
+    return () => clearInterval(interval)
+  }, [confirmTimer])
+
+  const checkUser = async () => {
     try {
-      const response = await fetch("/api/orders")
-      if (response.ok) {
-        const data = await response.json()
-        setOrders(data.orders || [])
-      } else {
-        toast.error("Buyurtmalarni yuklashda xatolik")
+      const {
+        data: { user: currentUser },
+      } = await supabase.auth.getUser()
+
+      if (!currentUser) {
+        router.push("/login")
+        return
       }
+
+      setUser(currentUser)
+      await fetchOrders(currentUser.id)
     } catch (error) {
-      console.error("Failed to fetch orders:", error)
-      toast.error("Buyurtmalarni yuklashda xatolik")
-    } finally {
-      setLoading(false)
+      console.error("Error checking user:", error)
+      router.push("/login")
     }
   }
 
-  const handleOrderAction = async (orderId: string, action: string, address?: string) => {
-    setActionLoading(orderId)
+  const fetchOrders = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("orders")
+        .select(`
+          *,
+          products (
+            id,
+            name,
+            image_url,
+            price,
+            product_type,
+            brand,
+            author,
+            has_delivery,
+            delivery_price,
+            seller_id,
+            users:seller_id (
+              full_name,
+              company_name,
+              phone
+            )
+          )
+        `)
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
 
+      if (error) throw error
+      setOrders(data || [])
+    } catch (error) {
+      console.error("Error fetching orders:", error)
+      toast.error("Buyurtmalarni olishda xatolik")
+    }
+  }
+
+  const updateOrderStatus = async (orderId: string, action: string, notes?: string) => {
     try {
       const response = await fetch("/api/orders", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ order_id: orderId, action, address }),
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          orderId,
+          action,
+          userId: user.id,
+          notes,
+        }),
       })
 
-      if (response.ok) {
-        toast.success("Buyurtma holati yangilandi")
-        fetchOrders()
-      } else {
-        toast.error("Xatolik yuz berdi")
-      }
-    } catch (error) {
-      console.error("Order action error:", error)
-      toast.error("Xatolik yuz berdi")
-    } finally {
-      setActionLoading(null)
-      setConfirmDialog(null)
-    }
-  }
+      const result = await response.json()
 
-  const handleConfirmAction = (order: Order, action: string) => {
-    if (action === "client_not_went") {
-      // Show countdown confirmation for "didn't go"
-      setConfirmDialog({ order, action, countdown: 5 })
-      const interval = setInterval(() => {
-        setConfirmDialog((prev) => {
-          if (!prev || prev.countdown === 1) {
-            clearInterval(interval)
-            return null
-          }
-          return { ...prev, countdown: prev.countdown! - 1 }
-        })
-      }, 1000)
-    } else {
-      setConfirmDialog({ order, action })
+      if (!response.ok) {
+        throw new Error(result.error || "Xatolik yuz berdi")
+      }
+
+      toast.success("Buyurtma holati yangilandi")
+      await fetchOrders(user.id)
+      setSelectedOrder(null)
+      setShowConfirmDialog(false)
+      setActionNotes("")
+    } catch (error: any) {
+      toast.error(error.message || "Xatolik yuz berdi")
     }
   }
 
   const submitReview = async () => {
-    if (!reviewDialog) return
+    if (!selectedOrder) return
 
     try {
       const response = await fetch("/api/reviews", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
-          product_id: reviewDialog.products.id,
-          order_id: reviewDialog.id,
-          rating,
-          comment,
+          productId: selectedOrder.products.id,
+          orderId: selectedOrder.id,
+          rating: review.rating,
+          comment: review.comment,
+          userId: user.id,
         }),
       })
 
-      if (response.ok) {
-        toast.success("Baho qoldirildi")
-        setReviewDialog(null)
-        setRating(5)
-        setComment("")
-      } else {
-        toast.error("Baho qoldirishda xatolik")
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || "Xatolik yuz berdi")
       }
-    } catch (error) {
-      console.error("Review submission error:", error)
-      toast.error("Baho qoldirishda xatolik")
+
+      toast.success("Sharh muvaffaqiyatli qoldirildi")
+      setShowReviewDialog(false)
+      setReview({ rating: 5, comment: "" })
+      await fetchOrders(user.id)
+    } catch (error: any) {
+      toast.error(error.message || "Xatolik yuz berdi")
     }
   }
 
   const submitComplaint = async () => {
-    if (!complaintDialog) return
+    if (!selectedOrder) return
 
     try {
       const response = await fetch("/api/complaints", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
-          order_id: complaintDialog.id,
-          complaint_text: complaintText,
+          orderId: selectedOrder.id,
+          complaintType,
+          description: complaintDescription,
+          userId: user.id,
         }),
       })
 
-      if (response.ok) {
-        toast.success("Shikoyat yuborildi")
-        setComplaintDialog(null)
-        setComplaintText("")
-      } else {
-        toast.error("Shikoyat yuborishda xatolik")
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || "Xatolik yuz berdi")
       }
-    } catch (error) {
-      console.error("Complaint submission error:", error)
-      toast.error("Shikoyat yuborishda xatolik")
+
+      toast.success("Shikoyat muvaffaqiyatli yuborildi")
+      setShowComplaintDialog(false)
+      setComplaintType("")
+      setComplaintDescription("")
+    } catch (error: any) {
+      toast.error(error.message || "Xatolik yuz berdi")
     }
   }
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "pending":
-        return <Clock className="h-4 w-4" />
-      case "confirmed":
-        return <Package className="h-4 w-4" />
-      case "ready":
-        return <Package className="h-4 w-4" />
-      case "completed":
-        return <CheckCircle className="h-4 w-4" />
-      case "cancelled":
-        return <XCircle className="h-4 w-4" />
+  const handleConfirmAction = (action: string) => {
+    setConfirmAction(action)
+    setConfirmTimer(5)
+    setShowConfirmDialog(true)
+  }
+
+  const executeAction = () => {
+    if (confirmTimer > 0) return
+
+    updateOrderStatus(selectedOrder!.id, confirmAction, actionNotes)
+  }
+
+  const getOrderProgress = (order: Order) => {
+    if (order.status === "cancelled") return 0
+    if (!order.is_agree) return 25
+    if (order.is_client_went === null) return 50
+    if (order.is_client_went === false) return 25
+    if (order.is_client_claimed === null) return 75
+    if (order.status === "completed") return 100
+    return 50
+  }
+
+  const getOrderStage = (order: Order) => {
+    if (order.status === "cancelled") return "Bekor qilingan"
+    if (!order.is_agree) return "Sotuvchi javobini kutmoqda"
+    if (order.is_client_went === null) return "Mahsulot olishga boring"
+    if (order.is_client_went === false) return "Mahsulot olishga bormaganingizni bildirdingiz"
+    if (order.is_client_claimed === null) return "Sotuvchi mahsulot berishini kutmoqda"
+    if (order.status === "completed") return "Buyurtma yakunlandi"
+    return "Noma'lum holat"
+  }
+
+  const canTakeAction = (order: Order, action: string) => {
+    switch (action) {
+      case "client_went":
+        return order.is_agree && order.is_client_went === null
+      case "client_not_went":
+        return order.is_agree && order.is_client_went === null
+      case "reorder":
+        return order.status === "cancelled"
+      case "review":
+        return order.status === "completed"
+      case "complaint":
+        return order.status === "cancelled" || order.status === "completed"
       default:
-        return <Clock className="h-4 w-4" />
+        return false
     }
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "pending":
-        return "bg-yellow-100 text-yellow-800"
-      case "confirmed":
-        return "bg-blue-100 text-blue-800"
-      case "ready":
-        return "bg-purple-100 text-purple-800"
-      case "completed":
-        return "bg-green-100 text-green-800"
-      case "cancelled":
-        return "bg-red-100 text-red-800"
-      default:
-        return "bg-gray-100 text-gray-800"
-    }
+  const formatPrice = (price: number) => {
+    return new Intl.NumberFormat("uz-UZ").format(price) + " so'm"
   }
 
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case "pending":
-        return "Kutilmoqda"
-      case "confirmed":
-        return "Tasdiqlangan"
-      case "ready":
-        return "Tayyor"
-      case "completed":
-        return "Yakunlangan"
-      case "cancelled":
-        return "Bekor qilingan"
-      default:
-        return status
+  const getStatusBadge = (order: Order) => {
+    if (order.status === "completed") {
+      return <Badge className="bg-green-100 text-green-800">Yakunlandi</Badge>
     }
+    if (order.status === "cancelled") {
+      return <Badge variant="destructive">Bekor qilingan</Badge>
+    }
+    if (!order.is_agree) {
+      return <Badge variant="secondary">Kutilmoqda</Badge>
+    }
+    return <Badge className="bg-blue-100 text-blue-800">Jarayonda</Badge>
   }
 
   if (loading) {
     return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="text-center">Yuklanmoqda...</div>
+      <div className="page-container flex items-center justify-center min-h-[60vh]">
+        <div className="text-center">
+          <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
+          <p className="text-gray-600">Buyurtmalar yuklanmoqda...</p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold">Buyurtmalarim</h1>
-      </div>
+    <div className="page-container">
+      {user && <NotificationPopup userId={user.id} />}
 
-      {orders.length === 0 ? (
-        <Card>
-          <CardContent className="text-center py-8">
-            <Package className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-            <p className="text-gray-500">Hozircha buyurtmalaringiz yo'q</p>
-            <Button className="mt-4" onClick={() => router.push("/products")}>
-              Xarid qilishni boshlash
-            </Button>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-6">
-          {orders.map((order) => (
-            <Card key={order.id} className={`${highlightOrderId === order.id ? "ring-2 ring-blue-500" : ""}`}>
-              <CardHeader>
-                <div className="flex justify-between items-start">
-                  <div>
-                    <CardTitle className="flex items-center gap-2">
-                      {getStatusIcon(order.status)}
-                      {order.products.title}
-                    </CardTitle>
-                    <CardDescription>Buyurtma #{order.id.slice(0, 8)}</CardDescription>
-                  </div>
-                  <Badge className={getStatusColor(order.status)}>{getStatusText(order.status)}</Badge>
-                </div>
-              </CardHeader>
-
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <p>
-                      <strong>Sotuvchi:</strong> {order.products.users.full_name}
-                    </p>
-                    <p>
-                      <strong>Kompaniya:</strong> {order.products.users.company_name}
-                    </p>
-                    <p>
-                      <strong>Miqdor:</strong> {order.quantity}
-                    </p>
-                    <p>
-                      <strong>Narx:</strong> {order.total_price.toLocaleString()} so'm
-                    </p>
-                  </div>
-                  <div>
-                    <p>
-                      <strong>Manzil:</strong> {order.address}
-                    </p>
-                    <p>
-                      <strong>Sana:</strong> {new Date(order.created_at).toLocaleDateString("uz-UZ")}
-                    </p>
-                    <p>
-                      <strong>Bosqich:</strong> {order.stage}/4
-                    </p>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Order Stage Actions */}
-                <div className="space-y-3">
-                  {order.status === "confirmed" && order.stage === 2 && (
-                    <div className="bg-blue-50 p-4 rounded-lg">
-                      <h4 className="font-semibold mb-2">Buyurtmangiz tayyor! Olishga keldingizmi?</h4>
-                      <p className="text-sm text-gray-600 mb-3">Manzil: {order.address}</p>
-                      <div className="flex gap-2">
-                        <Button
-                          onClick={() => handleOrderAction(order.id, "client_went")}
-                          disabled={actionLoading === order.id}
-                          size="sm"
-                        >
-                          Ha, bordim
-                        </Button>
-                        <Button
-                          variant="outline"
-                          onClick={() => handleConfirmAction(order, "client_not_went")}
-                          disabled={actionLoading === order.id}
-                          size="sm"
-                        >
-                          Yo'q, bormayman
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {order.status === "completed" && (
-                    <div className="bg-green-50 p-4 rounded-lg">
-                      <h4 className="font-semibold mb-2 text-green-800">Buyurtma yakunlandi!</h4>
-                      <div className="flex gap-2">
-                        <Button onClick={() => setReviewDialog(order)} size="sm" variant="outline">
-                          <Star className="h-4 w-4 mr-1" />
-                          Baho berish
-                        </Button>
-                        <Button onClick={() => setComplaintDialog(order)} size="sm" variant="outline">
-                          <AlertTriangle className="h-4 w-4 mr-1" />
-                          Shikoyat qilish
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {order.status === "cancelled" && (
-                    <div className="bg-red-50 p-4 rounded-lg">
-                      <h4 className="font-semibold mb-2 text-red-800">Buyurtma bekor qilindi</h4>
-                      <Button onClick={() => router.push(`/product/${order.products.id}`)} size="sm" variant="outline">
-                        <RotateCcw className="h-4 w-4 mr-1" />
-                        Qayta buyurtma qilish
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {/* Review Dialog */}
-      <Dialog open={!!reviewDialog} onOpenChange={() => setReviewDialog(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Baho berish</DialogTitle>
-            <DialogDescription>{reviewDialog?.products.title} uchun baho va fikr qoldiring</DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-2">Baho</label>
-              <div className="flex gap-1">
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <button
-                    key={star}
-                    onClick={() => setRating(star)}
-                    className={`p-1 ${star <= rating ? "text-yellow-400" : "text-gray-300"}`}
-                  >
-                    <Star className="h-6 w-6 fill-current" />
-                  </button>
-                ))}
+      <div className="container mx-auto px-4 py-8">
+        <div className="max-w-6xl mx-auto">
+          {/* Header */}
+          <div className="mb-8">
+            <h1 className="text-4xl font-bold gradient-text mb-2 flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
+                <ShoppingCart className="h-6 w-6 text-white" />
               </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-2">Fikr (ixtiyoriy)</label>
-              <Textarea
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                placeholder="Mahsulot haqida fikringizni yozing..."
-                rows={3}
-              />
-            </div>
+              Buyurtmalarim
+            </h1>
+            <p className="text-gray-600 text-lg">Barcha buyurtmalaringizni bu yerda ko'rishingiz mumkin</p>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setReviewDialog(null)}>
-              Bekor qilish
-            </Button>
-            <Button onClick={submitReview}>Baho berish</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Complaint Dialog */}
-      <Dialog open={!!complaintDialog} onOpenChange={() => setComplaintDialog(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Shikoyat qilish</DialogTitle>
-            <DialogDescription>
-              {complaintDialog?.products.title} buyurtmasi haqida shikoyatingizni yozing
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-2">Shikoyat matni</label>
-              <Textarea
-                value={complaintText}
-                onChange={(e) => setComplaintText(e.target.value)}
-                placeholder="Muammo haqida batafsil yozing..."
-                rows={4}
-                required
-              />
+          {orders.length === 0 ? (
+            <div className="text-center py-20">
+              <div className="w-32 h-32 mx-auto bg-gradient-to-br from-gray-100 to-gray-200 rounded-3xl flex items-center justify-center mb-8">
+                <ShoppingCart className="h-16 w-16 text-gray-400" />
+              </div>
+              <h2 className="text-3xl font-bold mb-4 text-gray-800">Buyurtmalar yo'q</h2>
+              <p className="text-gray-600 mb-8 text-lg max-w-md mx-auto">
+                Hozircha hech qanday buyurtma bermadingiz. Xarid qilishni boshlang!
+              </p>
+              <Button onClick={() => router.push("/")} className="btn-primary text-lg px-8 py-4">
+                <Package className="mr-2 h-5 w-5" />
+                Xarid qilishni boshlash
+              </Button>
             </div>
-          </div>
+          ) : (
+            <div className="space-y-6">
+              {orders.map((order) => (
+                <Card key={order.id} className="card-beautiful overflow-hidden">
+                  <CardHeader className="border-b border-gray-100">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="text-xl">Buyurtma #{order.id.slice(-8)}</CardTitle>
+                        <p className="text-gray-600 mt-1">
+                          {new Date(order.created_at).toLocaleDateString("uz-UZ", {
+                            year: "numeric",
+                            month: "long",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        {getStatusBadge(order)}
+                        <p className="text-2xl font-bold text-blue-600 mt-2">{formatPrice(order.total_amount)}</p>
+                      </div>
+                    </div>
+                  </CardHeader>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setComplaintDialog(null)}>
-              Bekor qilish
-            </Button>
-            <Button onClick={submitComplaint} disabled={!complaintText.trim()}>
-              Shikoyat yuborish
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+                  <CardContent className="p-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                      {/* Product Info */}
+                      <div className="lg:col-span-2">
+                        <div className="flex gap-4 mb-6">
+                          <img
+                            src={order.products.image_url || "/placeholder.svg?height=120&width=80"}
+                            alt={order.products.name}
+                            className="w-20 h-28 object-cover rounded-lg"
+                          />
+                          <div className="flex-1">
+                            <h3 className="font-semibold text-lg text-gray-800 mb-1">{order.products.name}</h3>
+                            {order.products.author && (
+                              <p className="text-gray-600 mb-1">Muallif: {order.products.author}</p>
+                            )}
+                            {order.products.brand && (
+                              <p className="text-gray-600 mb-2">Brend: {order.products.brand}</p>
+                            )}
+                            <p className="text-sm text-muted-foreground mb-2">Miqdor: {order.quantity} dona</p>
+                            <p className="text-2xl font-bold text-primary">{formatPrice(order.total_amount)}</p>
+                          </div>
+                        </div>
 
-      {/* Confirmation Dialog */}
-      <Dialog open={!!confirmDialog} onOpenChange={() => setConfirmDialog(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Tasdiqlash</DialogTitle>
-            <DialogDescription>
-              {confirmDialog?.action === "client_not_went"
-                ? "Haqiqatan ham mahsulotni olishga bormaganmisiz?"
-                : "Bu amalni bajarishni tasdiqlaysizmi?"}
-            </DialogDescription>
-          </DialogHeader>
+                        {/* Order Progress */}
+                        <div className="mb-6">
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="font-semibold text-gray-800">Buyurtma holati</h4>
+                            <span className="text-sm text-gray-600">{getOrderProgress(order)}%</span>
+                          </div>
+                          <Progress value={getOrderProgress(order)} className="h-3 mb-2" />
+                          <p className="text-sm text-gray-600">{getOrderStage(order)}</p>
+                        </div>
 
-          {confirmDialog?.countdown && (
-            <div className="text-center py-4">
-              <div className="text-2xl font-bold text-red-500">{confirmDialog.countdown}</div>
-              <p className="text-sm text-gray-600">soniya kutib turing...</p>
+                        {/* Order Steps */}
+                        <div className="space-y-3">
+                          <div
+                            className={`flex items-center gap-3 p-3 rounded-lg ${
+                              order.status !== "cancelled"
+                                ? "bg-green-50 border border-green-200"
+                                : "bg-gray-50 border border-gray-200"
+                            }`}
+                          >
+                            <CheckCircle
+                              className={`h-5 w-5 ${order.status !== "cancelled" ? "text-green-600" : "text-gray-400"}`}
+                            />
+                            <span className="text-sm">Buyurtma berildi</span>
+                          </div>
+
+                          <div
+                            className={`flex items-center gap-3 p-3 rounded-lg ${
+                              order.is_agree
+                                ? "bg-green-50 border border-green-200"
+                                : "bg-gray-50 border border-gray-200"
+                            }`}
+                          >
+                            <CheckCircle className={`h-5 w-5 ${order.is_agree ? "text-green-600" : "text-gray-400"}`} />
+                            <span className="text-sm">Sotuvchi qabul qildi</span>
+                          </div>
+
+                          <div
+                            className={`flex items-center gap-3 p-3 rounded-lg ${
+                              order.is_client_went === true
+                                ? "bg-green-50 border border-green-200"
+                                : "bg-gray-50 border border-gray-200"
+                            }`}
+                          >
+                            <Truck
+                              className={`h-5 w-5 ${order.is_client_went === true ? "text-green-600" : "text-gray-400"}`}
+                            />
+                            <span className="text-sm">Mahsulot olishga bordingiz</span>
+                          </div>
+
+                          <div
+                            className={`flex items-center gap-3 p-3 rounded-lg ${
+                              order.status === "completed"
+                                ? "bg-green-50 border border-green-200"
+                                : "bg-gray-50 border border-gray-200"
+                            }`}
+                          >
+                            <Package
+                              className={`h-5 w-5 ${order.status === "completed" ? "text-green-600" : "text-gray-400"}`}
+                            />
+                            <span className="text-sm">Mahsulot berildi</span>
+                          </div>
+                        </div>
+
+                        {/* Pickup Address */}
+                        {order.pickup_address && (
+                          <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                            <div className="flex items-start gap-2">
+                              <MapPin className="h-5 w-5 text-blue-600 mt-0.5" />
+                              <div>
+                                <h5 className="font-semibold text-blue-800 mb-1">Mahsulot olish manzili:</h5>
+                                <p className="text-blue-700">{order.pickup_address}</p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Seller Notes */}
+                        {order.seller_notes && (
+                          <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                            <h5 className="font-semibold text-gray-800 mb-1">Sotuvchi eslatmasi:</h5>
+                            <p className="text-gray-700">{order.seller_notes}</p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Actions */}
+                      <div className="space-y-4">
+                        {/* Seller Contact */}
+                        <Card className="border-2 border-gray-100">
+                          <CardContent className="p-4">
+                            <h4 className="font-semibold mb-3 flex items-center gap-2">
+                              <User className="h-4 w-4" />
+                              Sotuvchi
+                            </h4>
+                            <div className="space-y-2">
+                              <p className="font-medium">
+                                {order.products.users.company_name || order.products.users.full_name}
+                              </p>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="w-full bg-transparent"
+                                onClick={() => window.open(`tel:${order.products.users.phone}`)}
+                              >
+                                <Phone className="h-4 w-4 mr-2" />
+                                {order.products.users.phone}
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+
+                        {/* Action Buttons */}
+                        <div className="space-y-3">
+                          {canTakeAction(order, "client_went") && (
+                            <div className="space-y-2">
+                              <p className="text-sm text-gray-600 font-medium">Mahsulot olishga bordingizmi?</p>
+                              <Button
+                                className="w-full bg-green-600 hover:bg-green-700"
+                                onClick={() => {
+                                  setSelectedOrder(order)
+                                  handleConfirmAction("client_went")
+                                }}
+                              >
+                                <CheckCircle className="h-4 w-4 mr-2" />
+                                Ha, bordim
+                              </Button>
+                              <Button
+                                variant="outline"
+                                className="w-full border-red-200 text-red-600 hover:bg-red-50 bg-transparent"
+                                onClick={() => {
+                                  setSelectedOrder(order)
+                                  handleConfirmAction("client_not_went")
+                                }}
+                              >
+                                <XCircle className="h-4 w-4 mr-2" />
+                                Yo'q, bormayman
+                              </Button>
+                            </div>
+                          )}
+
+                          {canTakeAction(order, "review") && (
+                            <Button
+                              className="w-full bg-yellow-500 hover:bg-yellow-600"
+                              onClick={() => {
+                                setSelectedOrder(order)
+                                setShowReviewDialog(true)
+                              }}
+                            >
+                              <Star className="h-4 w-4 mr-2" />
+                              Sharh qoldirish
+                            </Button>
+                          )}
+
+                          {canTakeAction(order, "reorder") && (
+                            <Button
+                              className="w-full bg-blue-600 hover:bg-blue-700"
+                              onClick={() => router.push(`/product/${order.products.id}`)}
+                            >
+                              <RefreshCw className="h-4 w-4 mr-2" />
+                              Qayta buyurtma qilish
+                            </Button>
+                          )}
+
+                          {canTakeAction(order, "complaint") && (
+                            <Button
+                              variant="outline"
+                              className="w-full border-red-200 text-red-600 hover:bg-red-50 bg-transparent"
+                              onClick={() => {
+                                setSelectedOrder(order)
+                                setShowComplaintDialog(true)
+                              }}
+                            >
+                              <AlertTriangle className="h-4 w-4 mr-2" />
+                              Shikoyat qilish
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
             </div>
           )}
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmDialog(null)}>
-              Bekor qilish
-            </Button>
-            <Button
-              onClick={() => handleOrderAction(confirmDialog!.order.id, confirmDialog!.action)}
-              disabled={!!confirmDialog?.countdown}
-              variant={confirmDialog?.action === "client_not_went" ? "destructive" : "default"}
-            >
-              {confirmDialog?.countdown ? `Kutib turing (${confirmDialog.countdown})` : "Tasdiqlash"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </div>
+      </div>
     </div>
   )
 }

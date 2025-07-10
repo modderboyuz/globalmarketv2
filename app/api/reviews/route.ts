@@ -1,99 +1,59 @@
-import { createSupabaseClient } from "@/lib/supabase-server"
 import { type NextRequest, NextResponse } from "next/server"
-
-export async function GET(request: NextRequest) {
-  try {
-    const supabase = createSupabaseClient()
-    const { searchParams } = new URL(request.url)
-    const product_id = searchParams.get("product_id")
-
-    if (!product_id) {
-      return NextResponse.json({ error: "Product ID is required" }, { status: 400 })
-    }
-
-    const { data: reviews, error } = await supabase
-      .from("reviews")
-      .select(`
-        *,
-        users (
-          full_name
-        )
-      `)
-      .eq("product_id", product_id)
-      .order("created_at", { ascending: false })
-
-    if (error) {
-      console.error("Reviews fetch error:", error)
-      return NextResponse.json({ error: "Failed to fetch reviews" }, { status: 500 })
-    }
-
-    return NextResponse.json({ reviews })
-  } catch (error) {
-    console.error("Reviews API error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
-  }
-}
+import { supabase } from "@/lib/supabase"
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createSupabaseClient()
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
+    const body = await request.json()
+    const { productId, orderId, rating, comment, userId } = body
 
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    if (!productId || !orderId || !rating || !userId) {
+      return NextResponse.json({ error: "Barcha maydonlar to'ldirilishi kerak" }, { status: 400 })
     }
 
-    const { product_id, order_id, rating, comment } = await request.json()
-
-    if (!product_id || !order_id || !rating) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
-    }
-
-    if (rating < 1 || rating > 5) {
-      return NextResponse.json({ error: "Rating must be between 1 and 5" }, { status: 400 })
-    }
-
-    // Verify order belongs to user and is completed
+    // Check if the order exists and belongs to the user
     const { data: order, error: orderError } = await supabase
       .from("orders")
-      .select("status")
-      .eq("id", order_id)
-      .eq("user_id", user.id)
-      .eq("product_id", product_id)
+      .select("id")
+      .eq("id", orderId)
+      .eq("user_id", userId)
       .single()
 
     if (orderError || !order) {
-      return NextResponse.json({ error: "Order not found" }, { status: 404 })
+      return NextResponse.json({ error: "Buyurtma topilmadi yoki sizga tegishli emas" }, { status: 404 })
     }
 
-    if (order.status !== "completed") {
-      return NextResponse.json({ error: "Can only review completed orders" }, { status: 400 })
+    // Check if the product exists
+    const { data: product, error: productError } = await supabase
+      .from("products")
+      .select("id")
+      .eq("id", productId)
+      .single()
+
+    if (productError || !product) {
+      return NextResponse.json({ error: "Mahsulot topilmadi" }, { status: 404 })
     }
 
-    // Create review
+    // Insert the review
     const { data: review, error: reviewError } = await supabase
-      .from("reviews")
+      .from("product_reviews")
       .insert({
-        product_id,
-        user_id: user.id,
-        order_id,
-        rating,
-        comment,
+        product_id: productId,
+        order_id: orderId,
+        user_id: userId,
+        rating: rating,
+        comment: comment,
       })
       .select()
       .single()
 
     if (reviewError) {
       console.error("Review creation error:", reviewError)
-      return NextResponse.json({ error: "Failed to create review" }, { status: 500 })
+      return NextResponse.json({ error: "Sharh yaratishda xatolik" }, { status: 500 })
     }
 
     return NextResponse.json({ success: true, review })
   } catch (error) {
-    console.error("Review creation error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    console.error("API Error:", error)
+    return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
   }
 }
