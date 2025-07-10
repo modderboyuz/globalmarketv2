@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Package, ShoppingCart, TrendingUp, Eye, Heart, Star, Plus, BarChart3, DollarSign } from "lucide-react"
+import { Package, ShoppingCart, TrendingUp, Star, Plus, BarChart3, DollarSign, Eye, Heart } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 import Link from "next/link"
@@ -27,6 +27,7 @@ interface RecentOrder {
   quantity: number
   total_amount: number
   status: string
+  stage: number
   created_at: string
   products: {
     name: string
@@ -43,6 +44,7 @@ interface TopProduct {
   like_count: number
   average_rating: number
   image_url: string
+  stock_quantity: number
 }
 
 export default function SellerDashboard() {
@@ -109,8 +111,9 @@ export default function SellerDashboard() {
         const { data: orders } = await supabase.from("orders").select("*").in("product_id", productIds)
 
         const totalOrders = orders?.length || 0
-        const totalRevenue = orders?.reduce((sum, o) => sum + (o.total_amount || 0), 0) || 0
-        const pendingOrders = orders?.filter((o) => o.status === "pending")?.length || 0
+        const totalRevenue =
+          orders?.filter((o) => o.status === "completed")?.reduce((sum, o) => sum + (o.total_amount || 0), 0) || 0
+        const pendingOrders = orders?.filter((o) => o.status === "pending" || o.stage < 4)?.length || 0
 
         setStats({
           totalProducts,
@@ -183,24 +186,23 @@ export default function SellerDashboard() {
     return new Intl.NumberFormat("uz-UZ").format(price) + " so'm"
   }
 
-  const getStatusBadge = (status: string) => {
-    const statusConfig = {
-      pending: { variant: "secondary" as const, text: "Kutilmoqda" },
-      processing: { variant: "default" as const, text: "Jarayonda" },
-      completed: { variant: "default" as const, text: "Bajarilgan" },
-      cancelled: { variant: "destructive" as const, text: "Bekor qilingan" },
+  const getStatusBadge = (status: string, stage: number) => {
+    if (status === "completed") {
+      return <Badge className="bg-green-100 text-green-800">Yakunlandi</Badge>
     }
-
-    const config = statusConfig[status as keyof typeof statusConfig] || {
-      variant: "secondary" as const,
-      text: status,
+    if (status === "cancelled") {
+      return <Badge variant="destructive">Bekor qilingan</Badge>
     }
-
-    return (
-      <Badge variant={config.variant} className="text-xs">
-        {config.text}
-      </Badge>
-    )
+    if (stage === 1) {
+      return <Badge variant="secondary">Yangi</Badge>
+    }
+    if (stage === 2) {
+      return <Badge className="bg-blue-100 text-blue-800">Qabul qilingan</Badge>
+    }
+    if (stage === 3) {
+      return <Badge className="bg-yellow-100 text-yellow-800">Kutilmoqda</Badge>
+    }
+    return <Badge variant="secondary">Noma'lum</Badge>
   }
 
   if (loading) {
@@ -308,7 +310,7 @@ export default function SellerDashboard() {
                     </div>
                     <div className="text-right">
                       <p className="font-bold text-green-600">{formatPrice(order.total_amount)}</p>
-                      {getStatusBadge(order.status)}
+                      {getStatusBadge(order.status, order.stage)}
                       <p className="text-xs text-gray-500 mt-1">{new Date(order.created_at).toLocaleDateString()}</p>
                     </div>
                   </div>
@@ -349,8 +351,16 @@ export default function SellerDashboard() {
               <div className="space-y-4">
                 {topProducts.map((product) => (
                   <div key={product.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                    <div className="w-12 h-12 bg-gray-200 rounded-lg flex items-center justify-center">
-                      <Package className="h-6 w-6 text-gray-400" />
+                    <div className="w-12 h-12 bg-gray-200 rounded-lg flex items-center justify-center overflow-hidden">
+                      {product.image_url ? (
+                        <img
+                          src={product.image_url || "/placeholder.svg"}
+                          alt={product.name}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <Package className="h-6 w-6 text-gray-400" />
+                      )}
                     </div>
                     <div className="flex-1">
                       <h4 className="font-medium line-clamp-1">{product.name}</h4>
@@ -373,6 +383,9 @@ export default function SellerDashboard() {
                           {product.average_rating}
                         </span>
                       </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm font-medium">Ombor: {product.stock_quantity}</div>
                     </div>
                   </div>
                 ))}

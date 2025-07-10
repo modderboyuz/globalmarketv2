@@ -1,10 +1,21 @@
 "use client"
+
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
 import {
   ShoppingCart,
   Package,
@@ -36,6 +47,7 @@ interface Order {
   pickup_address: string | null
   seller_notes: string | null
   client_notes: string | null
+  stage: number
   created_at: string
   products: {
     id: string
@@ -73,8 +85,7 @@ export default function OrdersPage() {
   const [confirmAction, setConfirmAction] = useState<string>("")
   const [confirmTimer, setConfirmTimer] = useState(0)
   const [review, setReview] = useState<Review>({ rating: 5, comment: "" })
-  const [complaintType, setComplaintType] = useState("")
-  const [complaintDescription, setComplaintDescription] = useState("")
+  const [complaintText, setComplaintText] = useState("")
   const [actionNotes, setActionNotes] = useState("")
 
   useEffect(() => {
@@ -107,6 +118,8 @@ export default function OrdersPage() {
     } catch (error) {
       console.error("Error checking user:", error)
       router.push("/login")
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -220,8 +233,7 @@ export default function OrdersPage() {
         },
         body: JSON.stringify({
           orderId: selectedOrder.id,
-          complaintType,
-          description: complaintDescription,
+          complaintText,
           userId: user.id,
         }),
       })
@@ -234,8 +246,7 @@ export default function OrdersPage() {
 
       toast.success("Shikoyat muvaffaqiyatli yuborildi")
       setShowComplaintDialog(false)
-      setComplaintType("")
-      setComplaintDescription("")
+      setComplaintText("")
     } catch (error: any) {
       toast.error(error.message || "Xatolik yuz berdi")
     }
@@ -249,40 +260,38 @@ export default function OrdersPage() {
 
   const executeAction = () => {
     if (confirmTimer > 0) return
-
     updateOrderStatus(selectedOrder!.id, confirmAction, actionNotes)
   }
 
   const getOrderProgress = (order: Order) => {
     if (order.status === "cancelled") return 0
-    if (!order.is_agree) return 25
-    if (order.is_client_went === null) return 50
-    if (order.is_client_went === false) return 25
-    if (order.is_client_claimed === null) return 75
-    if (order.status === "completed") return 100
-    return 50
+    if (order.stage === 1) return 25
+    if (order.stage === 2) return 50
+    if (order.stage === 3) return 75
+    if (order.stage === 4) return 100
+    return 25
   }
 
   const getOrderStage = (order: Order) => {
     if (order.status === "cancelled") return "Bekor qilingan"
-    if (!order.is_agree) return "Sotuvchi javobini kutmoqda"
-    if (order.is_client_went === null) return "Mahsulot olishga boring"
-    if (order.is_client_went === false) return "Mahsulot olishga bormaganingizni bildirdingiz"
-    if (order.is_client_claimed === null) return "Sotuvchi mahsulot berishini kutmoqda"
-    if (order.status === "completed") return "Buyurtma yakunlandi"
+    if (order.stage === 1) return "Sotuvchi javobini kutmoqda"
+    if (order.stage === 2 && order.is_client_went === null) return "Mahsulot olishga boring"
+    if (order.stage === 2 && order.is_client_went === false) return "Mahsulot olishga bormaganingizni bildirdingiz"
+    if (order.stage === 3) return "Sotuvchi mahsulot berishini kutmoqda"
+    if (order.stage === 4 && order.status === "completed") return "Buyurtma yakunlandi"
     return "Noma'lum holat"
   }
 
   const canTakeAction = (order: Order, action: string) => {
     switch (action) {
       case "client_went":
-        return order.is_agree && order.is_client_went === null
+        return order.is_agree && order.is_client_went === null && order.stage === 2
       case "client_not_went":
-        return order.is_agree && order.is_client_went === null
+        return order.is_agree && order.is_client_went === null && order.stage === 2
       case "reorder":
         return order.status === "cancelled"
       case "review":
-        return order.status === "completed"
+        return order.status === "completed" && order.stage === 4
       case "complaint":
         return order.status === "cancelled" || order.status === "completed"
       default:
@@ -411,51 +420,49 @@ export default function OrdersPage() {
                         <div className="space-y-3">
                           <div
                             className={`flex items-center gap-3 p-3 rounded-lg ${
-                              order.status !== "cancelled"
+                              order.stage >= 1
                                 ? "bg-green-50 border border-green-200"
                                 : "bg-gray-50 border border-gray-200"
                             }`}
                           >
                             <CheckCircle
-                              className={`h-5 w-5 ${order.status !== "cancelled" ? "text-green-600" : "text-gray-400"}`}
+                              className={`h-5 w-5 ${order.stage >= 1 ? "text-green-600" : "text-gray-400"}`}
                             />
                             <span className="text-sm">Buyurtma berildi</span>
                           </div>
 
                           <div
                             className={`flex items-center gap-3 p-3 rounded-lg ${
-                              order.is_agree
+                              order.stage >= 2
                                 ? "bg-green-50 border border-green-200"
                                 : "bg-gray-50 border border-gray-200"
                             }`}
                           >
-                            <CheckCircle className={`h-5 w-5 ${order.is_agree ? "text-green-600" : "text-gray-400"}`} />
+                            <CheckCircle
+                              className={`h-5 w-5 ${order.stage >= 2 ? "text-green-600" : "text-gray-400"}`}
+                            />
                             <span className="text-sm">Sotuvchi qabul qildi</span>
                           </div>
 
                           <div
                             className={`flex items-center gap-3 p-3 rounded-lg ${
-                              order.is_client_went === true
+                              order.stage >= 3
                                 ? "bg-green-50 border border-green-200"
                                 : "bg-gray-50 border border-gray-200"
                             }`}
                           >
-                            <Truck
-                              className={`h-5 w-5 ${order.is_client_went === true ? "text-green-600" : "text-gray-400"}`}
-                            />
+                            <Truck className={`h-5 w-5 ${order.stage >= 3 ? "text-green-600" : "text-gray-400"}`} />
                             <span className="text-sm">Mahsulot olishga bordingiz</span>
                           </div>
 
                           <div
                             className={`flex items-center gap-3 p-3 rounded-lg ${
-                              order.status === "completed"
+                              order.stage >= 4
                                 ? "bg-green-50 border border-green-200"
                                 : "bg-gray-50 border border-gray-200"
                             }`}
                           >
-                            <Package
-                              className={`h-5 w-5 ${order.status === "completed" ? "text-green-600" : "text-gray-400"}`}
-                            />
+                            <Package className={`h-5 w-5 ${order.stage >= 4 ? "text-green-600" : "text-gray-400"}`} />
                             <span className="text-sm">Mahsulot berildi</span>
                           </div>
                         </div>
@@ -583,6 +590,116 @@ export default function OrdersPage() {
           )}
         </div>
       </div>
+
+      {/* Confirmation Dialog */}
+      <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Tasdiqlash</DialogTitle>
+            <DialogDescription>
+              {confirmAction === "client_went"
+                ? "Mahsulot olishga borgan ekanligingizni tasdiqlaysizmi?"
+                : "Mahsulot olishga bormaganingizni tasdiqlaysizmi?"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="notes">Izoh (ixtiyoriy)</Label>
+              <Textarea
+                id="notes"
+                placeholder="Qo'shimcha ma'lumot..."
+                value={actionNotes}
+                onChange={(e) => setActionNotes(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowConfirmDialog(false)}>
+              Bekor qilish
+            </Button>
+            <Button
+              onClick={executeAction}
+              disabled={confirmTimer > 0}
+              className={confirmTimer > 0 ? "bg-gray-400" : ""}
+            >
+              {confirmTimer > 0 ? `Kutish (${confirmTimer}s)` : "Tasdiqlash"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Review Dialog */}
+      <Dialog open={showReviewDialog} onOpenChange={setShowReviewDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Sharh qoldirish</DialogTitle>
+            <DialogDescription>{selectedOrder?.products.name} mahsuloti haqida fikringizni bildiring</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Reyting</Label>
+              <div className="flex gap-1 mt-2">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <button key={star} onClick={() => setReview({ ...review, rating: star })} className="p-1">
+                    <Star
+                      className={`h-6 w-6 ${
+                        star <= review.rating ? "fill-yellow-400 text-yellow-400" : "text-gray-300"
+                      }`}
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="comment">Sharh (ixtiyoriy)</Label>
+              <Textarea
+                id="comment"
+                placeholder="Mahsulot haqida fikringiz..."
+                value={review.comment}
+                onChange={(e) => setReview({ ...review, comment: e.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowReviewDialog(false)}>
+              Bekor qilish
+            </Button>
+            <Button onClick={submitReview}>Sharh qoldirish</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Complaint Dialog */}
+      <Dialog open={showComplaintDialog} onOpenChange={setShowComplaintDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Shikoyat qilish</DialogTitle>
+            <DialogDescription>
+              {selectedOrder?.products.name} buyurtmasi haqida shikoyatingizni bildiring
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="complaint">Shikoyat matni</Label>
+              <Textarea
+                id="complaint"
+                placeholder="Shikoyatingizni batafsil yozing..."
+                value={complaintText}
+                onChange={(e) => setComplaintText(e.target.value)}
+                required
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowComplaintDialog(false)}>
+              Bekor qilish
+            </Button>
+            <Button onClick={submitComplaint} disabled={!complaintText.trim()}>
+              Shikoyat yuborish
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

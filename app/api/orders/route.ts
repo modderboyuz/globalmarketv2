@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
     const totalAmount = productTotal + deliveryTotal
 
     // Generate anonymous temp ID for non-logged in users
-    const anonTempId = !userId ? `anon_${Date.now()}_${Math.random().toString(36).substr(2, 2)}` : null
+    const anonTempId = !userId ? `anon_${Date.now()}_${Math.random().toString(36).substr(2, 9)}` : null
 
     // Create order
     const orderData = {
@@ -75,6 +75,10 @@ export async function POST(request: NextRequest) {
       status: "pending",
       order_type: orderType,
       anon_temp_id: anonTempId,
+      stage: 1,
+      is_agree: false,
+      is_client_went: null,
+      is_client_claimed: null,
     }
 
     const { data: order, error: orderError } = await supabase.from("orders").insert(orderData).select().single()
@@ -84,7 +88,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Buyurtma yaratishda xatolik" }, { status: 500 })
     }
 
-    // Update product order count and stock
+    // Update product order count and decrease stock
     await supabase
       .from("products")
       .update({
@@ -94,31 +98,14 @@ export async function POST(request: NextRequest) {
       .eq("id", productId)
 
     // Create notification for seller
-    if (product.seller_id) {
+    if (product.seller_id && userId) {
       await supabase.rpc("create_notification", {
         p_user_id: product.seller_id,
         p_title: "Yangi buyurtma",
-        p_message: `Sizning mahsulotingizga yangi buyurtma keldi`,
+        p_message: `${fullName} tomonidan ${product.name} mahsulotiga buyurtma berildi`,
         p_type: "new_order",
         p_data: { order_id: order.id, product_id: productId },
       })
-    }
-
-    // Notify admins via Telegram
-    try {
-      const notifyResponse = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL}/api/webhook/telegram`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          type: "new_order",
-          order_id: order.id,
-        }),
-      })
-    } catch (notifyError) {
-      console.error("Error notifying admins:", notifyError)
-      // Don't fail the order creation if notification fails
     }
 
     return NextResponse.json({
@@ -149,6 +136,7 @@ export async function GET(request: NextRequest) {
       .select(`
         *,
         products (
+          id,
           name,
           image_url,
           price,
@@ -156,7 +144,13 @@ export async function GET(request: NextRequest) {
           brand,
           author,
           has_delivery,
-          delivery_price
+          delivery_price,
+          seller_id,
+          users:seller_id (
+            full_name,
+            company_name,
+            phone
+          )
         )
       `)
       .eq("user_id", userId)
@@ -177,7 +171,7 @@ export async function GET(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json()
-    const { orderId, action, userId, notes } = body
+    const { orderId, action, userId, notes, pickupAddress } = body
 
     if (!orderId || !action) {
       return NextResponse.json({ error: "Order ID va action talab qilinadi" }, { status: 400 })
@@ -198,6 +192,7 @@ export async function PUT(request: NextRequest) {
     let notificationTitle = ""
     let notificationMessage = ""
     let notificationType = ""
+    let notificationUserId = null
 
     switch (action) {
       case "agree":
@@ -205,12 +200,14 @@ export async function PUT(request: NextRequest) {
         updateData = {
           is_agree: true,
           status: "processing",
-          pickup_address: notes || order.address,
+          pickup_address: pickupAddress || order.address,
           seller_notes: notes,
+          stage: 2,
         }
         notificationTitle = "Buyurtma qabul qilindi"
-        notificationMessage = `${order.products.name} buyurtmangiz qabul qilindi. Mahsulotni olish uchun manzil: ${notes || order.address}`
+        notificationMessage = `${order.products.name} buyurtmangiz qabul qilindi. Mahsulotni olish manzili: ${pickupAddress || order.address}`
         notificationType = "order_agreed"
+        notificationUserId = order.user_id
         break
 
       case "client_went":
@@ -218,10 +215,12 @@ export async function PUT(request: NextRequest) {
         updateData = {
           is_client_went: true,
           client_notes: notes,
+          stage: 3,
         }
         notificationTitle = "Mijoz mahsulot olishga keldi"
         notificationMessage = `${order.full_name} mahsulot olishga kelganini tasdiqladi`
         notificationType = "client_arrived"
+        notificationUserId = order.products.seller_id
         break
 
       case "client_not_went":
@@ -229,10 +228,12 @@ export async function PUT(request: NextRequest) {
         updateData = {
           is_client_went: false,
           client_notes: notes,
+          stage: 2,
         }
         notificationTitle = "Mijoz mahsulot olishga kelmadi"
         notificationMessage = `${order.full_name} mahsulot olishga kelmaganini bildirdi`
         notificationType = "client_not_arrived"
+        notificationUserId = order.products.seller_id
         break
 
       case "product_given":
@@ -241,10 +242,12 @@ export async function PUT(request: NextRequest) {
           is_client_claimed: true,
           status: "completed",
           seller_notes: notes,
+          stage: 4,
         }
         notificationTitle = "Mahsulot berildi"
         notificationMessage = `${order.products.name} mahsuloti muvaffaqiyatli berildi. Fikr qoldiring!`
         notificationType = "product_delivered"
+        notificationUserId = order.user_id
         break
 
       case "product_not_given":
@@ -253,10 +256,28 @@ export async function PUT(request: NextRequest) {
           is_client_claimed: false,
           status: "cancelled",
           seller_notes: notes,
+          stage: 4,
         }
         notificationTitle = "Mahsulot berilmadi"
         notificationMessage = `${order.products.name} mahsuloti berilmadi. Qayta buyurtma qilishingiz mumkin.`
         notificationType = "product_not_delivered"
+        notificationUserId = order.user_id
+
+        // Return stock to product
+        const { data: product } = await supabase
+          .from("products")
+          .select("stock_quantity")
+          .eq("id", order.product_id)
+          .single()
+
+        if (product) {
+          await supabase
+            .from("products")
+            .update({
+              stock_quantity: product.stock_quantity + order.quantity,
+            })
+            .eq("id", order.product_id)
+        }
         break
 
       default:
@@ -271,16 +292,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: "Buyurtmani yangilashda xatolik" }, { status: 500 })
     }
 
-    // Create notification for appropriate user
-    let notificationUserId = null
-    if (action === "agree") {
-      notificationUserId = order.user_id
-    } else if (action.startsWith("client_")) {
-      notificationUserId = order.products.seller_id
-    } else {
-      notificationUserId = order.user_id
-    }
-
+    // Create notification
     if (notificationUserId) {
       await supabase.rpc("create_notification", {
         p_user_id: notificationUserId,

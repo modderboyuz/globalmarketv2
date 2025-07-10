@@ -13,7 +13,6 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import {
   Star,
-  ShoppingCart,
   User,
   Phone,
   MapPin,
@@ -27,6 +26,7 @@ import {
   Minus,
   Award,
   Zap,
+  Eye,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
@@ -44,6 +44,9 @@ interface Product {
   product_type: string
   brand: string
   author: string
+  view_count: number
+  like_count: number
+  average_rating: number
   categories: {
     name_uz: string
   }
@@ -55,17 +58,29 @@ interface Product {
   }
 }
 
+interface Review {
+  id: string
+  rating: number
+  comment: string
+  created_at: string
+  users: {
+    full_name: string
+  }
+}
+
 export default function ProductDetailPage() {
   const params = useParams()
   const router = useRouter()
   const productId = params.id as string
 
   const [product, setProduct] = useState<Product | null>(null)
+  const [reviews, setReviews] = useState<Review[]>([])
   const [loading, setLoading] = useState(true)
   const [orderLoading, setOrderLoading] = useState(false)
-  const [cartLoading, setCartLoading] = useState(false)
+  const [likeLoading, setLikeLoading] = useState(false)
   const [quantity, setQuantity] = useState(1)
   const [user, setUser] = useState<any>(null)
+  const [isLiked, setIsLiked] = useState(false)
 
   const [formData, setFormData] = useState({
     fullName: "",
@@ -77,6 +92,7 @@ export default function ProductDetailPage() {
     if (productId) {
       fetchProductDetails()
       checkUser()
+      incrementViewCount()
     }
   }, [productId])
 
@@ -92,6 +108,10 @@ export default function ProductDetailPage() {
         phone: currentUser.user_metadata.phone || "",
         address: currentUser.user_metadata.address || "",
       })
+    }
+
+    if (currentUser) {
+      checkLikeStatus(currentUser.id)
     }
   }
 
@@ -116,11 +136,85 @@ export default function ProductDetailPage() {
 
       if (productError) throw productError
       setProduct(productData)
+
+      // Fetch reviews
+      const { data: reviewsData } = await supabase
+        .from("product_reviews")
+        .select(`
+          *,
+          users (full_name)
+        `)
+        .eq("product_id", productId)
+        .order("created_at", { ascending: false })
+
+      setReviews(reviewsData || [])
     } catch (error) {
       console.error("Error fetching product details:", error)
       toast.error("Mahsulot ma'lumotlarini olishda xatolik")
     } finally {
       setLoading(false)
+    }
+  }
+
+  const incrementViewCount = async () => {
+    try {
+      await supabase.rpc("increment_view_count", { product_id: productId })
+    } catch (error) {
+      console.error("Error incrementing view count:", error)
+    }
+  }
+
+  const checkLikeStatus = async (userId: string) => {
+    try {
+      const response = await fetch(`/api/likes?productId=${productId}&userId=${userId}`)
+      const result = await response.json()
+
+      if (result.success) {
+        setIsLiked(result.isLiked)
+      }
+    } catch (error) {
+      console.error("Error checking like status:", error)
+    }
+  }
+
+  const handleLike = async () => {
+    if (!user) {
+      toast.error("Like qilish uchun tizimga kiring")
+      return
+    }
+
+    setLikeLoading(true)
+
+    try {
+      const response = await fetch("/api/likes", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          productId,
+          userId: user.id,
+        }),
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        setIsLiked(result.liked)
+        // Update product like count
+        if (product) {
+          setProduct({
+            ...product,
+            like_count: result.liked ? product.like_count + 1 : product.like_count - 1,
+          })
+        }
+        toast.success(result.liked ? "Like qilindi" : "Like olib tashlandi")
+      }
+    } catch (error) {
+      console.error("Error handling like:", error)
+      toast.error("Like qilishda xatolik")
+    } finally {
+      setLikeLoading(false)
     }
   }
 
@@ -130,6 +224,11 @@ export default function ProductDetailPage() {
 
     if (!formData.fullName || !formData.phone || !formData.address) {
       toast.error("Barcha maydonlarni to'ldiring")
+      return
+    }
+
+    if (product.stock_quantity < quantity) {
+      toast.error("Yetarli miqdorda mahsulot yo'q")
       return
     }
 
@@ -166,6 +265,9 @@ export default function ProductDetailPage() {
       setFormData({ fullName: "", phone: "", address: "" })
       setQuantity(1)
 
+      // Update product stock in UI
+      setProduct((prev) => (prev ? { ...prev, stock_quantity: prev.stock_quantity - quantity } : null))
+
       // Redirect to orders page if user is logged in
       if (user) {
         setTimeout(() => {
@@ -176,42 +278,6 @@ export default function ProductDetailPage() {
       toast.error(error.message || "Xatolik yuz berdi")
     } finally {
       setOrderLoading(false)
-    }
-  }
-
-  const handleAddToCart = async () => {
-    if (!user) {
-      toast.error("Savatga qo'shish uchun tizimga kiring")
-      router.push("/login")
-      return
-    }
-
-    if (!product) return
-
-    setCartLoading(true)
-
-    try {
-      const { data, error } = await supabase.from("cart").upsert(
-        {
-          user_id: user.id,
-          product_id: product.id,
-          quantity: quantity,
-        },
-        {
-          onConflict: "user_id,product_id",
-        },
-      )
-
-      if (error) throw error
-
-      toast.success("Mahsulot savatga qo'shildi!")
-
-      // Update cart count in header
-      window.location.reload()
-    } catch (error: any) {
-      toast.error("Savatga qo'shishda xatolik yuz berdi")
-    } finally {
-      setCartLoading(false)
     }
   }
 
@@ -232,6 +298,12 @@ export default function ProductDetailPage() {
       default:
         return "📦"
     }
+  }
+
+  const renderStars = (rating: number) => {
+    return Array.from({ length: 5 }, (_, i) => (
+      <Star key={i} className={`h-4 w-4 ${i < rating ? "fill-yellow-400 text-yellow-400" : "text-gray-300"}`} />
+    ))
   }
 
   if (loading) {
@@ -285,12 +357,28 @@ export default function ProductDetailPage() {
                     className="object-cover"
                   />
                   <div className="absolute top-4 right-4 flex flex-col gap-2">
-                    <Button size="icon" variant="secondary" className="rounded-full bg-white/90 backdrop-blur-sm">
-                      <Heart className="h-4 w-4" />
+                    <Button
+                      size="icon"
+                      variant="secondary"
+                      className="rounded-full bg-white/90 backdrop-blur-sm"
+                      onClick={handleLike}
+                      disabled={likeLoading}
+                    >
+                      <Heart className={`h-4 w-4 ${isLiked ? "fill-red-500 text-red-500" : ""}`} />
                     </Button>
                     <Button size="icon" variant="secondary" className="rounded-full bg-white/90 backdrop-blur-sm">
                       <Share2 className="h-4 w-4" />
                     </Button>
+                  </div>
+                  <div className="absolute bottom-4 left-4 flex gap-2">
+                    <Badge className="bg-white/90 text-gray-800 flex items-center gap-1">
+                      <Eye className="h-3 w-3" />
+                      {product.view_count}
+                    </Badge>
+                    <Badge className="bg-white/90 text-gray-800 flex items-center gap-1">
+                      <Heart className="h-3 w-3" />
+                      {product.like_count}
+                    </Badge>
                   </div>
                 </div>
               </div>
@@ -317,9 +405,9 @@ export default function ProductDetailPage() {
 
                   <div className="flex items-center space-x-4 mb-4">
                     <div className="flex items-center space-x-1">
-                      <Star className="h-5 w-5 fill-yellow-400 text-yellow-400" />
-                      <span className="font-semibold">4.5</span>
-                      <span className="text-gray-500">({product.order_count || 0} baho)</span>
+                      <div className="flex">{renderStars(Math.round(product.average_rating))}</div>
+                      <span className="font-semibold">{product.average_rating.toFixed(1)}</span>
+                      <span className="text-gray-500">({reviews.length} sharh)</span>
                     </div>
                     <Separator orientation="vertical" className="h-4" />
                     <span className="text-gray-500">{product.order_count || 0} marta sotilgan</span>
@@ -337,8 +425,11 @@ export default function ProductDetailPage() {
                     </div>
                     <div>
                       <p className="font-medium">
-                        <Link href={`/seller/${product.users.id}`}>
-                          {product.users?.full_name || "Noma'lum sotuvchi"}
+                        <Link
+                          href={`/seller/${product.users.id}`}
+                          className="hover:text-blue-600 transition-colors cursor-pointer"
+                        >
+                          {product.users?.company_name || product.users?.full_name || "Noma'lum sotuvchi"}
                         </Link>
                       </p>
                       {product.users?.is_verified_seller && (
@@ -376,6 +467,33 @@ export default function ProductDetailPage() {
                 )}
               </div>
             </div>
+
+            {/* Reviews Section */}
+            {reviews.length > 0 && (
+              <div className="mt-12">
+                <h3 className="text-2xl font-bold mb-6">Sharhlar ({reviews.length})</h3>
+                <div className="space-y-4">
+                  {reviews.map((review) => (
+                    <Card key={review.id} className="card-beautiful">
+                      <CardContent className="p-4">
+                        <div className="flex items-start justify-between mb-3">
+                          <div>
+                            <p className="font-semibold">{review.users.full_name}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <div className="flex">{renderStars(review.rating)}</div>
+                              <span className="text-sm text-gray-500">
+                                {new Date(review.created_at).toLocaleDateString("uz-UZ")}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        {review.comment && <p className="text-gray-700">{review.comment}</p>}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Order Options */}
@@ -401,43 +519,15 @@ export default function ProductDetailPage() {
                     size="icon"
                     onClick={() => setQuantity(Math.min(product.stock_quantity, quantity + 1))}
                     className="rounded-full border-2"
+                    disabled={quantity >= product.stock_quantity}
                   >
                     <Plus className="h-4 w-4" />
                   </Button>
                 </div>
                 <p className="text-center text-sm text-gray-500 mt-2">Mavjud: {product.stock_quantity} dona</p>
-              </CardContent>
-            </Card>
-
-            {/* Add to Cart */}
-            <Card className="card-beautiful">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ShoppingCart className="h-5 w-5" />
-                  Savatga qo'shish
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="text-center">
-                    <div className="text-2xl font-bold text-blue-600 mb-2">{formatPrice(product.price * quantity)}</div>
-                    <p className="text-sm text-gray-500">Jami summa</p>
-                  </div>
-
-                  <Button onClick={handleAddToCart} className="w-full btn-primary text-lg py-6" disabled={cartLoading}>
-                    {cartLoading ? (
-                      <>
-                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                        Qo'shilmoqda...
-                      </>
-                    ) : (
-                      <>
-                        <ShoppingCart className="mr-2 h-5 w-5" />
-                        Savatga qo'shish
-                      </>
-                    )}
-                  </Button>
-                </div>
+                {product.stock_quantity === 0 && (
+                  <p className="text-center text-sm text-red-500 mt-2 font-medium">Mahsulot tugagan</p>
+                )}
               </CardContent>
             </Card>
 
@@ -505,12 +595,18 @@ export default function ProductDetailPage() {
                     </div>
                   </div>
 
-                  <Button type="submit" className="w-full btn-primary text-lg py-6" disabled={orderLoading}>
+                  <Button
+                    type="submit"
+                    className="w-full btn-primary text-lg py-6"
+                    disabled={orderLoading || product.stock_quantity === 0 || quantity > product.stock_quantity}
+                  >
                     {orderLoading ? (
                       <>
                         <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
                         Buyurtma berilmoqda...
                       </>
+                    ) : product.stock_quantity === 0 ? (
+                      "Mahsulot tugagan"
                     ) : (
                       <>
                         <Zap className="mr-2 h-5 w-5" />

@@ -10,27 +10,33 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Barcha maydonlar to'ldirilishi kerak" }, { status: 400 })
     }
 
-    // Check if the order exists and belongs to the user
+    if (rating < 1 || rating > 5) {
+      return NextResponse.json({ error: "Reyting 1 dan 5 gacha bo'lishi kerak" }, { status: 400 })
+    }
+
+    // Check if the order exists and belongs to the user and is completed
     const { data: order, error: orderError } = await supabase
       .from("orders")
-      .select("id")
+      .select("id, status")
       .eq("id", orderId)
       .eq("user_id", userId)
+      .eq("status", "completed")
       .single()
 
     if (orderError || !order) {
-      return NextResponse.json({ error: "Buyurtma topilmadi yoki sizga tegishli emas" }, { status: 404 })
+      return NextResponse.json({ error: "Buyurtma topilmadi yoki yakunlanmagan" }, { status: 404 })
     }
 
-    // Check if the product exists
-    const { data: product, error: productError } = await supabase
-      .from("products")
+    // Check if review already exists
+    const { data: existingReview } = await supabase
+      .from("product_reviews")
       .select("id")
-      .eq("id", productId)
+      .eq("order_id", orderId)
+      .eq("user_id", userId)
       .single()
 
-    if (productError || !product) {
-      return NextResponse.json({ error: "Mahsulot topilmadi" }, { status: 404 })
+    if (existingReview) {
+      return NextResponse.json({ error: "Bu buyurtma uchun allaqachon sharh qoldirilgan" }, { status: 400 })
     }
 
     // Insert the review
@@ -41,7 +47,7 @@ export async function POST(request: NextRequest) {
         order_id: orderId,
         user_id: userId,
         rating: rating,
-        comment: comment,
+        comment: comment || null,
       })
       .select()
       .single()
@@ -52,6 +58,38 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ success: true, review })
+  } catch (error) {
+    console.error("API Error:", error)
+    return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
+  }
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const productId = searchParams.get("productId")
+
+    if (!productId) {
+      return NextResponse.json({ error: "Product ID talab qilinadi" }, { status: 400 })
+    }
+
+    const { data: reviews, error } = await supabase
+      .from("product_reviews")
+      .select(`
+        *,
+        users (
+          full_name
+        )
+      `)
+      .eq("product_id", productId)
+      .order("created_at", { ascending: false })
+
+    if (error) {
+      console.error("Reviews fetch error:", error)
+      return NextResponse.json({ error: "Sharhlarni olishda xatolik" }, { status: 500 })
+    }
+
+    return NextResponse.json({ reviews: reviews || [] })
   } catch (error) {
     console.error("API Error:", error)
     return NextResponse.json({ error: "Server xatosi" }, { status: 500 })

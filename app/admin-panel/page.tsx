@@ -1,16 +1,22 @@
 "use client"
 
-import { DialogFooter } from "@/components/ui/dialog"
-
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog"
 import {
   Users,
   Package,
@@ -30,6 +36,7 @@ import {
   MessageCircle,
   Menu,
   X,
+  AlertTriangle,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
@@ -109,6 +116,26 @@ interface ContactMessage {
   created_at: string
 }
 
+interface Complaint {
+  id: string
+  user_id: string
+  order_id: string
+  complaint_text: string
+  status: string
+  admin_response: string
+  created_at: string
+  orders: {
+    id: string
+    products: {
+      name: string
+    }
+  }
+  users: {
+    full_name: string
+    email: string
+  }
+}
+
 interface Stats {
   totalUsers: number
   totalSellers: number
@@ -117,6 +144,7 @@ interface Stats {
   pendingSellerApplications: number
   pendingProductApplications: number
   pendingContacts: number
+  pendingComplaints: number
   todayOrders: number
   totalRevenue: number
 }
@@ -134,6 +162,7 @@ export default function AdminPanel() {
     pendingSellerApplications: 0,
     pendingProductApplications: 0,
     pendingContacts: 0,
+    pendingComplaints: 0,
     todayOrders: 0,
     totalRevenue: 0,
   })
@@ -142,6 +171,7 @@ export default function AdminPanel() {
   const [sellerApplications, setSellerApplications] = useState<SellerApplication[]>([])
   const [productApplications, setProductApplications] = useState<ProductApplication[]>([])
   const [contactMessages, setContactMessages] = useState<ContactMessage[]>([])
+  const [complaints, setComplaints] = useState<Complaint[]>([])
   const [filteredUsers, setFilteredUsers] = useState<User[]>([])
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([])
   const [userFilter, setUserFilter] = useState("all")
@@ -210,6 +240,7 @@ export default function AdminPanel() {
         sellerAppsResult,
         productAppsResult,
         contactsResult,
+        complaintsResult,
         todayOrdersResult,
         revenueResult,
       ] = await Promise.all([
@@ -220,6 +251,7 @@ export default function AdminPanel() {
         supabase.from("seller_applications").select("*", { count: "exact", head: true }).eq("status", "pending"),
         supabase.from("product_applications").select("*", { count: "exact", head: true }).eq("status", "pending"),
         supabase.from("contact_messages").select("*", { count: "exact", head: true }).eq("status", "pending"),
+        supabase.from("complaints").select("*", { count: "exact", head: true }).eq("status", "pending"),
         supabase
           .from("orders")
           .select("*", { count: "exact", head: true })
@@ -237,6 +269,7 @@ export default function AdminPanel() {
         pendingSellerApplications: sellerAppsResult.count || 0,
         pendingProductApplications: productAppsResult.count || 0,
         pendingContacts: contactsResult.count || 0,
+        pendingComplaints: complaintsResult.count || 0,
         todayOrders: todayOrdersResult.count || 0,
         totalRevenue,
       })
@@ -283,6 +316,20 @@ export default function AdminPanel() {
         .select("*")
         .order("created_at", { ascending: false })
       setContactMessages(contactsData || [])
+
+      // Fetch complaints
+      const { data: complaintsData } = await supabase
+        .from("complaints")
+        .select(`
+          *,
+          orders (
+            id,
+            products (name)
+          ),
+          users (full_name, email)
+        `)
+        .order("created_at", { ascending: false })
+      setComplaints(complaintsData || [])
     } catch (error) {
       console.error("Error fetching data:", error)
       toast.error("Ma'lumotlarni yuklashda xatolik")
@@ -415,6 +462,26 @@ export default function AdminPanel() {
     }
   }
 
+  const handleComplaintResponse = async (complaintId: string) => {
+    try {
+      await supabase
+        .from("complaints")
+        .update({
+          status: "resolved",
+          admin_response: responseText || "",
+        })
+        .eq("id", complaintId)
+
+      toast.success("Shikoyat hal qilindi")
+      fetchData()
+      setSelectedApplication(null)
+      setResponseText("")
+    } catch (error) {
+      console.error("Error responding to complaint:", error)
+      toast.error("Xatolik yuz berdi")
+    }
+  }
+
   const updateOrderStatus = async (orderId: string, newStatus: string) => {
     try {
       const { error } = await supabase.from("orders").update({ status: newStatus }).eq("id", orderId)
@@ -426,6 +493,44 @@ export default function AdminPanel() {
     } catch (error) {
       console.error("Error updating order status:", error)
       toast.error("Xatolik yuz berdi")
+    }
+  }
+
+  const exportData = async (type: string, format = "csv") => {
+    try {
+      const response = await fetch(`/api/export?type=${type}&format=${format}`)
+
+      if (!response.ok) {
+        throw new Error("Export failed")
+      }
+
+      if (format === "csv") {
+        const blob = await response.blob()
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement("a")
+        a.href = url
+        a.download = `${type}_export.csv`
+        document.body.appendChild(a)
+        a.click()
+        window.URL.revokeObjectURL(url)
+        document.body.removeChild(a)
+      } else {
+        const data = await response.json()
+        const blob = new Blob([JSON.stringify(data.data, null, 2)], { type: "application/json" })
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement("a")
+        a.href = url
+        a.download = `${data.filename}.json`
+        document.body.appendChild(a)
+        a.click()
+        window.URL.revokeObjectURL(url)
+        document.body.removeChild(a)
+      }
+
+      toast.success("Ma'lumotlar muvaffaqiyatli eksport qilindi")
+    } catch (error) {
+      console.error("Export error:", error)
+      toast.error("Eksport qilishda xatolik")
     }
   }
 
@@ -442,6 +547,7 @@ export default function AdminPanel() {
       approved: { variant: "default" as const, text: "Tasdiqlangan", icon: CheckCircle },
       rejected: { variant: "destructive" as const, text: "Rad etilgan", icon: XCircle },
       responded: { variant: "default" as const, text: "Javob berilgan", icon: CheckCircle },
+      resolved: { variant: "default" as const, text: "Hal qilingan", icon: CheckCircle },
     }
 
     const config = statusConfig[status as keyof typeof statusConfig] || {
@@ -468,11 +574,14 @@ export default function AdminPanel() {
         return productApplications
       case "contact":
         return contactMessages
+      case "complaint":
+        return complaints
       default:
         return [
           ...sellerApplications.map((app) => ({ ...app, type: "seller" })),
           ...productApplications.map((app) => ({ ...app, type: "product" })),
           ...contactMessages.map((msg) => ({ ...msg, type: "contact" })),
+          ...complaints.map((comp) => ({ ...comp, type: "complaint" })),
         ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     }
   }
@@ -555,7 +664,10 @@ export default function AdminPanel() {
                         {item.name}
                         {item.id === "applications" && (
                           <Badge variant="destructive" className="ml-auto">
-                            {stats.pendingSellerApplications + stats.pendingProductApplications + stats.pendingContacts}
+                            {stats.pendingSellerApplications +
+                              stats.pendingProductApplications +
+                              stats.pendingContacts +
+                              stats.pendingComplaints}
                           </Badge>
                         )}
                       </button>
@@ -622,7 +734,10 @@ export default function AdminPanel() {
                     <CardContent className="p-4 text-center">
                       <FileText className="h-8 w-8 text-red-600 mx-auto mb-2" />
                       <div className="text-2xl font-bold">
-                        {stats.pendingSellerApplications + stats.pendingProductApplications + stats.pendingContacts}
+                        {stats.pendingSellerApplications +
+                          stats.pendingProductApplications +
+                          stats.pendingContacts +
+                          stats.pendingComplaints}
                       </div>
                       <div className="text-sm text-gray-600">Kutilayotgan arizalar</div>
                     </CardContent>
@@ -641,7 +756,10 @@ export default function AdminPanel() {
                         Arizalar
                       </div>
                       <Badge variant="destructive">
-                        {stats.pendingSellerApplications + stats.pendingProductApplications + stats.pendingContacts}{" "}
+                        {stats.pendingSellerApplications +
+                          stats.pendingProductApplications +
+                          stats.pendingContacts +
+                          stats.pendingComplaints}{" "}
                         yangi
                       </Badge>
                     </CardTitle>
@@ -680,6 +798,14 @@ export default function AdminPanel() {
                         <MessageCircle className="h-4 w-4 mr-1" />
                         Murojaatlar ({stats.pendingContacts})
                       </Button>
+                      <Button
+                        size="sm"
+                        variant={applicationFilter === "complaint" ? "default" : "outline"}
+                        onClick={() => setApplicationFilter("complaint")}
+                      >
+                        <AlertTriangle className="h-4 w-4 mr-1" />
+                        Shikoyatlar ({stats.pendingComplaints})
+                      </Button>
                     </div>
 
                     {/* Applications List */}
@@ -707,7 +833,9 @@ export default function AdminPanel() {
                                         ? "Sotuvchilik arizasi"
                                         : application.type === "product"
                                           ? "Mahsulot arizasi"
-                                          : "Murojaat"}
+                                          : application.type === "contact"
+                                            ? "Murojaat"
+                                            : "Shikoyat"}
                                     </Badge>
                                     {getStatusBadge(application.status)}
                                   </div>
@@ -716,14 +844,18 @@ export default function AdminPanel() {
                                       ? application.company_name
                                       : application.type === "product"
                                         ? application.product_data?.name || "Mahsulot arizasi"
-                                        : application.subject || "Murojaat"}
+                                        : application.type === "contact"
+                                          ? application.subject || "Murojaat"
+                                          : `Shikoyat - ${application.orders?.products?.name || "Mahsulot"}`}
                                   </h3>
                                   <p className="text-gray-600 mb-2 line-clamp-2">
                                     {application.type === "seller"
                                       ? application.description
                                       : application.type === "product"
                                         ? application.product_data?.description
-                                        : application.message}
+                                        : application.type === "contact"
+                                          ? application.message
+                                          : application.complaint_text}
                                   </p>
                                   <div className="text-sm text-gray-500">
                                     {application.type === "contact" ? application.name : application.users?.full_name} •{" "}
@@ -738,6 +870,8 @@ export default function AdminPanel() {
                                         e.stopPropagation()
                                         if (application.type === "contact") {
                                           handleContactResponse(application.id)
+                                        } else if (application.type === "complaint") {
+                                          handleComplaintResponse(application.id)
                                         } else {
                                           handleApplicationAction(application.id, application.type, "approve")
                                         }
@@ -745,9 +879,11 @@ export default function AdminPanel() {
                                       className="bg-green-600 hover:bg-green-700"
                                     >
                                       <CheckCircle className="h-4 w-4 mr-1" />
-                                      {application.type === "contact" ? "Javob berish" : "Tasdiqlash"}
+                                      {application.type === "contact" || application.type === "complaint"
+                                        ? "Javob berish"
+                                        : "Tasdiqlash"}
                                     </Button>
-                                    {application.type !== "contact" && (
+                                    {application.type !== "contact" && application.type !== "complaint" && (
                                       <Button
                                         size="sm"
                                         variant="destructive"
@@ -789,10 +925,16 @@ export default function AdminPanel() {
                         <ShoppingCart className="h-5 w-5" />
                         Buyurtmalar
                       </div>
-                      <Button onClick={() => {}} variant="outline" size="sm">
-                        <Download className="h-4 w-4 mr-2" />
-                        Export
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button onClick={() => exportData("orders", "csv")} variant="outline" size="sm">
+                          <Download className="h-4 w-4 mr-2" />
+                          CSV
+                        </Button>
+                        <Button onClick={() => exportData("orders", "json")} variant="outline" size="sm">
+                          <Download className="h-4 w-4 mr-2" />
+                          JSON
+                        </Button>
+                      </div>
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
@@ -880,10 +1022,16 @@ export default function AdminPanel() {
                         <Users className="h-5 w-5" />
                         Foydalanuvchilar
                       </div>
-                      <Button onClick={() => {}} variant="outline" size="sm">
-                        <Download className="h-4 w-4 mr-2" />
-                        Export
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button onClick={() => exportData("users", "csv")} variant="outline" size="sm">
+                          <Download className="h-4 w-4 mr-2" />
+                          CSV
+                        </Button>
+                        <Button onClick={() => exportData("users", "json")} variant="outline" size="sm">
+                          <Download className="h-4 w-4 mr-2" />
+                          JSON
+                        </Button>
+                      </div>
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
@@ -967,65 +1115,147 @@ export default function AdminPanel() {
         <Dialog open={!!selectedApplication} onOpenChange={() => setSelectedApplication(null)}>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
-              <DialogTitle>Sotuvchi Arizasi</DialogTitle>
-              <DialogDescription>{selectedApplication?.users.full_name} tomonidan yuborilgan ariza</DialogDescription>
+              <DialogTitle>
+                {selectedApplication.type === "seller"
+                  ? "Sotuvchilik arizasi"
+                  : selectedApplication.type === "product"
+                    ? "Mahsulot arizasi"
+                    : selectedApplication.type === "contact"
+                      ? "Murojaat"
+                      : "Shikoyat"}
+              </DialogTitle>
+              <DialogDescription>
+                {selectedApplication.type === "contact"
+                  ? selectedApplication.name
+                  : selectedApplication.users?.full_name}{" "}
+                tomonidan yuborilgan
+              </DialogDescription>
             </DialogHeader>
 
-            {selectedApplication && (
-              <div className="space-y-4">
+            <div className="space-y-4">
+              {selectedApplication.type === "seller" && (
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <strong>Ism:</strong> {selectedApplication.users.full_name}
+                    <strong>Ism:</strong> {selectedApplication.users?.full_name}
                   </div>
                   <div>
-                    <strong>Email:</strong> {selectedApplication.users.email}
+                    <strong>Email:</strong> {selectedApplication.users?.email}
                   </div>
                   <div>
-                    <strong>Telefon:</strong> {selectedApplication.users.phone}
+                    <strong>Telefon:</strong> {selectedApplication.users?.phone}
                   </div>
                   <div>
-                    <strong>Biznes nomi:</strong> {selectedApplication.business_name}
+                    <strong>Kompaniya:</strong> {selectedApplication.company_name}
                   </div>
                   <div>
                     <strong>Biznes turi:</strong> {selectedApplication.business_type}
                   </div>
                   <div>
-                    <strong>Status:</strong>
-                    <Badge
-                      className="ml-2"
-                      variant={
-                        selectedApplication.status === "pending"
-                          ? "secondary"
-                          : selectedApplication.status === "approved"
-                            ? "default"
-                            : "destructive"
-                      }
-                    >
-                      {selectedApplication.status === "pending"
-                        ? "Kutilmoqda"
-                        : selectedApplication.status === "approved"
-                          ? "Tasdiqlangan"
-                          : "Rad etilgan"}
-                    </Badge>
+                    <strong>Status:</strong> {getStatusBadge(selectedApplication.status)}
                   </div>
                 </div>
+              )}
 
-                <div>
-                  <strong>Tavsif:</strong>
-                  <p className="mt-2 p-3 bg-gray-50 rounded-lg">{selectedApplication.description}</p>
+              {selectedApplication.type === "contact" && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <strong>Ism:</strong> {selectedApplication.name}
+                  </div>
+                  <div>
+                    <strong>Email:</strong> {selectedApplication.email}
+                  </div>
+                  <div>
+                    <strong>Telefon:</strong> {selectedApplication.phone}
+                  </div>
+                  <div>
+                    <strong>Mavzu:</strong> {selectedApplication.subject}
+                  </div>
+                  <div>
+                    <strong>Status:</strong> {getStatusBadge(selectedApplication.status)}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {selectedApplication?.status === "pending" && (
+              {selectedApplication.type === "complaint" && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <strong>Ism:</strong> {selectedApplication.users?.full_name}
+                  </div>
+                  <div>
+                    <strong>Email:</strong> {selectedApplication.users?.email}
+                  </div>
+                  <div>
+                    <strong>Mahsulot:</strong> {selectedApplication.orders?.products?.name}
+                  </div>
+                  <div>
+                    <strong>Status:</strong> {getStatusBadge(selectedApplication.status)}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <strong>
+                  {selectedApplication.type === "seller"
+                    ? "Tavsif:"
+                    : selectedApplication.type === "contact"
+                      ? "Xabar:"
+                      : "Shikoyat:"}
+                </strong>
+                <p className="mt-2 p-3 bg-gray-50 rounded-lg">
+                  {selectedApplication.type === "seller"
+                    ? selectedApplication.description
+                    : selectedApplication.type === "contact"
+                      ? selectedApplication.message
+                      : selectedApplication.complaint_text}
+                </p>
+              </div>
+
+              {selectedApplication.admin_response && (
+                <div>
+                  <strong>Admin javobi:</strong>
+                  <p className="mt-2 p-3 bg-green-50 rounded-lg">{selectedApplication.admin_response}</p>
+                </div>
+              )}
+
+              {selectedApplication.status === "pending" && (
+                <div>
+                  <strong>Javob:</strong>
+                  <Textarea
+                    placeholder="Javobingizni yozing..."
+                    value={responseText}
+                    onChange={(e) => setResponseText(e.target.value)}
+                    className="mt-2"
+                  />
+                </div>
+              )}
+            </div>
+
+            {selectedApplication.status === "pending" && (
               <DialogFooter>
-                <Button variant="outline" onClick={() => handleApplicationAction(selectedApplication.id, "reject")}>
-                  <XCircle className="h-4 w-4 mr-1" />
-                  Rad etish
-                </Button>
-                <Button onClick={() => handleApplicationAction(selectedApplication.id, "approve")}>
+                {selectedApplication.type !== "contact" && selectedApplication.type !== "complaint" && (
+                  <Button
+                    variant="outline"
+                    onClick={() => handleApplicationAction(selectedApplication.id, selectedApplication.type, "reject")}
+                  >
+                    <XCircle className="h-4 w-4 mr-1" />
+                    Rad etish
+                  </Button>
+                )}
+                <Button
+                  onClick={() => {
+                    if (selectedApplication.type === "contact") {
+                      handleContactResponse(selectedApplication.id)
+                    } else if (selectedApplication.type === "complaint") {
+                      handleComplaintResponse(selectedApplication.id)
+                    } else {
+                      handleApplicationAction(selectedApplication.id, selectedApplication.type, "approve")
+                    }
+                  }}
+                >
                   <CheckCircle className="h-4 w-4 mr-1" />
-                  Tasdiqlash
+                  {selectedApplication.type === "contact" || selectedApplication.type === "complaint"
+                    ? "Javob berish"
+                    : "Tasdiqlash"}
                 </Button>
               </DialogFooter>
             )}
