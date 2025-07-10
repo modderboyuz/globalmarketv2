@@ -1,57 +1,69 @@
+import { createSupabaseClient } from "@/lib/supabase-server"
 import { type NextRequest, NextResponse } from "next/server"
-import { supabase } from "@/lib/supabase"
 
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url)
-    const userId = searchParams.get("userId")
+    const supabase = createSupabaseClient()
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
 
-    if (!userId) {
-      return NextResponse.json({ error: "User ID talab qilinadi" }, { status: 400 })
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
     const { data: notifications, error } = await supabase
       .from("notifications")
       .select("*")
-      .eq("user_id", userId)
+      .eq("user_id", user.id)
       .order("created_at", { ascending: false })
-      .limit(50)
+      .limit(10)
 
     if (error) {
       console.error("Notifications fetch error:", error)
-      return NextResponse.json({ error: "Bildirishnomalarni olishda xatolik" }, { status: 500 })
+      return NextResponse.json({ error: "Failed to fetch notifications" }, { status: 500 })
     }
 
-    return NextResponse.json({ notifications: notifications || [] })
+    return NextResponse.json({ notifications })
   } catch (error) {
-    console.error("API Error:", error)
-    return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
+    console.error("Notifications API error:", error)
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
 
-export async function PUT(request: NextRequest) {
+export async function PATCH(request: NextRequest) {
   try {
-    const body = await request.json()
-    const { notificationId, userId, isRead } = body
+    const supabase = createSupabaseClient()
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
 
-    if (!notificationId || !userId) {
-      return NextResponse.json({ error: "Notification ID va User ID talab qilinadi" }, { status: 400 })
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    const { notification_id } = await request.json()
+
+    if (!notification_id) {
+      return NextResponse.json({ error: "Notification ID is required" }, { status: 400 })
     }
 
     const { error } = await supabase
       .from("notifications")
-      .update({ is_read: isRead })
-      .eq("id", notificationId)
-      .eq("user_id", userId)
+      .update({ is_read: true })
+      .eq("id", notification_id)
+      .eq("user_id", user.id)
 
     if (error) {
       console.error("Notification update error:", error)
-      return NextResponse.json({ error: "Bildirishnomani yangilashda xatolik" }, { status: 500 })
+      return NextResponse.json({ error: "Failed to update notification" }, { status: 500 })
     }
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error("API Error:", error)
-    return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
+    console.error("Notification update error:", error)
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }

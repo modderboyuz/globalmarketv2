@@ -1,35 +1,95 @@
+import { createSupabaseClient } from "@/lib/supabase-server"
 import { type NextRequest, NextResponse } from "next/server"
-import { supabase } from "@/lib/supabase"
+
+export async function GET(request: NextRequest) {
+  try {
+    const supabase = createSupabaseClient()
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
+
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    // Check if user is admin
+    const { data: userData, error: userError } = await supabase.from("users").select("type").eq("id", user.id).single()
+
+    if (userError || !userData) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 })
+    }
+
+    let query = supabase.from("complaints").select(`
+        *,
+        orders (
+          id,
+          products (
+            title
+          )
+        ),
+        users (
+          full_name,
+          email
+        )
+      `)
+
+    if (userData.type !== "admin") {
+      // Regular users can only see their own complaints
+      query = query.eq("user_id", user.id)
+    }
+
+    const { data: complaints, error } = await query.order("created_at", { ascending: false })
+
+    if (error) {
+      console.error("Complaints fetch error:", error)
+      return NextResponse.json({ error: "Failed to fetch complaints" }, { status: 500 })
+    }
+
+    return NextResponse.json({ complaints })
+  } catch (error) {
+    console.error("Complaints API error:", error)
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-    const { orderId, complaintType, description, userId } = body
+    const supabase = createSupabaseClient()
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
 
-    if (!orderId || !complaintType || !description || !userId) {
-      return NextResponse.json({ error: "Barcha majburiy maydonlarni to'ldiring" }, { status: 400 })
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    // Check if order exists and belongs to user
+    const { order_id, complaint_text } = await request.json()
+
+    if (!order_id || !complaint_text) {
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
+    }
+
+    // Verify order belongs to user
     const { data: order, error: orderError } = await supabase
       .from("orders")
-      .select("*")
-      .eq("id", orderId)
-      .eq("user_id", userId)
+      .select("id")
+      .eq("id", order_id)
+      .eq("user_id", user.id)
       .single()
 
     if (orderError || !order) {
-      return NextResponse.json({ error: "Buyurtma topilmadi" }, { status: 404 })
+      return NextResponse.json({ error: "Order not found" }, { status: 404 })
     }
 
     // Create complaint
     const { data: complaint, error: complaintError } = await supabase
       .from("complaints")
       .insert({
-        order_id: orderId,
-        user_id: userId,
-        complaint_type: complaintType,
-        description: description,
+        order_id,
+        user_id: user.id,
+        complaint_text,
         status: "pending",
       })
       .select()
@@ -37,27 +97,12 @@ export async function POST(request: NextRequest) {
 
     if (complaintError) {
       console.error("Complaint creation error:", complaintError)
-      return NextResponse.json({ error: "Shikoyat yuborishda xatolik" }, { status: 500 })
+      return NextResponse.json({ error: "Failed to create complaint" }, { status: 500 })
     }
 
-    // Notify admins
-    const { data: admins } = await supabase.from("users").select("id").eq("is_admin", true)
-
-    if (admins && admins.length > 0) {
-      for (const admin of admins) {
-        await supabase.rpc("create_notification", {
-          p_user_id: admin.id,
-          p_title: "Yangi shikoyat",
-          p_message: `Buyurtma #${orderId.slice(-8)} bo'yicha yangi shikoyat keldi`,
-          p_type: "new_complaint",
-          p_data: { complaint_id: complaint.id, order_id: orderId },
-        })
-      }
-    }
-
-    return NextResponse.json({ success: true, complaint: complaint })
+    return NextResponse.json({ success: true, complaint })
   } catch (error) {
-    console.error("API Error:", error)
-    return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
+    console.error("Complaint creation error:", error)
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }

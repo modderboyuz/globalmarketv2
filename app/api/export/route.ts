@@ -1,126 +1,143 @@
+import { createSupabaseClient } from "@/lib/supabase-server"
 import { type NextRequest, NextResponse } from "next/server"
-import { supabase } from "@/lib/supabase"
 import * as XLSX from "xlsx"
 
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url)
-    const type = searchParams.get("type")
-    const userId = searchParams.get("userId")
+    const supabase = createSupabaseClient()
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
 
-    if (!type) {
-      return NextResponse.json({ error: "Export type talab qilinadi" }, { status: 400 })
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
     // Check if user is admin
-    if (userId) {
-      const { data: user } = await supabase.from("users").select("is_admin").eq("id", userId).single()
-      if (!user?.is_admin) {
-        return NextResponse.json({ error: "Admin huquqi talab qilinadi" }, { status: 403 })
-      }
+    const { data: userData, error: userError } = await supabase.from("users").select("type").eq("id", user.id).single()
+
+    if (userError || !userData || userData.type !== "admin") {
+      return NextResponse.json({ error: "Admin access required" }, { status: 403 })
     }
 
+    const { searchParams } = new URL(request.url)
+    const type = searchParams.get("type") || "orders"
+
     let data: any[] = []
-    let filename = ""
+    let filename = "export.xlsx"
 
     switch (type) {
       case "orders":
-        const { data: orders } = await supabase
+        const { data: orders, error: ordersError } = await supabase
           .from("orders")
           .select(`
             id,
-            full_name,
-            phone,
-            address,
             quantity,
-            total_amount,
+            total_price,
             status,
+            address,
             created_at,
-            products (name, price)
+            products (title, price),
+            users (full_name, email, phone)
           `)
           .order("created_at", { ascending: false })
 
+        if (ordersError) throw ordersError
+
         data =
           orders?.map((order) => ({
-            "Buyurtma ID": order.id.slice(-8),
-            "Mijoz ismi": order.full_name,
-            Telefon: order.phone,
-            Manzil: order.address,
-            Mahsulot: order.products?.name,
+            "Buyurtma ID": order.id,
+            Mahsulot: order.products?.title,
+            Mijoz: order.users?.full_name,
+            Email: order.users?.email,
+            Telefon: order.users?.phone,
             Miqdor: order.quantity,
-            "Jami summa": order.total_amount,
-            Holat: order.status,
-            Sana: new Date(order.created_at).toLocaleDateString(),
+            Narx: order.total_price,
+            Status: order.status,
+            Manzil: order.address,
+            Sana: new Date(order.created_at).toLocaleDateString("uz-UZ"),
           })) || []
-        filename = "buyurtmalar"
-        break
-
-      case "users":
-        const { data: users } = await supabase.from("users").select("*").order("created_at", { ascending: false })
-
-        data =
-          users?.map((user) => ({
-            ID: user.id.slice(-8),
-            Ism: user.full_name,
-            Email: user.email,
-            Telefon: user.phone,
-            Kompaniya: user.company_name,
-            Sotuvchi: user.is_verified_seller ? "Ha" : "Yo'q",
-            Admin: user.is_admin ? "Ha" : "Yo'q",
-            "Ro'yxatdan o'tgan sana": new Date(user.created_at).toLocaleDateString(),
-          })) || []
-        filename = "foydalanuvchilar"
+        filename = "buyurtmalar.xlsx"
         break
 
       case "products":
-        const { data: products } = await supabase
+        const { data: products, error: productsError } = await supabase
           .from("products")
           .select(`
-            *,
-            categories (name_uz),
+            id,
+            title,
+            price,
+            stock_quantity,
+            sold_quantity,
+            status,
+            created_at,
             users (full_name, company_name)
           `)
           .order("created_at", { ascending: false })
 
+        if (productsError) throw productsError
+
         data =
           products?.map((product) => ({
-            ID: product.id.slice(-8),
-            Nomi: product.name,
+            "Mahsulot ID": product.id,
+            Nomi: product.title,
             Narx: product.price,
-            Kategoriya: product.categories?.name_uz,
-            Sotuvchi: product.users?.company_name || product.users?.full_name,
             "Ombordagi soni": product.stock_quantity,
-            "Sotilgan soni": product.order_count,
-            "Ko'rishlar": product.view_count,
-            Reyting: product.average_rating,
-            Holat: product.is_active ? "Faol" : "Nofaol",
-            Tasdiqlangan: product.is_approved ? "Ha" : "Yo'q",
-            "Yaratilgan sana": new Date(product.created_at).toLocaleDateString(),
+            "Sotilgan soni": product.sold_quantity,
+            Status: product.status,
+            Sotuvchi: product.users?.full_name,
+            Kompaniya: product.users?.company_name,
+            Sana: new Date(product.created_at).toLocaleDateString("uz-UZ"),
           })) || []
-        filename = "mahsulotlar"
+        filename = "mahsulotlar.xlsx"
+        break
+
+      case "users":
+        const { data: users, error: usersError } = await supabase
+          .from("users")
+          .select("*")
+          .order("created_at", { ascending: false })
+
+        if (usersError) throw usersError
+
+        data =
+          users?.map((user) => ({
+            "Foydalanuvchi ID": user.id,
+            "To'liq ism": user.full_name,
+            Email: user.email,
+            Telefon: user.phone,
+            Turi: user.type,
+            Kompaniya: user.company_name,
+            Manzil: user.address,
+            Sana: new Date(user.created_at).toLocaleDateString("uz-UZ"),
+          })) || []
+        filename = "foydalanuvchilar.xlsx"
         break
 
       default:
-        return NextResponse.json({ error: "Noto'g'ri export type" }, { status: 400 })
+        return NextResponse.json({ error: "Invalid export type" }, { status: 400 })
     }
 
-    // Create Excel workbook
-    const wb = XLSX.utils.book_new()
-    const ws = XLSX.utils.json_to_sheet(data)
-    XLSX.utils.book_append_sheet(wb, ws, "Ma'lumotlar")
+    // Create workbook and worksheet
+    const workbook = XLSX.utils.book_new()
+    const worksheet = XLSX.utils.json_to_sheet(data)
 
-    // Generate Excel buffer
-    const excelBuffer = XLSX.write(wb, { bookType: "xlsx", type: "buffer" })
+    // Add worksheet to workbook
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Ma'lumotlar")
 
-    // Return Excel file
-    return new NextResponse(excelBuffer, {
+    // Generate buffer
+    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" })
+
+    // Return file
+    return new NextResponse(buffer, {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": `attachment; filename="${filename}_${new Date().toISOString().split("T")[0]}.xlsx"`,
+        "Content-Disposition": `attachment; filename="${filename}"`,
       },
     })
   } catch (error) {
-    console.error("Export Error:", error)
-    return NextResponse.json({ error: "Export qilishda xatolik" }, { status: 500 })
+    console.error("Export error:", error)
+    return NextResponse.json({ error: "Export failed" }, { status: 500 })
   }
 }
