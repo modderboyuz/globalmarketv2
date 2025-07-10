@@ -29,7 +29,10 @@ export function MobileNav() {
 
   const fetchCartCount = async (userId: string) => {
     try {
-      const { count } = await supabase.from("cart").select("*", { count: "exact", head: true }).eq("user_id", userId)
+      const { count } = await supabase
+        .from("cart_items")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", userId)
 
       setCartCount(count || 0)
     } catch (error) {
