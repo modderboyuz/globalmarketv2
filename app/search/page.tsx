@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Image from "next/image"
 import { Card, CardContent } from "@/components/ui/card"
@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Search, Star, ShoppingCart, Heart, Share2, Award } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
+import { debounce } from "lodash"
 
 interface Product {
   id: string
@@ -26,7 +27,7 @@ interface Product {
   product_type: string
   brand: string
   author: string
-  rating: number
+  average_rating: number
   like_count: number
   has_delivery: boolean
   categories: {
@@ -55,9 +56,10 @@ export default function SearchPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(false)
   const [searchQuery, setSearchQuery] = useState(searchParams.get("q") || "")
-  const [selectedCategory, setSelectedCategory] = useState("all") // Updated default value
+  const [selectedCategory, setSelectedCategory] = useState("all")
   const [sortBy, setSortBy] = useState("popular")
   const [user, setUser] = useState<any>(null)
+  const [isSearching, setIsSearching] = useState(false)
 
   useEffect(() => {
     checkUser()
@@ -69,10 +71,11 @@ export default function SearchPage() {
 
   useEffect(() => {
     if (searchQuery || selectedCategory !== "all") {
-      // Updated condition
-      handleSearch()
+      debouncedSearch()
+    } else {
+      setProducts([])
     }
-  }, [selectedCategory, sortBy])
+  }, [searchQuery, selectedCategory, sortBy])
 
   const checkUser = async () => {
     const {
@@ -94,12 +97,12 @@ export default function SearchPage() {
 
   const handleSearch = async () => {
     if (!searchQuery && selectedCategory === "all") {
-      // Updated condition
       setProducts([])
       return
     }
 
     setLoading(true)
+    setIsSearching(true)
 
     try {
       let query = supabase
@@ -118,6 +121,7 @@ export default function SearchPage() {
           )
         `)
         .eq("is_active", true)
+        .eq("is_approved", true)
         .gt("stock_quantity", 0)
 
       // Apply search filter
@@ -129,7 +133,6 @@ export default function SearchPage() {
 
       // Apply category filter
       if (selectedCategory !== "all") {
-        // Updated condition
         query = query.eq("category_id", selectedCategory)
       }
 
@@ -145,7 +148,7 @@ export default function SearchPage() {
           query = query.order("created_at", { ascending: false })
           break
         case "rating":
-          query = query.order("rating", { ascending: false })
+          query = query.order("average_rating", { ascending: false })
           break
         default:
           query = query.order("order_count", { ascending: false })
@@ -163,8 +166,17 @@ export default function SearchPage() {
       toast.error("Qidirishda xatolik yuz berdi")
     } finally {
       setLoading(false)
+      setIsSearching(false)
     }
   }
+
+  // Debounced search function
+  const debouncedSearch = useCallback(
+    debounce(() => {
+      handleSearch()
+    }, 300),
+    [searchQuery, selectedCategory, sortBy],
+  )
 
   const handleLike = async (productId: string, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -255,18 +267,32 @@ export default function SearchPage() {
                 placeholder="Kitob, qalam, daftar qidiring..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-12 h-12 text-lg input-beautiful"
+                className={`pl-12 h-12 text-lg transition-all duration-300 ${
+                  isSearching
+                    ? "border-2 border-transparent bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 p-[2px] rounded-lg"
+                    : "input-beautiful"
+                }`}
+                style={
+                  isSearching
+                    ? {
+                        background:
+                          "linear-gradient(white, white) padding-box, linear-gradient(45deg, #3b82f6, #8b5cf6, #ec4899) border-box",
+                      }
+                    : {}
+                }
               />
             </div>
 
             {/* Filters */}
-            <div className="flex flex-col sm:flex-row gap-4">
+            <div
+              className={`flex flex-col sm:flex-row gap-4 transition-all duration-300 ${isSearching ? "opacity-70" : ""}`}
+            >
               <Select value={selectedCategory} onValueChange={setSelectedCategory}>
                 <SelectTrigger className="input-beautiful">
                   <SelectValue placeholder="Kategoriya tanlang" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Barcha kategoriyalar</SelectItem> {/* Updated value */}
+                  <SelectItem value="all">Barcha kategoriyalar</SelectItem>
                   {categories.map((category) => (
                     <SelectItem key={category.id} value={category.id}>
                       {category.icon} {category.name_uz}
@@ -308,7 +334,7 @@ export default function SearchPage() {
               </div>
             ))}
           </div>
-        ) : products.length === 0 ? (
+        ) : products.length === 0 && (searchQuery || selectedCategory !== "all") ? (
           <div className="text-center py-16">
             <div className="w-32 h-32 mx-auto bg-gradient-to-br from-gray-100 to-gray-200 rounded-3xl flex items-center justify-center mb-8">
               <Search className="h-16 w-16 text-gray-400" />
@@ -316,7 +342,7 @@ export default function SearchPage() {
             <h3 className="text-xl font-semibold mb-2">Hech narsa topilmadi</h3>
             <p className="text-gray-600">Boshqa kalit so'zlar bilan qidirib ko'ring</p>
           </div>
-        ) : (
+        ) : products.length > 0 ? (
           <>
             <div className="mb-6">
               <p className="text-gray-600">
@@ -421,7 +447,7 @@ export default function SearchPage() {
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-1">
                           <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                          <span className="text-sm font-medium">{product.rating}</span>
+                          <span className="text-sm font-medium">{product.average_rating}</span>
                           <span className="text-sm text-gray-500">({product.order_count})</span>
                         </div>
                         <div className="flex items-center gap-1">
@@ -451,7 +477,7 @@ export default function SearchPage() {
               ))}
             </div>
           </>
-        )}
+        ) : null}
       </div>
     </div>
   )

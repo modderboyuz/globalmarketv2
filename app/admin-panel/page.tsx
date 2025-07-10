@@ -7,38 +7,31 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   Users,
   Package,
   ShoppingCart,
-  MessageSquare,
   Phone,
   CheckCircle,
   XCircle,
   Search,
   Download,
-  Send,
   Award,
   Store,
   Eye,
   Clock,
+  FileText,
+  UserCheck,
+  PackageCheck,
+  MessageCircle,
+  Menu,
+  X,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
-import { AdsManagement } from "./ads-management"
-import { ProductsManagement } from "./products-management"
-import { CategoriesManagement } from "./categories-management"
 
 interface User {
   id: string
@@ -71,15 +64,16 @@ interface Order {
   }
 }
 
-interface AdminMessage {
+interface SellerApplication {
   id: string
-  type: string
-  title: string
-  content: string
-  data: any
+  user_id: string
+  company_name: string
+  business_type: string
+  description: string
+  phone: string
+  address: string
   status: string
-  admin_response: string
-  created_by: string
+  admin_notes: string
   created_at: string
   users: {
     full_name: string
@@ -88,49 +82,75 @@ interface AdminMessage {
   }
 }
 
+interface ProductApplication {
+  id: string
+  user_id: string
+  product_data: any
+  status: string
+  admin_notes: string
+  created_at: string
+  users: {
+    full_name: string
+    email: string
+    phone: string
+  }
+}
+
+interface ContactMessage {
+  id: string
+  name: string
+  email: string
+  phone: string
+  subject: string
+  message: string
+  status: string
+  admin_response: string
+  created_at: string
+}
+
 interface Stats {
   totalUsers: number
   totalSellers: number
   totalProducts: number
   totalOrders: number
-  pendingApplications: number
-  pendingProducts: number
-  newMessages: number
+  pendingSellerApplications: number
+  pendingProductApplications: number
+  pendingContacts: number
   todayOrders: number
   totalRevenue: number
-  unreadMessages: number
 }
 
 export default function AdminPanel() {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [stats, setStats] = useState<Stats>({
     totalUsers: 0,
     totalSellers: 0,
     totalProducts: 0,
     totalOrders: 0,
-    pendingApplications: 0,
-    pendingProducts: 0,
-    newMessages: 0,
+    pendingSellerApplications: 0,
+    pendingProductApplications: 0,
+    pendingContacts: 0,
     todayOrders: 0,
     totalRevenue: 0,
-    unreadMessages: 0,
   })
   const [users, setUsers] = useState<User[]>([])
   const [orders, setOrders] = useState<Order[]>([])
-  const [adminMessages, setAdminMessages] = useState<AdminMessage[]>([])
+  const [sellerApplications, setSellerApplications] = useState<SellerApplication[]>([])
+  const [productApplications, setProductApplications] = useState<ProductApplication[]>([])
+  const [contactMessages, setContactMessages] = useState<ContactMessage[]>([])
   const [filteredUsers, setFilteredUsers] = useState<User[]>([])
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([])
-  const [filteredMessages, setFilteredMessages] = useState<AdminMessage[]>([])
   const [userFilter, setUserFilter] = useState("all")
   const [orderFilter, setOrderFilter] = useState("all")
-  const [messageFilter, setMessageFilter] = useState("all")
+  const [applicationFilter, setApplicationFilter] = useState("all")
   const [searchQuery, setSearchQuery] = useState("")
   const [orderSearchQuery, setOrderSearchQuery] = useState("")
-  const [messageSearchQuery, setMessageSearchQuery] = useState("")
-  const [selectedMessage, setSelectedMessage] = useState<AdminMessage | null>(null)
+  const [selectedApplication, setSelectedApplication] = useState<any>(null)
   const [responseText, setResponseText] = useState("")
+  const [activeTab, setActiveTab] = useState("overview")
 
   useEffect(() => {
     checkAdminAccess()
@@ -149,10 +169,6 @@ export default function AdminPanel() {
   useEffect(() => {
     filterOrders()
   }, [orders, orderFilter, orderSearchQuery])
-
-  useEffect(() => {
-    filterMessages()
-  }, [adminMessages, messageFilter, messageSearchQuery])
 
   const checkAdminAccess = async () => {
     try {
@@ -190,8 +206,9 @@ export default function AdminPanel() {
         sellersResult,
         productsResult,
         ordersResult,
-        applicationsResult,
-        messagesResult,
+        sellerAppsResult,
+        productAppsResult,
+        contactsResult,
         todayOrdersResult,
         revenueResult,
       ] = await Promise.all([
@@ -200,7 +217,8 @@ export default function AdminPanel() {
         supabase.from("products").select("*", { count: "exact", head: true }),
         supabase.from("orders").select("*", { count: "exact", head: true }),
         supabase.from("seller_applications").select("*", { count: "exact", head: true }).eq("status", "pending"),
-        supabase.from("admin_messages").select("*", { count: "exact", head: true }).eq("status", "pending"),
+        supabase.from("product_applications").select("*", { count: "exact", head: true }).eq("status", "pending"),
+        supabase.from("contact_messages").select("*", { count: "exact", head: true }).eq("status", "pending"),
         supabase
           .from("orders")
           .select("*", { count: "exact", head: true })
@@ -215,12 +233,11 @@ export default function AdminPanel() {
         totalSellers: sellersResult.count || 0,
         totalProducts: productsResult.count || 0,
         totalOrders: ordersResult.count || 0,
-        pendingApplications: applicationsResult.count || 0,
-        pendingProducts: 0, // Will be calculated from admin messages
-        newMessages: messagesResult.count || 0,
+        pendingSellerApplications: sellerAppsResult.count || 0,
+        pendingProductApplications: productAppsResult.count || 0,
+        pendingContacts: contactsResult.count || 0,
         todayOrders: todayOrdersResult.count || 0,
         totalRevenue,
-        unreadMessages: messagesResult.count || 0,
       })
 
       // Fetch users
@@ -239,15 +256,32 @@ export default function AdminPanel() {
         .limit(100)
       setOrders(ordersData || [])
 
-      // Fetch admin messages
-      const { data: messagesData } = await supabase
-        .from("admin_messages")
+      // Fetch seller applications
+      const { data: sellerAppsData } = await supabase
+        .from("seller_applications")
         .select(`
           *,
           users (full_name, email, phone)
         `)
         .order("created_at", { ascending: false })
-      setAdminMessages(messagesData || [])
+      setSellerApplications(sellerAppsData || [])
+
+      // Fetch product applications
+      const { data: productAppsData } = await supabase
+        .from("product_applications")
+        .select(`
+          *,
+          users (full_name, email, phone)
+        `)
+        .order("created_at", { ascending: false })
+      setProductApplications(productAppsData || [])
+
+      // Fetch contact messages
+      const { data: contactsData } = await supabase
+        .from("contact_messages")
+        .select("*")
+        .order("created_at", { ascending: false })
+      setContactMessages(contactsData || [])
     } catch (error) {
       console.error("Error fetching data:", error)
       toast.error("Ma'lumotlarni yuklashda xatolik")
@@ -298,65 +332,47 @@ export default function AdminPanel() {
     setFilteredOrders(filtered)
   }
 
-  const filterMessages = () => {
-    let filtered = adminMessages
-
-    if (messageFilter !== "all") {
-      if (messageFilter === "unread") {
-        filtered = filtered.filter((msg) => msg.status === "pending")
-      } else {
-        filtered = filtered.filter((msg) => msg.type === messageFilter)
-      }
-    }
-
-    if (messageSearchQuery) {
-      filtered = filtered.filter(
-        (msg) =>
-          msg.title?.toLowerCase().includes(messageSearchQuery.toLowerCase()) ||
-          msg.content?.toLowerCase().includes(messageSearchQuery.toLowerCase()) ||
-          msg.users?.full_name?.toLowerCase().includes(messageSearchQuery.toLowerCase()),
-      )
-    }
-
-    setFilteredMessages(filtered)
-  }
-
-  const handleMessageAction = async (messageId: string, action: "approve" | "reject", response?: string) => {
+  const handleApplicationAction = async (applicationId: string, type: string, action: "approve" | "reject") => {
     try {
-      const message = adminMessages.find((m) => m.id === messageId)
-      if (!message) return
-
       const status = action === "approve" ? "approved" : "rejected"
 
-      // Update admin message
-      await supabase
-        .from("admin_messages")
-        .update({
-          status,
-          admin_response: response || "",
-          handled_by: user.id,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", messageId)
+      if (type === "seller") {
+        const application = sellerApplications.find((app) => app.id === applicationId)
+        if (!application) return
 
-      // Handle specific message types
-      if (message.type === "seller_application") {
+        // Update application status
         await supabase
           .from("seller_applications")
           .update({
             status,
-            admin_notes: response || "",
-            updated_at: new Date().toISOString(),
+            admin_notes: responseText || "",
+            reviewed_by: user.id,
+            reviewed_at: new Date().toISOString(),
           })
-          .eq("id", message.data.application_id)
+          .eq("id", applicationId)
 
+        // If approved, make user a verified seller
         if (action === "approve") {
-          await supabase.from("users").update({ is_verified_seller: true }).eq("id", message.data.user_id)
+          await supabase.from("users").update({ is_verified_seller: true }).eq("id", application.user_id)
         }
-      } else if (message.type === "product_approval") {
+      } else if (type === "product") {
+        const application = productApplications.find((app) => app.id === applicationId)
+        if (!application) return
+
+        // Update application status
+        await supabase
+          .from("product_applications")
+          .update({
+            status,
+            admin_notes: responseText || "",
+            reviewed_by: user.id,
+            reviewed_at: new Date().toISOString(),
+          })
+          .eq("id", applicationId)
+
+        // If approved, create the product
         if (action === "approve") {
-          // Create the actual product
-          const productData = message.data.product_data
+          const productData = application.product_data
           await supabase.from("products").insert({
             ...productData,
             is_approved: true,
@@ -364,42 +380,37 @@ export default function AdminPanel() {
             created_at: new Date().toISOString(),
           })
         }
-      } else if (message.type === "product_action_request") {
-        if (action === "approve") {
-          const { product_id, action: requestedAction } = message.data
-          if (requestedAction === "delete") {
-            await supabase.from("products").update({ is_active: false }).eq("id", product_id)
-          }
-          // For edit requests, admin would need to manually edit the product
-        }
-      } else if (message.type === "contact") {
-        await supabase
-          .from("contact_messages")
-          .update({
-            status: "responded",
-            admin_response: response || "",
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", message.data.contact_id)
       }
 
       toast.success(action === "approve" ? "Tasdiqlandi" : "Rad etildi")
       fetchData()
-      setSelectedMessage(null)
+      setSelectedApplication(null)
       setResponseText("")
     } catch (error) {
-      console.error("Error handling message action:", error)
+      console.error("Error handling application action:", error)
       toast.error("Xatolik yuz berdi")
     }
   }
 
-  const markMessageAsRead = async (messageId: string) => {
+  const handleContactResponse = async (contactId: string) => {
     try {
-      await supabase.from("admin_messages").update({ status: "read" }).eq("id", messageId).eq("status", "pending")
+      await supabase
+        .from("contact_messages")
+        .update({
+          status: "responded",
+          admin_response: responseText || "",
+          responded_by: user.id,
+          responded_at: new Date().toISOString(),
+        })
+        .eq("id", contactId)
 
+      toast.success("Javob yuborildi")
       fetchData()
+      setSelectedApplication(null)
+      setResponseText("")
     } catch (error) {
-      console.error("Error marking message as read:", error)
+      console.error("Error responding to contact:", error)
+      toast.error("Xatolik yuz berdi")
     }
   }
 
@@ -429,7 +440,7 @@ export default function AdminPanel() {
       cancelled: { variant: "destructive" as const, text: "Bekor qilingan", icon: XCircle },
       approved: { variant: "default" as const, text: "Tasdiqlangan", icon: CheckCircle },
       rejected: { variant: "destructive" as const, text: "Rad etilgan", icon: XCircle },
-      read: { variant: "secondary" as const, text: "O'qilgan", icon: Eye },
+      responded: { variant: "default" as const, text: "Javob berilgan", icon: CheckCircle },
     }
 
     const config = statusConfig[status as keyof typeof statusConfig] || {
@@ -448,26 +459,21 @@ export default function AdminPanel() {
     )
   }
 
-  const getMessageTypeText = (type: string) => {
-    const types: Record<string, string> = {
-      seller_application: "Sotuvchi arizasi",
-      product_approval: "Mahsulot tasdiqlash",
-      product_action_request: "Mahsulot amal so'rovi",
-      contact: "Murojaat",
-      system_message: "Tizim xabari",
+  const getFilteredApplications = () => {
+    switch (applicationFilter) {
+      case "seller":
+        return sellerApplications
+      case "product":
+        return productApplications
+      case "contact":
+        return contactMessages
+      default:
+        return [
+          ...sellerApplications.map((app) => ({ ...app, type: "seller" })),
+          ...productApplications.map((app) => ({ ...app, type: "product" })),
+          ...contactMessages.map((msg) => ({ ...msg, type: "contact" })),
+        ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     }
-    return types[type] || "Xabar"
-  }
-
-  const getMessageTypeColor = (type: string) => {
-    const colors: Record<string, string> = {
-      seller_application: "bg-blue-100 text-blue-800",
-      product_approval: "bg-green-100 text-green-800",
-      product_action_request: "bg-yellow-100 text-yellow-800",
-      contact: "bg-purple-100 text-purple-800",
-      system_message: "bg-gray-100 text-gray-800",
-    }
-    return colors[type] || "bg-gray-100 text-gray-800"
   }
 
   if (loading) {
@@ -478,434 +484,538 @@ export default function AdminPanel() {
     )
   }
 
+  const sidebarItems = [
+    { id: "overview", name: "Umumiy ko'rinish", icon: Eye },
+    { id: "applications", name: "Arizalar", icon: FileText },
+    { id: "orders", name: "Buyurtmalar", icon: ShoppingCart },
+    { id: "users", name: "Foydalanuvchilar", icon: Users },
+    { id: "products", name: "Mahsulotlar", icon: Package },
+  ]
+
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold gradient-text mb-2">Admin Panel</h1>
-        <p className="text-gray-600">Tizimni boshqarish va nazorat qilish</p>
+    <div className="min-h-screen bg-gray-50">
+      {/* Mobile Header */}
+      <div className="lg:hidden bg-white border-b border-gray-200 px-4 py-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(true)}>
+              <Menu className="h-5 w-5" />
+            </Button>
+            <h1 className="text-lg font-semibold">Admin Panel</h1>
+          </div>
+        </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
-        <Card className="card-beautiful">
-          <CardContent className="p-4 text-center">
-            <Users className="h-8 w-8 text-blue-600 mx-auto mb-2" />
-            <div className="text-2xl font-bold">{stats.totalUsers}</div>
-            <div className="text-sm text-gray-600">Foydalanuvchilar</div>
-          </CardContent>
-        </Card>
-        <Card className="card-beautiful">
-          <CardContent className="p-4 text-center">
-            <Store className="h-8 w-8 text-green-600 mx-auto mb-2" />
-            <div className="text-2xl font-bold">{stats.totalSellers}</div>
-            <div className="text-sm text-gray-600">Sotuvchilar</div>
-          </CardContent>
-        </Card>
-        <Card className="card-beautiful">
-          <CardContent className="p-4 text-center">
-            <Package className="h-8 w-8 text-purple-600 mx-auto mb-2" />
-            <div className="text-2xl font-bold">{stats.totalProducts}</div>
-            <div className="text-sm text-gray-600">Mahsulotlar</div>
-          </CardContent>
-        </Card>
-        <Card className="card-beautiful">
-          <CardContent className="p-4 text-center">
-            <ShoppingCart className="h-8 w-8 text-orange-600 mx-auto mb-2" />
-            <div className="text-2xl font-bold">{stats.totalOrders}</div>
-            <div className="text-sm text-gray-600">Buyurtmalar</div>
-          </CardContent>
-        </Card>
-        <Card className="card-beautiful">
-          <CardContent className="p-4 text-center">
-            <MessageSquare className="h-8 w-8 text-red-600 mx-auto mb-2" />
-            <div className="text-2xl font-bold">{stats.unreadMessages}</div>
-            <div className="text-sm text-gray-600">O'qilmagan xabarlar</div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Tabs defaultValue="messages" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-6">
-          <TabsTrigger value="messages">Xabarlar ({stats.unreadMessages})</TabsTrigger>
-          <TabsTrigger value="orders">Buyurtmalar</TabsTrigger>
-          <TabsTrigger value="users">Foydalanuvchilar</TabsTrigger>
-          <TabsTrigger value="products">Mahsulotlar</TabsTrigger>
-          <TabsTrigger value="categories">Kategoriyalar</TabsTrigger>
-          <TabsTrigger value="ads">Reklamalar</TabsTrigger>
-        </TabsList>
-
-        {/* Messages Tab */}
-        <TabsContent value="messages" className="space-y-6">
-          <Card className="card-beautiful">
-            <CardHeader>
-              <CardTitle className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <MessageSquare className="h-5 w-5" />
-                  Admin Xabarlar
-                </div>
-                <Badge variant="destructive">{stats.unreadMessages} yangi</Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {/* Message Filters */}
-              <div className="flex flex-col sm:flex-row gap-4 mb-6">
-                <div className="flex-1">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                    <Input
-                      placeholder="Xabar qidirish..."
-                      value={messageSearchQuery}
-                      onChange={(e) => setMessageSearchQuery(e.target.value)}
-                      className="pl-10"
-                    />
+      <div className="flex">
+        {/* Sidebar */}
+        <div
+          className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-0 ${
+            sidebarOpen ? "translate-x-0" : "-translate-x-full"
+          }`}
+        >
+          <div className="flex flex-col h-full">
+            {/* Sidebar Header */}
+            <div className="p-4 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+                    <Award className="h-5 w-5 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="font-semibold text-gray-900">Admin</h2>
+                    <p className="text-xs text-gray-500">Panel</p>
                   </div>
                 </div>
-                <Select value={messageFilter} onValueChange={setMessageFilter}>
-                  <SelectTrigger className="w-48">
-                    <SelectValue placeholder="Tur bo'yicha filter" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Barchasi</SelectItem>
-                    <SelectItem value="unread">O'qilmaganlar</SelectItem>
-                    <SelectItem value="seller_application">Sotuvchi arizalari</SelectItem>
-                    <SelectItem value="product_approval">Mahsulot tasdiqlash</SelectItem>
-                    <SelectItem value="product_action_request">Mahsulot amallari</SelectItem>
-                    <SelectItem value="contact">Murojaatlar</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Messages List */}
-              <div className="space-y-4 max-h-[600px] overflow-y-auto">
-                {filteredMessages.length === 0 ? (
-                  <div className="text-center py-8">
-                    <MessageSquare className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500">Xabarlar topilmadi</p>
-                  </div>
-                ) : (
-                  filteredMessages.map((message) => (
-                    <Card
-                      key={message.id}
-                      className={`border cursor-pointer transition-colors ${
-                        message.status === "pending" ? "border-l-4 border-l-red-500 bg-red-50/50" : ""
-                      }`}
-                      onClick={() => {
-                        setSelectedMessage(message)
-                        if (message.status === "pending") {
-                          markMessageAsRead(message.id)
-                        }
-                      }}
-                    >
-                      <CardContent className="p-4">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-2">
-                              <Badge className={getMessageTypeColor(message.type)}>
-                                {getMessageTypeText(message.type)}
-                              </Badge>
-                              {getStatusBadge(message.status)}
-                            </div>
-                            <h3 className="font-semibold mb-1">{message.title}</h3>
-                            <p className="text-gray-600 mb-2 line-clamp-2">{message.content}</p>
-                            <div className="text-sm text-gray-500">
-                              {message.users?.full_name} • {new Date(message.created_at).toLocaleDateString()}
-                            </div>
-                          </div>
-                          {message.status === "pending" && (
-                            <div className="flex gap-2 ml-4">
-                              <Button
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  handleMessageAction(message.id, "approve")
-                                }}
-                                className="bg-green-600 hover:bg-green-700"
-                              >
-                                <CheckCircle className="h-4 w-4 mr-1" />
-                                Tasdiqlash
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  handleMessageAction(message.id, "reject")
-                                }}
-                              >
-                                <XCircle className="h-4 w-4 mr-1" />
-                                Rad etish
-                              </Button>
-                            </div>
-                          )}
-                        </div>
-                        {message.admin_response && (
-                          <div className="mt-3 p-3 bg-gray-50 rounded-lg">
-                            <p className="text-sm">
-                              <strong>Admin javobi:</strong> {message.admin_response}
-                            </p>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Orders Tab */}
-        <TabsContent value="orders" className="space-y-6">
-          <Card className="card-beautiful">
-            <CardHeader>
-              <CardTitle className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <ShoppingCart className="h-5 w-5" />
-                  Buyurtmalar
-                </div>
-                <Button onClick={() => {}} variant="outline" size="sm">
-                  <Download className="h-4 w-4 mr-2" />
-                  Export
+                <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(false)}>
+                  <X className="h-5 w-5" />
                 </Button>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {/* Filters */}
-              <div className="flex flex-col sm:flex-row gap-4 mb-6">
-                <div className="flex-1">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                    <Input
-                      placeholder="Buyurtma qidirish..."
-                      value={orderSearchQuery}
-                      onChange={(e) => setOrderSearchQuery(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
-                </div>
-                <Select value={orderFilter} onValueChange={setOrderFilter}>
-                  <SelectTrigger className="w-48">
-                    <SelectValue placeholder="Holat bo'yicha filter" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Barchasi</SelectItem>
-                    <SelectItem value="pending">Kutilmoqda</SelectItem>
-                    <SelectItem value="processing">Jarayonda</SelectItem>
-                    <SelectItem value="completed">Bajarilgan</SelectItem>
-                    <SelectItem value="cancelled">Bekor qilingan</SelectItem>
-                  </SelectContent>
-                </Select>
               </div>
+            </div>
 
-              {/* Orders List */}
-              <div className="space-y-4 max-h-[600px] overflow-y-auto">
-                {filteredOrders.map((order) => (
-                  <Card key={order.id} className="border">
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                          <div>
-                            <h3 className="font-semibold">#{order.id.slice(-8)}</h3>
-                            <p className="text-sm text-gray-600">{order.full_name}</p>
-                            <p className="text-sm text-gray-600">{order.phone}</p>
-                          </div>
-                          <div>
-                            <p className="font-medium">{order.products?.name}</p>
-                            <p className="text-sm text-gray-600">Miqdor: {order.quantity}</p>
-                            <p className="text-sm font-bold text-green-600">{formatPrice(order.total_amount)}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {getStatusBadge(order.status)}
-                          <Select value={order.status} onValueChange={(value) => updateOrderStatus(order.id, value)}>
-                            <SelectTrigger className="w-32">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="pending">Kutilmoqda</SelectItem>
-                              <SelectItem value="processing">Jarayonda</SelectItem>
-                              <SelectItem value="completed">Bajarilgan</SelectItem>
-                              <SelectItem value="cancelled">Bekor qilingan</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <Button size="sm" variant="outline" onClick={() => window.open(`tel:${order.phone}`)}>
-                            <Phone className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
+            {/* Navigation */}
+            <nav className="flex-1 p-4">
+              <ul className="space-y-2">
+                {sidebarItems.map((item) => {
+                  const isActive = activeTab === item.id
+                  return (
+                    <li key={item.id}>
+                      <button
+                        onClick={() => {
+                          setActiveTab(item.id)
+                          setSidebarOpen(false)
+                        }}
+                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          isActive
+                            ? "bg-blue-50 text-blue-700 border border-blue-200"
+                            : "text-gray-700 hover:bg-gray-100"
+                        }`}
+                      >
+                        <item.icon className="h-5 w-5" />
+                        {item.name}
+                        {item.id === "applications" && (
+                          <Badge variant="destructive" className="ml-auto">
+                            {stats.pendingSellerApplications + stats.pendingProductApplications + stats.pendingContacts}
+                          </Badge>
+                        )}
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            </nav>
+          </div>
+        </div>
+
+        {/* Mobile Overlay */}
+        {sidebarOpen && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
+        )}
+
+        {/* Main Content */}
+        <div className="flex-1 lg:ml-0">
+          {/* Desktop Header */}
+          <div className="hidden lg:block bg-white border-b border-gray-200 px-6 py-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">Admin Panel</h1>
+                <p className="text-gray-600">Tizimni boshqarish va nazorat qilish</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Page Content */}
+          <main className="p-4 lg:p-6">
+            {activeTab === "overview" && (
+              <div className="space-y-6">
+                {/* Stats Cards */}
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                  <Card className="card-beautiful">
+                    <CardContent className="p-4 text-center">
+                      <Users className="h-8 w-8 text-blue-600 mx-auto mb-2" />
+                      <div className="text-2xl font-bold">{stats.totalUsers}</div>
+                      <div className="text-sm text-gray-600">Foydalanuvchilar</div>
                     </CardContent>
                   </Card>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Users Tab */}
-        <TabsContent value="users" className="space-y-6">
-          <Card className="card-beautiful">
-            <CardHeader>
-              <CardTitle className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Users className="h-5 w-5" />
-                  Foydalanuvchilar
+                  <Card className="card-beautiful">
+                    <CardContent className="p-4 text-center">
+                      <Store className="h-8 w-8 text-green-600 mx-auto mb-2" />
+                      <div className="text-2xl font-bold">{stats.totalSellers}</div>
+                      <div className="text-sm text-gray-600">Sotuvchilar</div>
+                    </CardContent>
+                  </Card>
+                  <Card className="card-beautiful">
+                    <CardContent className="p-4 text-center">
+                      <Package className="h-8 w-8 text-purple-600 mx-auto mb-2" />
+                      <div className="text-2xl font-bold">{stats.totalProducts}</div>
+                      <div className="text-sm text-gray-600">Mahsulotlar</div>
+                    </CardContent>
+                  </Card>
+                  <Card className="card-beautiful">
+                    <CardContent className="p-4 text-center">
+                      <ShoppingCart className="h-8 w-8 text-orange-600 mx-auto mb-2" />
+                      <div className="text-2xl font-bold">{stats.totalOrders}</div>
+                      <div className="text-sm text-gray-600">Buyurtmalar</div>
+                    </CardContent>
+                  </Card>
+                  <Card className="card-beautiful">
+                    <CardContent className="p-4 text-center">
+                      <FileText className="h-8 w-8 text-red-600 mx-auto mb-2" />
+                      <div className="text-2xl font-bold">
+                        {stats.pendingSellerApplications + stats.pendingProductApplications + stats.pendingContacts}
+                      </div>
+                      <div className="text-sm text-gray-600">Kutilayotgan arizalar</div>
+                    </CardContent>
+                  </Card>
                 </div>
-                <Button onClick={() => {}} variant="outline" size="sm">
-                  <Download className="h-4 w-4 mr-2" />
-                  Export
-                </Button>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {/* Filters */}
-              <div className="flex flex-col sm:flex-row gap-4 mb-6">
-                <div className="flex-1">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                    <Input
-                      placeholder="Qidirish..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
-                </div>
-                <Select value={userFilter} onValueChange={setUserFilter}>
-                  <SelectTrigger className="w-48">
-                    <SelectValue placeholder="Filter" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Barchasi</SelectItem>
-                    <SelectItem value="customers">Mijozlar</SelectItem>
-                    <SelectItem value="sellers">Sotuvchilar</SelectItem>
-                    <SelectItem value="admins">Adminlar</SelectItem>
-                  </SelectContent>
-                </Select>
               </div>
+            )}
 
-              {/* Users List */}
-              <div className="space-y-4 max-h-[600px] overflow-y-auto">
-                {filteredUsers.map((userData) => (
-                  <Card key={userData.id} className="border">
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                          <Avatar>
-                            <AvatarImage src="/placeholder-user.jpg" />
-                            <AvatarFallback>
-                              {userData.full_name?.charAt(0) || userData.email?.charAt(0) || "U"}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div>
-                            <h3 className="font-semibold">{userData.full_name || "Noma'lum"}</h3>
-                            <p className="text-sm text-gray-600">{userData.email}</p>
-                            {userData.phone && <p className="text-sm text-gray-600">{userData.phone}</p>}
-                            {userData.company_name && <p className="text-sm text-blue-600">{userData.company_name}</p>}
-                          </div>
+            {activeTab === "applications" && (
+              <div className="space-y-6">
+                <Card className="card-beautiful">
+                  <CardHeader>
+                    <CardTitle className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-5 w-5" />
+                        Arizalar
+                      </div>
+                      <Badge variant="destructive">
+                        {stats.pendingSellerApplications + stats.pendingProductApplications + stats.pendingContacts}{" "}
+                        yangi
+                      </Badge>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {/* Application Filters */}
+                    <div className="flex gap-2 mb-6 flex-wrap">
+                      <Button
+                        size="sm"
+                        variant={applicationFilter === "all" ? "default" : "outline"}
+                        onClick={() => setApplicationFilter("all")}
+                      >
+                        Barchasi
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={applicationFilter === "seller" ? "default" : "outline"}
+                        onClick={() => setApplicationFilter("seller")}
+                      >
+                        <UserCheck className="h-4 w-4 mr-1" />
+                        Sotuvchilik arizalari ({stats.pendingSellerApplications})
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={applicationFilter === "product" ? "default" : "outline"}
+                        onClick={() => setApplicationFilter("product")}
+                      >
+                        <PackageCheck className="h-4 w-4 mr-1" />
+                        Mahsulot arizalari ({stats.pendingProductApplications})
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={applicationFilter === "contact" ? "default" : "outline"}
+                        onClick={() => setApplicationFilter("contact")}
+                      >
+                        <MessageCircle className="h-4 w-4 mr-1" />
+                        Murojaatlar ({stats.pendingContacts})
+                      </Button>
+                    </div>
+
+                    {/* Applications List */}
+                    <div className="space-y-4 max-h-[600px] overflow-y-auto">
+                      {getFilteredApplications().length === 0 ? (
+                        <div className="text-center py-8">
+                          <FileText className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+                          <p className="text-gray-500">Arizalar topilmadi</p>
                         </div>
-                        <div className="flex items-center gap-2">
-                          {userData.is_admin && (
-                            <Badge variant="destructive">
-                              <Award className="h-3 w-3 mr-1" />
-                              Admin
-                            </Badge>
-                          )}
-                          {userData.is_verified_seller && (
-                            <Badge variant="default">
-                              <Store className="h-3 w-3 mr-1" />
-                              Sotuvchi
-                            </Badge>
-                          )}
-                          <Dialog>
-                            <DialogTrigger asChild>
-                              <Button size="sm" variant="outline">
-                                <Send className="h-4 w-4 mr-1" />
-                                Xabar
-                              </Button>
-                            </DialogTrigger>
-                            <DialogContent>
-                              <DialogHeader>
-                                <DialogTitle>Xabar yuborish</DialogTitle>
-                                <DialogDescription>
-                                  {userData.full_name || userData.email} ga xabar yuboring
-                                </DialogDescription>
-                              </DialogHeader>
-                              <div className="space-y-4">
-                                <Textarea
-                                  placeholder="Xabaringizni yozing..."
-                                  value={responseText}
-                                  onChange={(e) => setResponseText(e.target.value)}
-                                />
-                                <Button
-                                  onClick={() => {
-                                    // Send message logic here
-                                    setResponseText("")
-                                  }}
-                                  disabled={!responseText.trim()}
+                      ) : (
+                        getFilteredApplications().map((application: any) => (
+                          <Card
+                            key={application.id}
+                            className={`border cursor-pointer transition-colors ${
+                              application.status === "pending" ? "border-l-4 border-l-red-500 bg-red-50/50" : ""
+                            }`}
+                            onClick={() => setSelectedApplication(application)}
+                          >
+                            <CardContent className="p-4">
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <Badge className="bg-blue-100 text-blue-800">
+                                      {application.type === "seller"
+                                        ? "Sotuvchilik arizasi"
+                                        : application.type === "product"
+                                          ? "Mahsulot arizasi"
+                                          : "Murojaat"}
+                                    </Badge>
+                                    {getStatusBadge(application.status)}
+                                  </div>
+                                  <h3 className="font-semibold mb-1">
+                                    {application.type === "seller"
+                                      ? application.company_name
+                                      : application.type === "product"
+                                        ? application.product_data?.name || "Mahsulot arizasi"
+                                        : application.subject || "Murojaat"}
+                                  </h3>
+                                  <p className="text-gray-600 mb-2 line-clamp-2">
+                                    {application.type === "seller"
+                                      ? application.description
+                                      : application.type === "product"
+                                        ? application.product_data?.description
+                                        : application.message}
+                                  </p>
+                                  <div className="text-sm text-gray-500">
+                                    {application.type === "contact" ? application.name : application.users?.full_name} •{" "}
+                                    {new Date(application.created_at).toLocaleDateString()}
+                                  </div>
+                                </div>
+                                {application.status === "pending" && (
+                                  <div className="flex gap-2 ml-4">
+                                    <Button
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        if (application.type === "contact") {
+                                          handleContactResponse(application.id)
+                                        } else {
+                                          handleApplicationAction(application.id, application.type, "approve")
+                                        }
+                                      }}
+                                      className="bg-green-600 hover:bg-green-700"
+                                    >
+                                      <CheckCircle className="h-4 w-4 mr-1" />
+                                      {application.type === "contact" ? "Javob berish" : "Tasdiqlash"}
+                                    </Button>
+                                    {application.type !== "contact" && (
+                                      <Button
+                                        size="sm"
+                                        variant="destructive"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          handleApplicationAction(application.id, application.type, "reject")
+                                        }}
+                                      >
+                                        <XCircle className="h-4 w-4 mr-1" />
+                                        Rad etish
+                                      </Button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              {application.admin_response && (
+                                <div className="mt-3 p-3 bg-gray-50 rounded-lg">
+                                  <p className="text-sm">
+                                    <strong>Admin javobi:</strong> {application.admin_response}
+                                  </p>
+                                </div>
+                              )}
+                            </CardContent>
+                          </Card>
+                        ))
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {activeTab === "orders" && (
+              <div className="space-y-6">
+                <Card className="card-beautiful">
+                  <CardHeader>
+                    <CardTitle className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <ShoppingCart className="h-5 w-5" />
+                        Buyurtmalar
+                      </div>
+                      <Button onClick={() => {}} variant="outline" size="sm">
+                        <Download className="h-4 w-4 mr-2" />
+                        Export
+                      </Button>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {/* Filters */}
+                    <div className="flex flex-col sm:flex-row gap-4 mb-6">
+                      <div className="flex-1">
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                          <Input
+                            placeholder="Buyurtma qidirish..."
+                            value={orderSearchQuery}
+                            onChange={(e) => setOrderSearchQuery(e.target.value)}
+                            className="pl-10"
+                          />
+                        </div>
+                      </div>
+                      <Select value={orderFilter} onValueChange={setOrderFilter}>
+                        <SelectTrigger className="w-48">
+                          <SelectValue placeholder="Holat bo'yicha filter" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Barchasi</SelectItem>
+                          <SelectItem value="pending">Kutilmoqda</SelectItem>
+                          <SelectItem value="processing">Jarayonda</SelectItem>
+                          <SelectItem value="completed">Bajarilgan</SelectItem>
+                          <SelectItem value="cancelled">Bekor qilingan</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Orders List */}
+                    <div className="space-y-4 max-h-[600px] overflow-y-auto">
+                      {filteredOrders.map((order) => (
+                        <Card key={order.id} className="border">
+                          <CardContent className="p-4">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-4">
+                                <div>
+                                  <h3 className="font-semibold">#{order.id.slice(-8)}</h3>
+                                  <p className="text-sm text-gray-600">{order.full_name}</p>
+                                  <p className="text-sm text-gray-600">{order.phone}</p>
+                                </div>
+                                <div>
+                                  <p className="font-medium">{order.products?.name}</p>
+                                  <p className="text-sm text-gray-600">Miqdor: {order.quantity}</p>
+                                  <p className="text-sm font-bold text-green-600">{formatPrice(order.total_amount)}</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {getStatusBadge(order.status)}
+                                <Select
+                                  value={order.status}
+                                  onValueChange={(value) => updateOrderStatus(order.id, value)}
                                 >
-                                  Yuborish
+                                  <SelectTrigger className="w-32">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="pending">Kutilmoqda</SelectItem>
+                                    <SelectItem value="processing">Jarayonda</SelectItem>
+                                    <SelectItem value="completed">Bajarilgan</SelectItem>
+                                    <SelectItem value="cancelled">Bekor qilingan</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                <Button size="sm" variant="outline" onClick={() => window.open(`tel:${order.phone}`)}>
+                                  <Phone className="h-4 w-4" />
                                 </Button>
                               </div>
-                            </DialogContent>
-                          </Dialog>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {activeTab === "users" && (
+              <div className="space-y-6">
+                <Card className="card-beautiful">
+                  <CardHeader>
+                    <CardTitle className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Users className="h-5 w-5" />
+                        Foydalanuvchilar
+                      </div>
+                      <Button onClick={() => {}} variant="outline" size="sm">
+                        <Download className="h-4 w-4 mr-2" />
+                        Export
+                      </Button>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {/* Filters */}
+                    <div className="flex flex-col sm:flex-row gap-4 mb-6">
+                      <div className="flex-1">
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                          <Input
+                            placeholder="Qidirish..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="pl-10"
+                          />
                         </div>
                       </div>
-                    </CardContent>
-                  </Card>
-                ))}
+                      <Select value={userFilter} onValueChange={setUserFilter}>
+                        <SelectTrigger className="w-48">
+                          <SelectValue placeholder="Filter" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Barchasi</SelectItem>
+                          <SelectItem value="customers">Mijozlar</SelectItem>
+                          <SelectItem value="sellers">Sotuvchilar</SelectItem>
+                          <SelectItem value="admins">Adminlar</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Users List */}
+                    <div className="space-y-4 max-h-[600px] overflow-y-auto">
+                      {filteredUsers.map((userData) => (
+                        <Card key={userData.id} className="border">
+                          <CardContent className="p-4">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-4">
+                                <Avatar>
+                                  <AvatarImage src="/placeholder-user.jpg" />
+                                  <AvatarFallback>
+                                    {userData.full_name?.charAt(0) || userData.email?.charAt(0) || "U"}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div>
+                                  <h3 className="font-semibold">{userData.full_name || "Noma'lum"}</h3>
+                                  <p className="text-sm text-gray-600">{userData.email}</p>
+                                  {userData.phone && <p className="text-sm text-gray-600">{userData.phone}</p>}
+                                  {userData.company_name && (
+                                    <p className="text-sm text-blue-600">{userData.company_name}</p>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {userData.is_admin && (
+                                  <Badge variant="destructive">
+                                    <Award className="h-3 w-3 mr-1" />
+                                    Admin
+                                  </Badge>
+                                )}
+                                {userData.is_verified_seller && (
+                                  <Badge variant="default">
+                                    <Store className="h-3 w-3 mr-1" />
+                                    Sotuvchi
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
+            )}
+          </main>
+        </div>
+      </div>
 
-        {/* Products Tab */}
-        <TabsContent value="products">
-          <ProductsManagement />
-        </TabsContent>
-
-        {/* Categories Tab */}
-        <TabsContent value="categories">
-          <CategoriesManagement />
-        </TabsContent>
-
-        {/* Ads Tab */}
-        <TabsContent value="ads">
-          <AdsManagement />
-        </TabsContent>
-      </Tabs>
-
-      {/* Message Detail Modal */}
-      {selectedMessage && (
-        <Dialog open={!!selectedMessage} onOpenChange={() => setSelectedMessage(null)}>
+      {/* Application Detail Modal */}
+      {selectedApplication && (
+        <Dialog open={!!selectedApplication} onOpenChange={() => setSelectedApplication(null)}>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
-              <DialogTitle>{selectedMessage.title}</DialogTitle>
+              <DialogTitle>
+                {selectedApplication.type === "seller"
+                  ? selectedApplication.company_name
+                  : selectedApplication.type === "product"
+                    ? selectedApplication.product_data?.name || "Mahsulot arizasi"
+                    : selectedApplication.subject || "Murojaat"}
+              </DialogTitle>
               <DialogDescription>
-                {getMessageTypeText(selectedMessage.type)} • {selectedMessage.users?.full_name}
+                {selectedApplication.type === "seller"
+                  ? "Sotuvchilik arizasi"
+                  : selectedApplication.type === "product"
+                    ? "Mahsulot arizasi"
+                    : "Murojaat"}{" "}
+                •{" "}
+                {selectedApplication.type === "contact"
+                  ? selectedApplication.name
+                  : selectedApplication.users?.full_name}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="p-4 bg-gray-50 rounded-lg">
-                <p>{selectedMessage.content}</p>
+                <p>
+                  {selectedApplication.type === "seller"
+                    ? selectedApplication.description
+                    : selectedApplication.type === "product"
+                      ? selectedApplication.product_data?.description
+                      : selectedApplication.message}
+                </p>
               </div>
 
-              {selectedMessage.data && Object.keys(selectedMessage.data).length > 0 && (
-                <div className="p-4 bg-blue-50 rounded-lg">
-                  <h4 className="font-semibold mb-2">Qo'shimcha ma'lumotlar:</h4>
-                  <pre className="text-sm text-gray-700 whitespace-pre-wrap">
-                    {JSON.stringify(selectedMessage.data, null, 2)}
-                  </pre>
+              {selectedApplication.type === "contact" && selectedApplication.phone && (
+                <div className="flex items-center gap-2">
+                  <Button
+                    onClick={() => window.open(`tel:${selectedApplication.phone}`)}
+                    className="bg-green-600 hover:bg-green-700"
+                  >
+                    <Phone className="h-4 w-4 mr-2" />
+                    {selectedApplication.phone} ga qo'ng'iroq qilish
+                  </Button>
                 </div>
               )}
 
-              {selectedMessage.admin_response && (
+              {selectedApplication.admin_response && (
                 <div className="p-4 bg-green-50 rounded-lg">
-                  <h4 className="font-semibold mb-2">Admin javobi:</h4>
-                  <p>{selectedMessage.admin_response}</p>
+                  <h4 className="font-semibold text-green-800 mb-2">Admin javobi:</h4>
+                  <p className="text-green-700">{selectedApplication.admin_response}</p>
                 </div>
               )}
 
-              {selectedMessage.status === "pending" && (
+              {selectedApplication.status === "pending" && (
                 <div className="space-y-3">
                   <Textarea
                     placeholder="Javobingizni yozing..."
@@ -913,20 +1023,36 @@ export default function AdminPanel() {
                     onChange={(e) => setResponseText(e.target.value)}
                   />
                   <div className="flex gap-2">
-                    <Button
-                      onClick={() => handleMessageAction(selectedMessage.id, "approve", responseText)}
-                      className="bg-green-600 hover:bg-green-700"
-                    >
-                      <CheckCircle className="h-4 w-4 mr-2" />
-                      Tasdiqlash
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      onClick={() => handleMessageAction(selectedMessage.id, "reject", responseText)}
-                    >
-                      <XCircle className="h-4 w-4 mr-2" />
-                      Rad etish
-                    </Button>
+                    {selectedApplication.type === "contact" ? (
+                      <Button
+                        onClick={() => handleContactResponse(selectedApplication.id)}
+                        className="bg-green-600 hover:bg-green-700"
+                      >
+                        <CheckCircle className="h-4 w-4 mr-2" />
+                        Javob berish
+                      </Button>
+                    ) : (
+                      <>
+                        <Button
+                          onClick={() =>
+                            handleApplicationAction(selectedApplication.id, selectedApplication.type, "approve")
+                          }
+                          className="bg-green-600 hover:bg-green-700"
+                        >
+                          <CheckCircle className="h-4 w-4 mr-2" />
+                          Tasdiqlash
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          onClick={() =>
+                            handleApplicationAction(selectedApplication.id, selectedApplication.type, "reject")
+                          }
+                        >
+                          <XCircle className="h-4 w-4 mr-2" />
+                          Rad etish
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
               )}

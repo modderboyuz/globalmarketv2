@@ -87,7 +87,7 @@ export default function CartPage() {
   const fetchCartItems = async (userId: string) => {
     try {
       const { data, error } = await supabase
-        .from("cart")
+        .from("cart_items")
         .select(`
           *,
           products (
@@ -119,7 +119,7 @@ export default function CartPage() {
     if (newQuantity < 1) return
 
     try {
-      const { error } = await supabase.from("cart").update({ quantity: newQuantity }).eq("id", cartId)
+      const { error } = await supabase.from("cart_items").update({ quantity: newQuantity }).eq("id", cartId)
 
       if (error) throw error
 
@@ -131,7 +131,7 @@ export default function CartPage() {
 
   const removeItem = async (cartId: string) => {
     try {
-      const { error } = await supabase.from("cart").delete().eq("id", cartId)
+      const { error } = await supabase.from("cart_items").delete().eq("id", cartId)
 
       if (error) throw error
 
@@ -187,7 +187,7 @@ export default function CartPage() {
       }
 
       // Clear cart
-      await supabase.from("cart").delete().eq("user_id", user.id)
+      await supabase.from("cart_items").delete().eq("user_id", user.id)
 
       toast.success("Barcha buyurtmalar muvaffaqiyatli berildi! Sizga tez orada aloqaga chiqamiz.")
 

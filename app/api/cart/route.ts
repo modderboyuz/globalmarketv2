@@ -36,9 +36,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Check if item already exists in cart
+    // Check if item already exists in cart_items
     const { data: existingItem, error: checkError } = await supabase
-      .from("cart")
+      .from("cart_items")
       .select("*")
       .eq("user_id", userId)
       .eq("product_id", productId)
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     if (existingItem) {
       // Update quantity
       const { data, error } = await supabase
-        .from("cart")
+        .from("cart_items")
         .update({
           quantity: existingItem.quantity + quantity,
           updated_at: new Date().toISOString(),
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
     } else {
       // Add new item
       const { data, error } = await supabase
-        .from("cart")
+        .from("cart_items")
         .insert({
           user_id: userId,
           product_id: productId,
@@ -80,5 +80,63 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Cart API Error:", error)
     return NextResponse.json({ error: "Savatga qo'shishda xatolik" }, { status: 500 })
+  }
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const userId = searchParams.get("userId")
+
+    if (!userId) {
+      return NextResponse.json({ error: "User ID talab qilinadi" }, { status: 400 })
+    }
+
+    const { data, error } = await supabase
+      .from("cart_items")
+      .select(`
+        *,
+        products (
+          id,
+          name,
+          price,
+          image_url,
+          stock_quantity,
+          product_type,
+          brand,
+          author,
+          has_delivery,
+          delivery_price
+        )
+      `)
+      .eq("user_id", userId)
+
+    if (error) throw error
+
+    return NextResponse.json({ success: true, items: data || [] })
+  } catch (error) {
+    console.error("Cart GET Error:", error)
+    return NextResponse.json({ error: "Savatcha ma'lumotlarini olishda xatolik" }, { status: 500 })
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const itemId = searchParams.get("itemId")
+    const userId = searchParams.get("userId")
+
+    if (!itemId || !userId) {
+      return NextResponse.json({ error: "Item ID va User ID talab qilinadi" }, { status: 400 })
+    }
+
+    const { error } = await supabase.from("cart_items").delete().eq("id", itemId).eq("user_id", userId)
+
+    if (error) throw error
+
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    console.error("Cart DELETE Error:", error)
+    return NextResponse.json({ error: "Mahsulotni o'chirishda xatolik" }, { status: 500 })
   }
 }

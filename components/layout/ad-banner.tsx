@@ -91,7 +91,10 @@ export function AdBanner() {
   const currentAd = ads[currentAdIndex]
 
   return (
-    <Card className="relative overflow-hidden bg-gradient-to-r from-blue-50 to-purple-50 border-2 border-blue-100 shadow-xl">
+    <Card
+      className="relative overflow-hidden bg-gradient-to-r from-blue-50 to-purple-50 border-2 border-blue-100 shadow-xl cursor-pointer"
+      onClick={() => handleAdClick(currentAd.id, currentAd.link_url)}
+    >
       <div className="relative h-48 md:h-64 lg:h-80">
         {/* Background Image */}
         {currentAd.image_url && currentAd.image_url !== "/placeholder.svg" && (
@@ -120,7 +123,10 @@ export function AdBanner() {
                   </p>
                 )}
                 <Button
-                  onClick={() => handleAdClick(currentAd.id, currentAd.link_url)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleAdClick(currentAd.id, currentAd.link_url)
+                  }}
                   className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-8 py-4 rounded-2xl text-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
                   size="lg"
                 >
@@ -151,7 +157,10 @@ export function AdBanner() {
               variant="ghost"
               size="icon"
               className="absolute left-4 top-1/2 transform -translate-y-1/2 bg-white/90 hover:bg-white rounded-full shadow-lg backdrop-blur-sm"
-              onClick={prevAd}
+              onClick={(e) => {
+                e.stopPropagation()
+                prevAd()
+              }}
             >
               <ChevronLeft className="h-6 w-6" />
             </Button>
@@ -159,7 +168,10 @@ export function AdBanner() {
               variant="ghost"
               size="icon"
               className="absolute right-4 top-1/2 transform -translate-y-1/2 bg-white/90 hover:bg-white rounded-full shadow-lg backdrop-blur-sm"
-              onClick={nextAd}
+              onClick={(e) => {
+                e.stopPropagation()
+                nextAd()
+              }}
             >
               <ChevronRight className="h-6 w-6" />
             </Button>
@@ -175,7 +187,10 @@ export function AdBanner() {
                 className={`w-3 h-3 rounded-full transition-all duration-300 ${
                   index === currentAdIndex ? "bg-white shadow-lg scale-125" : "bg-white/60 hover:bg-white/80"
                 }`}
-                onClick={() => setCurrentAdIndex(index)}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setCurrentAdIndex(index)
+                }}
               />
             ))}
           </div>
