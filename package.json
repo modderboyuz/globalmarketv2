@@ -1,5 +1,5 @@
 {
-  "name": "my-v0-project",
+  "name": "globalmarket",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,7 +9,9 @@
     "start": "next start"
   },
   "dependencies": {
-    "@hookform/resolvers": "^3.9.1",
+    "@ai-sdk/openai": "^0.0.66",
+    "@hookform/resolvers": "^3.9.0",
+    "@neondatabase/serverless": "^0.10.1",
     "@radix-ui/react-accordion": "latest",
     "@radix-ui/react-alert-dialog": "latest",
     "@radix-ui/react-aspect-ratio": "latest",
@@ -29,6 +31,7 @@
     "@radix-ui/react-scroll-area": "latest",
     "@radix-ui/react-select": "latest",
     "@radix-ui/react-separator": "latest",
+    "@radix-ui/react-sheet": "^1.1.0",
     "@radix-ui/react-slider": "latest",
     "@radix-ui/react-slot": "latest",
     "@radix-ui/react-switch": "latest",
@@ -38,7 +41,10 @@
     "@radix-ui/react-toggle-group": "latest",
     "@radix-ui/react-tooltip": "latest",
     "@supabase/supabase-js": "latest",
-    "autoprefixer": "^10.4.20",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "ai": "^3.4.32",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "latest",
@@ -60,14 +66,18 @@
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
     "vaul": "latest",
-    "zod": "^3.24.1"
+    "xlsx": "latest",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/xlsx": "^0.0.36",
+    "eslint": "^8",
+    "eslint-config-next": "15.0.3",
     "postcss": "^8.5",
-    "tailwindcss": "^3.4.17",
+    "tailwindcss": "^3.4.1",
     "typescript": "^5"
   }
 }

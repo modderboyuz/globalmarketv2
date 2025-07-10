@@ -75,6 +75,10 @@ export async function POST(request: NextRequest) {
       status: "pending",
       order_type: orderType,
       anon_temp_id: anonTempId,
+      is_agree: false,
+      is_client_went: null,
+      is_client_claimed: null,
+      pickup_address: null,
     }
 
     const { data: order, error: orderError } = await supabase.from("orders").insert(orderData).select().single()
@@ -84,14 +88,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Buyurtma yaratishda xatolik" }, { status: 500 })
     }
 
-    // Update product order count and stock
+    // Update product order count (but don't decrease stock yet - only when completed)
     await supabase
       .from("products")
       .update({
         order_count: product.order_count + quantity,
-        stock_quantity: product.stock_quantity - quantity,
       })
       .eq("id", productId)
+
+    // Create notification for seller
+    if (product.seller_id) {
+      await supabase.rpc("create_notification", {
+        p_user_id: product.seller_id,
+        p_title: "Yangi buyurtma",
+        p_message: `${product.name} mahsulotingizga yangi buyurtma keldi`,
+        p_type: "new_order",
+        p_data: { order_id: order.id, product_id: productId },
+      })
+    }
 
     // Notify admins via Telegram
     try {
@@ -143,7 +157,13 @@ export async function GET(request: NextRequest) {
           brand,
           author,
           has_delivery,
-          delivery_price
+          delivery_price,
+          seller_id,
+          users:seller_id (
+            full_name,
+            company_name,
+            phone
+          )
         )
       `)
       .eq("user_id", userId)
@@ -155,6 +175,130 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({ orders: orders || [] })
+  } catch (error) {
+    console.error("API Error:", error)
+    return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const { orderId, action, userId, notes } = body
+
+    if (!orderId || !action) {
+      return NextResponse.json({ error: "Order ID va action talab qilinadi" }, { status: 400 })
+    }
+
+    // Get current order
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .select("*, products(seller_id, name)")
+      .eq("id", orderId)
+      .single()
+
+    if (orderError || !order) {
+      return NextResponse.json({ error: "Buyurtma topilmadi" }, { status: 404 })
+    }
+
+    let updateData: any = {}
+    let notificationTitle = ""
+    let notificationMessage = ""
+    let notificationType = ""
+
+    switch (action) {
+      case "agree":
+        // Seller/admin agrees to the order
+        updateData = {
+          is_agree: true,
+          status: "processing",
+          pickup_address: notes || order.address,
+          seller_notes: notes,
+        }
+        notificationTitle = "Buyurtma qabul qilindi"
+        notificationMessage = `${order.products.name} buyurtmangiz qabul qilindi. Mahsulotni olish uchun manzil: ${notes || order.address}`
+        notificationType = "order_agreed"
+        break
+
+      case "client_went":
+        // Client confirms they went to pick up
+        updateData = {
+          is_client_went: true,
+          client_notes: notes,
+        }
+        notificationTitle = "Mijoz mahsulot olishga keldi"
+        notificationMessage = `${order.full_name} mahsulot olishga kelganini tasdiqladi`
+        notificationType = "client_arrived"
+        break
+
+      case "client_not_went":
+        // Client confirms they didn't go
+        updateData = {
+          is_client_went: false,
+          client_notes: notes,
+        }
+        notificationTitle = "Mijoz mahsulot olishga kelmadi"
+        notificationMessage = `${order.full_name} mahsulot olishga kelmaganini bildirdi`
+        notificationType = "client_not_arrived"
+        break
+
+      case "product_given":
+        // Seller confirms product was given
+        updateData = {
+          is_client_claimed: true,
+          status: "completed",
+          seller_notes: notes,
+        }
+        notificationTitle = "Mahsulot berildi"
+        notificationMessage = `${order.products.name} mahsuloti muvaffaqiyatli berildi. Fikr qoldiring!`
+        notificationType = "product_delivered"
+        break
+
+      case "product_not_given":
+        // Seller confirms product was not given
+        updateData = {
+          is_client_claimed: false,
+          status: "cancelled",
+          seller_notes: notes,
+        }
+        notificationTitle = "Mahsulot berilmadi"
+        notificationMessage = `${order.products.name} mahsuloti berilmadi. Qayta buyurtma qilishingiz mumkin.`
+        notificationType = "product_not_delivered"
+        break
+
+      default:
+        return NextResponse.json({ error: "Noto'g'ri action" }, { status: 400 })
+    }
+
+    // Update order
+    const { error: updateError } = await supabase.from("orders").update(updateData).eq("id", orderId)
+
+    if (updateError) {
+      console.error("Order update error:", updateError)
+      return NextResponse.json({ error: "Buyurtmani yangilashda xatolik" }, { status: 500 })
+    }
+
+    // Create notification for appropriate user
+    let notificationUserId = null
+    if (action === "agree") {
+      notificationUserId = order.user_id
+    } else if (action.startsWith("client_")) {
+      notificationUserId = order.products.seller_id
+    } else {
+      notificationUserId = order.user_id
+    }
+
+    if (notificationUserId) {
+      await supabase.rpc("create_notification", {
+        p_user_id: notificationUserId,
+        p_title: notificationTitle,
+        p_message: notificationMessage,
+        p_type: notificationType,
+        p_data: { order_id: orderId },
+      })
+    }
+
+    return NextResponse.json({ success: true, message: "Buyurtma muvaffaqiyatli yangilandi" })
   } catch (error) {
     console.error("API Error:", error)
     return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
