@@ -17,10 +17,11 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
+import { cn } from "@/lib/utils"
 import {
-  Search,
+  Sun,
+  Moon,
   ShoppingCart,
-  Heart,
   Menu,
   LogOut,
   Settings,
@@ -36,6 +37,8 @@ import {
   LogIn,
   Briefcase,
 } from "lucide-react"
+import { useTheme } from "@/hooks/use-theme"
+import { Search, Heart } from "lucide-react"
 
 interface AppUser {
   id: string
@@ -55,6 +58,13 @@ interface CompanyInfo {
   favicon_url: string
 }
 
+const links = [
+  { href: "/", label: "Home" },
+  { href: "/products", label: "Products" },
+  { href: "/about", label: "About" },
+  { href: "/contact", label: "Contact" },
+]
+
 export function Header() {
   const [user, setUser] = useState<AppUser | null>(null)
   const [company, setCompany] = useState<CompanyInfo | null>(null)
@@ -63,6 +73,7 @@ export function Header() {
   const [isOpen, setIsOpen] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
+  const { theme, setTheme } = useTheme()
 
   const isSellerRoute = pathname?.startsWith("/seller")
 
@@ -160,7 +171,7 @@ export function Header() {
   ]
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60">
+    <header className="sticky top-0 z-50 w-full border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:bg-gray-900/80">
       <div className="container mx-auto px-4">
         <div className="flex h-16 items-center justify-between">
           {/* Logo */}
@@ -195,16 +206,16 @@ export function Header() {
           <nav className="hidden lg:flex items-center space-x-6">
             {!isSellerRoute ? (
               <>
-                {navigationItems.map((item) => (
+                {links.map((link) => (
                   <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`flex items-center space-x-1 text-sm font-medium transition-colors hover:text-blue-600 ${
-                      pathname === item.href ? "text-blue-600" : "text-gray-700"
-                    }`}
+                    key={link.href}
+                    href={link.href}
+                    className={cn(
+                      "transition-colors hover:text-gray-900 dark:hover:text-gray-50",
+                      pathname === link.href ? "text-gray-900 dark:text-gray-50" : "text-gray-500 dark:text-gray-400",
+                    )}
                   >
-                    <item.icon className="w-4 h-4" />
-                    <span>{item.label}</span>
+                    {link.label}
                   </Link>
                 ))}
               </>
@@ -416,7 +427,7 @@ export function Header() {
 
                   {/* Mobile Navigation */}
                   <nav className="flex flex-col space-y-2">
-                    {(!isSellerRoute ? navigationItems : sellerNavigationItems).map((item) => (
+                    {(!isSellerRoute ? links : sellerNavigationItems).map((item) => (
                       <Link
                         key={item.href}
                         href={item.href}
@@ -433,9 +444,21 @@ export function Header() {
                 </div>
               </SheetContent>
             </Sheet>
+
+            {/* Theme Switch Button */}
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Toggle theme"
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            >
+              {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+            </Button>
           </div>
         </div>
       </div>
     </header>
   )
 }
+
+export default Header
