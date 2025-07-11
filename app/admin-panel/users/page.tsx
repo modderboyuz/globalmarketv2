@@ -180,7 +180,6 @@ export default function AdminUsersPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold gradient-text">Foydalanuvchilar</h1>
@@ -192,7 +191,6 @@ export default function AdminUsersPage() {
         </Button>
       </div>
 
-      {/* Filters and Search */}
       <Card className="card-beautiful">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -226,7 +224,6 @@ export default function AdminUsersPage() {
             </Select>
           </div>
 
-          {/* Users List */}
           <div className="space-y-4">
             {loading ? (
               <div className="text-center py-8">
@@ -297,7 +294,6 @@ export default function AdminUsersPage() {
             )}
           </div>
 
-          {/* Pagination */}
           {pagination.totalPages > 1 && (
             <div className="flex items-center justify-between mt-6">
               <p className="text-sm text-gray-600">

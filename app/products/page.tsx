@@ -10,7 +10,8 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { Star, Heart, ShoppingCart, Search, Filter, SlidersHorizontal } from "lucide-react"
 import Link from "next/link"
 import Image from "next/image"
-import { supabase } from "@/lib/supabase"
+import { supabase } from "@/lib/supabase" // Keep for auth, but product fetching via API
+import { toast } from "react-toastify" // Import toast for error notifications
 
 interface Product {
   id: string
@@ -21,7 +22,13 @@ interface Product {
   average_rating: number
   like_count: number
   order_count: number
-  stock_quantity: number
+  stock_quantity: number // This is initial stock
+  remaining_stock: number // Calculated remaining stock
+  product_type: string
+  brand: string
+  author: string
+  has_delivery: boolean
+  delivery_price: number
   seller: {
     full_name: string
     company_name: string
@@ -30,6 +37,7 @@ interface Product {
   category: {
     name: string
     slug: string
+    icon: string
   }
 }
 
@@ -64,12 +72,12 @@ function ProductCard({ product }: { product: Product }) {
             >
               <Heart className="h-3 w-3 md:h-4 md:w-4" />
             </Button>
-            {product.stock_quantity <= 5 && product.stock_quantity > 0 && (
+            {product.remaining_stock <= 5 && product.remaining_stock > 0 && (
               <Badge className="absolute bottom-2 left-2 bg-orange-500 text-xs">
-                Kam qoldi: {product.stock_quantity}
+                Kam qoldi: {product.remaining_stock}
               </Badge>
             )}
-            {product.stock_quantity === 0 && (
+            {product.remaining_stock === 0 && (
               <Badge className="absolute bottom-2 left-2 bg-red-500 text-xs">Tugagan</Badge>
             )}
           </div>
@@ -96,7 +104,7 @@ function ProductCard({ product }: { product: Product }) {
             <div className="flex items-center justify-between">
               <span className="font-bold text-sm md:text-lg text-blue-600">{product.price.toLocaleString()} so'm</span>
               <div className="flex items-center gap-1 text-xs text-gray-500">
-                <Heart className="h-3 w-3" />
+                <Heart className="h-3 w-3 md:h-4 md:w-4" />
                 {product.like_count || 0}
               </div>
             </div>
@@ -118,7 +126,7 @@ function ProductCard({ product }: { product: Product }) {
               <Button
                 size="sm"
                 className="flex-1 text-xs"
-                disabled={product.stock_quantity === 0}
+                disabled={product.remaining_stock === 0}
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -126,7 +134,7 @@ function ProductCard({ product }: { product: Product }) {
                 }}
               >
                 <ShoppingCart className="h-3 w-3 md:h-4 md:w-4 mr-1" />
-                {product.stock_quantity === 0 ? "Tugagan" : "Sotib olish"}
+                {product.remaining_stock === 0 ? "Tugagan" : "Sotib olish"}
               </Button>
               <Button
                 size="sm"
@@ -160,84 +168,45 @@ export default function ProductsPage() {
   const [showFilters, setShowFilters] = useState(false)
 
   useEffect(() => {
-    fetchData()
+    fetchCategories()
   }, [])
 
-  const fetchData = async () => {
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      fetchProducts()
+    }, 500)
+
+    return () => clearTimeout(timeoutId)
+  }, [searchQuery, selectedCategory, sortBy, minPrice, maxPrice])
+
+  const fetchProducts = async () => {
+    setLoading(true)
     try {
-      // Fetch products with enhanced search
-      let query = supabase
-        .from("products")
-        .select(`
-          *,
-          seller:users!products_seller_id_fkey(full_name, company_name, is_verified_seller),
-          category:categories!products_category_id_fkey(name, slug)
-        `)
-        .eq("is_active", true)
-        .eq("is_approved", true)
+      const params = new URLSearchParams({
+        search: searchQuery,
+        category: selectedCategory,
+        sortBy: sortBy,
+        minPrice: minPrice,
+        maxPrice: maxPrice,
+      })
+      const response = await fetch(`/api/products?${params.toString()}`)
+      const result = await response.json()
 
-      // Apply search with full-text search
-      if (searchQuery.trim()) {
-        query = query.or(`
-          name.ilike.%${searchQuery}%,
-          description.ilike.%${searchQuery}%,
-          author.ilike.%${searchQuery}%,
-          brand.ilike.%${searchQuery}%,
-          search_vector.fts.${searchQuery}
-        `)
-      }
-
-      // Apply category filter
-      if (selectedCategory !== "all") {
-        const { data: categoryData } = await supabase
-          .from("categories")
-          .select("id")
-          .eq("slug", selectedCategory)
-          .single()
-
-        if (categoryData) {
-          query = query.eq("category_id", categoryData.id)
-        }
-      }
-
-      // Apply price filters
-      if (minPrice) {
-        query = query.gte("price", Number(minPrice))
-      }
-      if (maxPrice) {
-        query = query.lte("price", Number(maxPrice))
-      }
-
-      // Apply sorting
-      switch (sortBy) {
-        case "price_asc":
-          query = query.order("price", { ascending: true })
-          break
-        case "price_desc":
-          query = query.order("price", { ascending: false })
-          break
-        case "popular":
-          query = query.order("order_count", { ascending: false })
-          break
-        case "rating":
-          query = query.order("average_rating", { ascending: false })
-          break
-        case "newest":
-          query = query.order("created_at", { ascending: false })
-          break
-        default:
-          query = query.order("order_count", { ascending: false })
-      }
-
-      const { data: productsData, error: productsError } = await query.limit(24)
-
-      if (productsError) {
-        console.error("Products error:", productsError)
+      if (result.success) {
+        setProducts(result.products || [])
       } else {
-        setProducts(productsData || [])
+        toast.error(result.error || "Mahsulotlarni yuklashda xatolik")
       }
+    } catch (error) {
+      console.error("Error fetching products:", error)
+      toast.error("Mahsulotlarni yuklashda xatolik")
+    } finally {
+      setLoading(false)
+    }
+  }
 
-      // Fetch categories
+  const fetchCategories = async () => {
+    try {
       const { data: categoriesData, error: categoriesError } = await supabase
         .from("categories")
         .select("*")
@@ -251,18 +220,8 @@ export default function ProductsPage() {
       }
     } catch (error) {
       console.error("Database error:", error)
-    } finally {
-      setLoading(false)
     }
   }
-
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      fetchData()
-    }, 500)
-
-    return () => clearTimeout(timeoutId)
-  }, [searchQuery, selectedCategory, sortBy, minPrice, maxPrice])
 
   const clearFilters = () => {
     setSearchQuery("")
@@ -272,7 +231,7 @@ export default function ProductsPage() {
     setMaxPrice("")
   }
 
-  if (loading) {
+  if (loading && products.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
@@ -283,13 +242,11 @@ export default function ProductsPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="container mx-auto px-4 py-4 md:py-8">
-        {/* Header */}
         <div className="mb-6 md:mb-8">
           <h1 className="text-2xl md:text-3xl font-bold mb-4">Barcha mahsulotlar</h1>
           <p className="text-gray-600">{products.length} ta mahsulot topildi</p>
         </div>
 
-        {/* Mobile Search */}
         <div className="mb-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
@@ -314,7 +271,6 @@ export default function ProductsPage() {
                   <SheetTitle>Filtrlar</SheetTitle>
                 </SheetHeader>
                 <div className="space-y-6 mt-6">
-                  {/* Category Filter */}
                   <div>
                     <label className="text-sm font-medium mb-2 block">Kategoriya</label>
                     <Select value={selectedCategory} onValueChange={setSelectedCategory}>
@@ -332,7 +288,6 @@ export default function ProductsPage() {
                     </Select>
                   </div>
 
-                  {/* Price Range */}
                   <div>
                     <label className="text-sm font-medium mb-2 block">Narx oralig'i</label>
                     <div className="flex gap-2">
@@ -351,7 +306,6 @@ export default function ProductsPage() {
                     </div>
                   </div>
 
-                  {/* Sort */}
                   <div>
                     <label className="text-sm font-medium mb-2 block">Saralash</label>
                     <Select value={sortBy} onValueChange={setSortBy}>
@@ -382,10 +336,8 @@ export default function ProductsPage() {
           </div>
         </div>
 
-        {/* Desktop Filters */}
         <div className="hidden md:block bg-white rounded-lg p-6 mb-8 shadow-sm">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Category Filter */}
             <Select value={selectedCategory} onValueChange={setSelectedCategory}>
               <SelectTrigger>
                 <SelectValue placeholder="Kategoriya tanlang" />
@@ -400,7 +352,6 @@ export default function ProductsPage() {
               </SelectContent>
             </Select>
 
-            {/* Price Range */}
             <div className="flex gap-2">
               <Input
                 placeholder="Min narx"
@@ -416,7 +367,6 @@ export default function ProductsPage() {
               />
             </div>
 
-            {/* Sort */}
             <Select value={sortBy} onValueChange={setSortBy}>
               <SelectTrigger>
                 <SelectValue placeholder="Saralash" />
@@ -430,7 +380,6 @@ export default function ProductsPage() {
               </SelectContent>
             </Select>
 
-            {/* Clear Filters */}
             <Button variant="outline" onClick={clearFilters} className="bg-transparent">
               <Filter className="h-4 w-4 mr-2" />
               Tozalash
@@ -438,7 +387,6 @@ export default function ProductsPage() {
           </div>
         </div>
 
-        {/* Products Grid */}
         {products.length > 0 ? (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3 md:gap-4">
             {products.map((product) => (
@@ -454,14 +402,14 @@ export default function ProductsPage() {
           </div>
         )}
 
-        {/* Load More */}
-        {products.length >= 24 && (
+        {/* Load More - Pagination will be handled by API, so this might be removed or adapted */}
+        {/* {products.length >= 24 && (
           <div className="text-center mt-8">
             <Button variant="outline" size="lg">
               Ko'proq yuklash
             </Button>
           </div>
-        )}
+        )} */}
       </div>
     </div>
   )

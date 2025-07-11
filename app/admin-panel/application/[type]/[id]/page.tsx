@@ -45,20 +45,16 @@ interface Application {
     phone: string
     username: string
   }
-  // Seller application fields
   company_name?: string
   business_type?: string
   description?: string
-  // Product application fields
   product_data?: any
-  // Contact message fields
   name?: string
   email?: string
   phone?: string
   subject?: string
   message?: string
   admin_response?: string
-  // Complaint fields
   complaint_text?: string
   orders?: {
     id: string
@@ -276,7 +272,6 @@ export default function AdminApplicationDetailPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" onClick={() => router.back()}>
           <ArrowLeft className="h-4 w-4 mr-2" />
@@ -288,7 +283,6 @@ export default function AdminApplicationDetailPage() {
         </div>
       </div>
 
-      {/* Application Details */}
       <Card className="card-beautiful">
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
@@ -300,7 +294,6 @@ export default function AdminApplicationDetailPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Applicant Info */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <h3 className="font-semibold mb-3 flex items-center gap-2">
@@ -352,7 +345,6 @@ export default function AdminApplicationDetailPage() {
             </div>
           </div>
 
-          {/* Application Content */}
           <div>
             {application.type === "seller" && (
               <div className="space-y-4">
@@ -441,7 +433,6 @@ export default function AdminApplicationDetailPage() {
             )}
           </div>
 
-          {/* Admin Response */}
           {(application.admin_notes || application.admin_response) && (
             <div>
               <h3 className="font-semibold mb-2">Admin javobi</h3>
@@ -451,7 +442,6 @@ export default function AdminApplicationDetailPage() {
             </div>
           )}
 
-          {/* Action Buttons */}
           {application.status === "pending" && (
             <div className="flex gap-4 pt-4 border-t">
               {application.type !== "contact" && application.type !== "complaint" && (
@@ -494,7 +484,6 @@ export default function AdminApplicationDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Confirmation Dialog */}
       <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
         <DialogContent>
           <DialogHeader>

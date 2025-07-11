@@ -29,6 +29,7 @@ import {
   Download,
   Eye,
   AlertTriangle,
+  RefreshCw,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
@@ -77,6 +78,7 @@ export default function SellerOrdersPage() {
   const [pickupAddress, setPickupAddress] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
+  const [actionLoading, setActionLoading] = useState(false)
   const [stats, setStats] = useState({
     total: 0,
     pending: 0,
@@ -153,18 +155,16 @@ export default function SellerOrdersPage() {
   const filterOrders = () => {
     let filtered = orders
 
-    // Filter by search query
     if (searchQuery) {
       filtered = filtered.filter(
         (order) =>
           order.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
           order.phone?.includes(searchQuery) ||
-          order.products.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          order.products?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
           order.id.includes(searchQuery),
       )
     }
 
-    // Filter by status
     if (statusFilter !== "all") {
       filtered = filtered.filter((order) => order.status === statusFilter)
     }
@@ -175,6 +175,7 @@ export default function SellerOrdersPage() {
   const handleOrderAction = async (action: string) => {
     if (!selectedOrder) return
 
+    setActionLoading(true)
     try {
       const response = await fetch("/api/orders", {
         method: "PUT",
@@ -185,7 +186,7 @@ export default function SellerOrdersPage() {
           orderId: selectedOrder.id,
           action,
           notes: actionNotes,
-          pickupAddress: pickupAddress || selectedOrder.address,
+          pickupAddress: pickupAddress,
         }),
       })
 
@@ -203,42 +204,33 @@ export default function SellerOrdersPage() {
       setPickupAddress("")
     } catch (error: any) {
       toast.error(error.message || "Xatolik yuz berdi")
+    } finally {
+      setActionLoading(false)
     }
   }
 
   const openActionDialog = (order: Order, action: string) => {
     setSelectedOrder(order)
     setActionType(action)
-    setPickupAddress(order.address)
+    setPickupAddress(order.pickup_address || order.address || "") // Use existing pickup address or default to order address
+    setActionNotes(order.seller_notes || "") // Pre-fill notes if any
     setShowActionDialog(true)
   }
 
   const getOrderStage = (order: Order) => {
-    if (order.status === "cancelled") return 0
-    if (order.is_agree === null && order.status === "pending") return 1
-    if (order.is_agree === false && order.status === "cancelled") return 0
-    if (order.is_agree === true && order.status === "pending") return 2
-    if (order.is_agree === true && order.is_client_went === true && order.status === "pending") return 3
-    if (
-      order.is_agree === true &&
-      order.is_client_went === true &&
-      order.is_client_claimed === true &&
-      order.status === "completed"
-    )
-      return 4
+    if (order.status === "cancelled") return 0 // Cancelled
+    if (order.status === "completed") return 4 // Completed
 
-    // Error case
-    if (order.is_client_went === true && order.is_agree === false) return -1
+    if (order.is_agree === null && order.status === "pending") return 1 // Pending seller action
+    if (order.is_agree === true && order.status === "processing" && order.is_client_went === null) return 2 // Seller agreed, waiting for client to go
+    if (order.is_agree === true && order.is_client_went === true && order.is_client_claimed === null) return 3 // Client went, waiting for product to be given
 
-    return 1
+    return 1 // Default to pending if status is unclear
   }
 
   const getStatusBadge = (order: Order) => {
     const stage = getOrderStage(order)
 
-    if (stage === -1) {
-      return <Badge variant="destructive">Xatolik</Badge>
-    }
     if (stage === 4) {
       return <Badge className="bg-green-100 text-green-800">Yakunlandi</Badge>
     }
@@ -286,7 +278,7 @@ export default function SellerOrdersPage() {
           order.id.slice(-8),
           order.full_name || "",
           order.phone || "",
-          order.products.name || "",
+          order.products?.name || "",
           order.quantity,
           order.total_amount,
           order.status,
@@ -304,13 +296,13 @@ export default function SellerOrdersPage() {
     window.URL.revokeObjectURL(url)
   }
 
-  if (loading) {
+  if (loading && orders.length === 0) {
     return (
       <div className="space-y-6">
         <div className="animate-pulse space-y-6">
           <div className="h-8 bg-gray-200 rounded w-1/4"></div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            {[...Array(4)].map((_, i) => (
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            {[...Array(5)].map((_, i) => (
               <div key={i} className="h-24 bg-gray-200 rounded-2xl"></div>
             ))}
           </div>
@@ -326,13 +318,11 @@ export default function SellerOrdersPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div>
         <h1 className="text-3xl font-bold gradient-text">Buyurtmalar</h1>
         <p className="text-gray-600">Sizning mahsulotlaringizga berilgan buyurtmalar</p>
       </div>
 
-      {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <Card className="card-beautiful">
           <CardContent className="p-4 text-center">
@@ -371,7 +361,6 @@ export default function SellerOrdersPage() {
         </Card>
       </div>
 
-      {/* Filters and Search */}
       <Card className="card-beautiful">
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
@@ -412,9 +401,13 @@ export default function SellerOrdersPage() {
             </Select>
           </div>
 
-          {/* Orders List */}
           <div className="space-y-4">
-            {filteredOrders.length === 0 ? (
+            {loading ? (
+              <div className="text-center py-8">
+                <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
+                <p className="text-gray-600">Yuklanmoqda...</p>
+              </div>
+            ) : filteredOrders.length === 0 ? (
               <div className="text-center py-8">
                 <ShoppingCart className="h-16 w-16 text-gray-300 mx-auto mb-4" />
                 <p className="text-gray-500">Buyurtmalar topilmadi</p>
@@ -426,8 +419,8 @@ export default function SellerOrdersPage() {
                     <div className="flex items-start justify-between mb-4">
                       <div className="flex items-start gap-4">
                         <img
-                          src={order.products.image_url || "/placeholder.svg?height=80&width=60"}
-                          alt={order.products.name}
+                          src={order.products?.image_url || "/placeholder.svg?height=80&width=60"}
+                          alt={order.products?.name || "Product Image"}
                           className="w-16 h-20 object-cover rounded-lg"
                         />
                         <div className="flex-1">
@@ -436,7 +429,7 @@ export default function SellerOrdersPage() {
                             {getStatusBadge(order)}
                           </div>
                           <p className="text-sm text-gray-600 mb-1">
-                            <strong>Mahsulot:</strong> {order.products.name}
+                            <strong>Mahsulot:</strong> {order.products?.name || "Noma'lum mahsulot"}
                           </p>
                           <p className="text-sm text-gray-600 mb-1">
                             <strong>Mijoz:</strong> {order.full_name}
@@ -466,7 +459,6 @@ export default function SellerOrdersPage() {
                       </div>
                     </div>
 
-                    {/* Address */}
                     <div className="mb-4 p-3 bg-gray-50 rounded-lg">
                       <div className="flex items-start gap-2">
                         <MapPin className="h-4 w-4 text-gray-500 mt-0.5" />
@@ -477,7 +469,6 @@ export default function SellerOrdersPage() {
                       </div>
                     </div>
 
-                    {/* Notes */}
                     {order.seller_notes && (
                       <div className="mb-4 p-3 bg-blue-50 rounded-lg">
                         <p className="text-sm font-medium text-blue-700 mb-1">Sizning eslatmangiz:</p>
@@ -492,7 +483,6 @@ export default function SellerOrdersPage() {
                       </div>
                     )}
 
-                    {/* Action Buttons */}
                     <div className="flex gap-2 flex-wrap">
                       {canTakeAction(order, "agree") && (
                         <Button
@@ -548,7 +538,6 @@ export default function SellerOrdersPage() {
         </CardContent>
       </Card>
 
-      {/* Action Dialog */}
       <Dialog open={showActionDialog} onOpenChange={setShowActionDialog}>
         <DialogContent>
           <DialogHeader>
@@ -590,20 +579,28 @@ export default function SellerOrdersPage() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowActionDialog(false)}>
+            <Button variant="outline" onClick={() => setShowActionDialog(false)} disabled={actionLoading}>
               Bekor qilish
             </Button>
-            <Button onClick={() => handleOrderAction(actionType)}>
-              {actionType === "agree" && "Qabul qilish"}
-              {actionType === "reject" && "Rad etish"}
-              {actionType === "product_given" && "Tasdiqlash"}
-              {actionType === "product_not_given" && "Tasdiqlash"}
+            <Button onClick={() => handleOrderAction(actionType)} disabled={actionLoading}>
+              {actionLoading ? (
+                <>
+                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                  Yuklanmoqda...
+                </>
+              ) : (
+                <>
+                  {actionType === "agree" && "Qabul qilish"}
+                  {actionType === "reject" && "Rad etish"}
+                  {actionType === "product_given" && "Tasdiqlash"}
+                  {actionType === "product_not_given" && "Tasdiqlash"}
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Order Details Dialog */}
       <Dialog open={!!selectedOrder && !showActionDialog} onOpenChange={() => setSelectedOrder(null)}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
@@ -646,19 +643,19 @@ export default function SellerOrdersPage() {
                 <h4 className="font-semibold mb-2">Mahsulot</h4>
                 <div className="flex gap-3 p-3 bg-gray-50 rounded-lg">
                   <img
-                    src={selectedOrder.products.image_url || "/placeholder.svg?height=80&width=60"}
-                    alt={selectedOrder.products.name}
+                    src={selectedOrder.products?.image_url || "/placeholder.svg?height=80&width=60"}
+                    alt={selectedOrder.products?.name || "Product Image"}
                     className="w-16 h-20 object-cover rounded-lg"
                   />
                   <div>
-                    <h5 className="font-medium">{selectedOrder.products.name}</h5>
-                    {selectedOrder.products.author && (
+                    <h5 className="font-medium">{selectedOrder.products?.name || "Noma'lum mahsulot"}</h5>
+                    {selectedOrder.products?.author && (
                       <p className="text-sm text-gray-600">Muallif: {selectedOrder.products.author}</p>
                     )}
-                    {selectedOrder.products.brand && (
+                    {selectedOrder.products?.brand && (
                       <p className="text-sm text-gray-600">Brend: {selectedOrder.products.brand}</p>
                     )}
-                    <p className="text-sm text-gray-600">Narx: {formatPrice(selectedOrder.products.price)}</p>
+                    <p className="text-sm text-gray-600">Narx: {formatPrice(selectedOrder.products?.price || 0)}</p>
                   </div>
                 </div>
               </div>
@@ -707,7 +704,6 @@ export default function SellerOrdersPage() {
                     {getOrderStage(selectedOrder) === 3 && "Mijoz keldi, mahsulot berishni kutmoqda"}
                     {getOrderStage(selectedOrder) === 4 && "Buyurtma muvaffaqiyatli yakunlandi"}
                     {getOrderStage(selectedOrder) === 0 && "Buyurtma bekor qilingan"}
-                    {getOrderStage(selectedOrder) === -1 && "Buyurtmada xatolik mavjud"}
                   </span>
                 </div>
               </div>
