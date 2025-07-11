@@ -123,9 +123,9 @@ export default function SellerProfilePage() {
       const { data: productsData, error: productsError } = await supabase
         .from("products")
         .select(`
-          *,
-          categories (name_uz, icon)
-        `)
+        *,
+        categories (name, icon)
+      `)
         .eq("seller_id", sellerId)
         .eq("is_active", true)
         .eq("is_approved", true)
@@ -134,13 +134,37 @@ export default function SellerProfilePage() {
       if (productsError) throw productsError
       setProducts(productsData || [])
 
-      // Fetch seller stats
-      const { data: statsData, error: statsError } = await supabase.rpc("get_user_stats", {
-        p_user_id: sellerId,
-      })
+      // Fetch seller stats manually
+      const { data: ordersData } = await supabase
+        .from("orders")
+        .select("total_amount, status")
+        .eq("seller_id", sellerId)
 
-      if (statsError) throw statsError
-      setStats(statsData)
+      const { data: productsCount } = await supabase
+        .from("products")
+        .select("id", { count: "exact" })
+        .eq("seller_id", sellerId)
+        .eq("is_active", true)
+
+      const { data: reviewsData } = await supabase
+        .from("product_reviews")
+        .select("rating")
+        .in("product_id", productsData?.map((p) => p.id) || [])
+
+      const totalOrders = ordersData?.length || 0
+      const totalRevenue = ordersData?.reduce((sum, order) => sum + order.total_amount, 0) || 0
+      const avgRating =
+        reviewsData?.length > 0 ? reviewsData.reduce((sum, review) => sum + review.rating, 0) / reviewsData.length : 0
+
+      setStats({
+        total_products: productsCount?.length || 0,
+        total_orders: totalOrders,
+        total_revenue: totalRevenue,
+        avg_rating: avgRating,
+        total_views: 0,
+        followers_count: 0,
+        following_count: 0,
+      })
     } catch (error) {
       console.error("Error fetching seller data:", error)
       toast.error("Sotuvchi ma'lumotlarini olishda xatolik")
@@ -342,7 +366,9 @@ export default function SellerProfilePage() {
                         <div className="text-sm text-gray-600">Buyurtmalar</div>
                       </div>
                       <div className="text-center p-3 bg-white/10 rounded-lg">
-                        <div className="text-2xl font-bold text-purple-600">{stats.avg_rating.toFixed(1)}</div>
+                        <div className="text-2xl font-bold text-purple-600">
+                          {stats.avg_rating ? stats.avg_rating.toFixed(1) : "0.0"}
+                        </div>
                         <div className="text-sm text-gray-600">Reyting</div>
                       </div>
                       <div className="text-center p-3 bg-white/10 rounded-lg">

@@ -95,7 +95,7 @@ export function AdBanner() {
       className="relative overflow-hidden bg-gradient-to-r from-blue-50 to-purple-50 border-2 border-blue-100 shadow-xl cursor-pointer"
       onClick={() => handleAdClick(currentAd.id, currentAd.link_url)}
     >
-      <div className="relative h-48 md:h-64 lg:h-80">
+      <div className="relative h-48 md:h-64 lg:h-80 transition-all duration-1000 ease-in-out">
         {/* Background Image */}
         {currentAd.image_url && currentAd.image_url !== "/placeholder.svg" && (
           <div className="absolute inset-0">

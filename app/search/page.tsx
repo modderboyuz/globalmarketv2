@@ -31,7 +31,7 @@ interface Product {
   like_count: number
   has_delivery: boolean
   categories: {
-    name_uz: string
+    name: string
     icon: string
   }
   users: {
@@ -44,7 +44,7 @@ interface Product {
 
 interface Category {
   id: string
-  name_uz: string
+  name: string
   slug: string
   icon: string
 }
@@ -110,7 +110,7 @@ export default function SearchPage() {
         .select(`
           *,
           categories (
-            name_uz,
+            name,
             icon
           ),
           users (
@@ -124,11 +124,49 @@ export default function SearchPage() {
         .eq("is_approved", true)
         .gt("stock_quantity", 0)
 
-      // Apply search filter
+      // Apply search filter with improved fuzzy matching
       if (searchQuery) {
-        query = query.or(
-          `name.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%,author.ilike.%${searchQuery}%,brand.ilike.%${searchQuery}%`,
-        )
+        // First try exact matches
+        const exactQuery = supabase
+          .from("products")
+          .select(`
+            *,
+            categories (
+              name,
+              icon
+            ),
+            users (
+              full_name,
+              company_name,
+              is_verified_seller,
+              seller_rating
+            )
+          `)
+          .eq("is_active", true)
+          .eq("is_approved", true)
+          .gt("stock_quantity", 0)
+          .or(
+            `name.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%,author.ilike.%${searchQuery}%,brand.ilike.%${searchQuery}%`,
+          )
+
+        const { data: exactResults } = await exactQuery
+
+        if (exactResults && exactResults.length > 0) {
+          query = exactQuery
+        } else {
+          // If no exact matches, try partial matches with individual words
+          const words = searchQuery.split(" ").filter((word) => word.length > 1)
+          if (words.length > 0) {
+            const partialConditions = words
+              .map(
+                (word) =>
+                  `name.ilike.%${word}%,description.ilike.%${word}%,author.ilike.%${word}%,brand.ilike.%${word}%`,
+              )
+              .join(",")
+
+            query = query.or(partialConditions)
+          }
+        }
       }
 
       // Apply category filter
@@ -295,7 +333,7 @@ export default function SearchPage() {
                   <SelectItem value="all">Barcha kategoriyalar</SelectItem>
                   {categories.map((category) => (
                     <SelectItem key={category.id} value={category.id}>
-                      {category.icon} {category.name_uz}
+                      {category.icon} {category.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -376,7 +414,7 @@ export default function SearchPage() {
                       {/* Badges */}
                       <div className="absolute top-3 left-3 flex flex-col gap-2">
                         <Badge className="badge-beautiful border-blue-200 text-blue-700">
-                          {product.categories?.icon} {product.categories?.name_uz}
+                          {product.categories?.icon} {product.categories?.name}
                         </Badge>
                         {product.users?.is_verified_seller && (
                           <Badge className="badge-beautiful border-green-200 text-green-700">

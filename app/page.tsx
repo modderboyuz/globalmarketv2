@@ -1,9 +1,11 @@
-import { Suspense } from "react"
+"use client"
+
+import { Suspense, useState } from "react"
 import { createSupabaseClient } from "@/lib/supabase-server"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Star, Heart, ShoppingCart, Phone, MapPin, Mail } from "lucide-react"
+import { Star, Heart, ShoppingCart, Phone, MapPin, Mail, ChevronDown, ChevronUp } from "lucide-react"
 import Link from "next/link"
 import Image from "next/image"
 import { AdBanner } from "@/components/layout/ad-banner"
@@ -30,21 +32,34 @@ interface Category {
   name: string
   slug: string
   icon: string
+  sort_order: number
 }
 
 async function fetchData() {
   const supabase = createSupabaseClient()
 
   try {
-    // Fetch categories
+    // Fetch categories - only first 6 for initial display
     const { data: categories, error: categoriesError } = await supabase
       .from("categories")
       .select("*")
       .eq("is_active", true)
       .order("sort_order")
+      .limit(6)
 
     if (categoriesError) {
       console.error("Categories error:", categoriesError)
+    }
+
+    // Fetch all categories for "show more" functionality
+    const { data: allCategories, error: allCategoriesError } = await supabase
+      .from("categories")
+      .select("*")
+      .eq("is_active", true)
+      .order("sort_order")
+
+    if (allCategoriesError) {
+      console.error("All categories error:", allCategoriesError)
     }
 
     // Fetch featured products
@@ -118,6 +133,7 @@ async function fetchData() {
 
     return {
       categories: categories || [],
+      allCategories: allCategories || [],
       featuredProducts: featuredProducts || [],
       popularProducts: popularProducts || [],
       books: books || [],
@@ -127,6 +143,7 @@ async function fetchData() {
     console.error("Database error:", error)
     return {
       categories: [],
+      allCategories: [],
       featuredProducts: [],
       popularProducts: [],
       books: [],
@@ -224,6 +241,39 @@ function CategoryCard({ category }: { category: Category }) {
   )
 }
 
+function CategoriesSection({ categories, allCategories }: { categories: Category[]; allCategories: Category[] }) {
+  const [showAll, setShowAll] = useState(false)
+  const displayCategories = showAll ? allCategories : categories
+
+  return (
+    <section className="container mx-auto px-4 py-6 sm:py-8">
+      <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">📂 Kategoriyalar</h2>
+      <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
+        {displayCategories.map((category) => (
+          <CategoryCard key={category.id} category={category} />
+        ))}
+      </div>
+      {allCategories.length > 6 && (
+        <div className="text-center mt-6">
+          <Button variant="outline" onClick={() => setShowAll(!showAll)} className="bg-transparent">
+            {showAll ? (
+              <>
+                <ChevronUp className="h-4 w-4 mr-2" />
+                Kamroq ko'rsatish
+              </>
+            ) : (
+              <>
+                <ChevronDown className="h-4 w-4 mr-2" />
+                Boshqa kategoriyalar
+              </>
+            )}
+          </Button>
+        </div>
+      )}
+    </section>
+  )
+}
+
 export default async function HomePage() {
   const data = await fetchData()
 
@@ -234,14 +284,7 @@ export default async function HomePage() {
 
       {/* Categories */}
       {data.categories.length > 0 && (
-        <section className="container mx-auto px-4 py-6 sm:py-8">
-          <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">📂 Kategoriyalar</h2>
-          <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
-            {data.categories.map((category) => (
-              <CategoryCard key={category.id} category={category} />
-            ))}
-          </div>
-        </section>
+        <CategoriesSection categories={data.categories} allCategories={data.allCategories} />
       )}
 
       {/* Featured Products */}

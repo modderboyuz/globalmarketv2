@@ -30,7 +30,6 @@ import {
   Home,
   Phone,
   Info,
-  UserPlus,
   LogIn,
   Briefcase,
 } from "lucide-react"
@@ -318,20 +317,12 @@ export function Header() {
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
-              <div className="flex items-center space-x-2">
-                <Link href="/login">
-                  <Button variant="ghost" size="sm">
-                    <LogIn className="w-4 h-4 mr-1" />
-                    Kirish
-                  </Button>
-                </Link>
-                <Link href="/register">
-                  <Button size="sm">
-                    <UserPlus className="w-4 h-4 mr-1" />
-                    Ro'yxatdan o'tish
-                  </Button>
-                </Link>
-              </div>
+              <Link href="/login">
+                <Button size="sm">
+                  <LogIn className="w-4 h-4 mr-1" />
+                  Kirish
+                </Button>
+              </Link>
             )}
 
             {/* Mobile Menu */}

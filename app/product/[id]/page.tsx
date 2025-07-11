@@ -223,6 +223,7 @@ export default function ProductDetailPage() {
   const handleLike = async () => {
     if (!user) {
       toast.error("Like qilish uchun tizimga kiring")
+      setShowLoginDialog(true)
       return
     }
 
@@ -252,8 +253,10 @@ export default function ProductDetailPage() {
           })
         }
         toast.success(result.liked ? "Like qilindi" : "Like olib tashlandi")
+      } else {
+        throw new Error(result.error)
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error handling like:", error)
       toast.error("Like qilishda xatolik")
     } finally {
