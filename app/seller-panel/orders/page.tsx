@@ -41,12 +41,14 @@ interface Order {
   quantity: number
   total_amount: number
   status: string
+  stage: number
   is_agree: boolean | null
   is_client_went: boolean | null
   is_client_claimed: boolean | null
   pickup_address: string | null
   seller_notes: string | null
   client_notes: string | null
+  order_type: string
   created_at: string
   products: {
     id: string
@@ -124,15 +126,33 @@ export default function SellerOrdersPage() {
 
   const fetchOrders = async (sellerId: string) => {
     try {
-      const response = await fetch(`/api/orders?sellerId=${sellerId}`)
-      const result = await response.json()
+      const { data, error } = await supabase
+        .from("orders")
+        .select(`
+          *,
+          products!orders_product_id_fkey (
+            id,
+            name,
+            image_url,
+            price,
+            product_type,
+            brand,
+            author,
+            seller_id
+          ),
+          users!orders_user_id_fkey (
+            full_name,
+            email,
+            phone
+          )
+        `)
+        .eq("products.seller_id", sellerId)
+        .order("created_at", { ascending: false })
 
-      if (!response.ok) {
-        throw new Error(result.error || "Buyurtmalarni olishda xatolik")
-      }
+      if (error) throw error
 
-      setOrders(result.orders || [])
-      calculateStats(result.orders || [])
+      setOrders(data || [])
+      calculateStats(data || [])
     } catch (error) {
       console.error("Error fetching orders:", error)
       toast.error("Buyurtmalarni olishda xatolik")
@@ -176,31 +196,25 @@ export default function SellerOrdersPage() {
     if (!selectedOrder) return
 
     try {
-      const response = await fetch("/api/orders", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          orderId: selectedOrder.id,
-          action,
-          notes: actionNotes,
-          pickupAddress: pickupAddress || selectedOrder.address,
-        }),
+      const { data, error } = await supabase.rpc("update_order_status", {
+        order_id_param: selectedOrder.id,
+        action_param: action,
+        notes_param: actionNotes || null,
+        pickup_address_param: pickupAddress || selectedOrder.address,
       })
 
-      const result = await response.json()
+      if (error) throw error
 
-      if (!response.ok) {
-        throw new Error(result.error || "Xatolik yuz berdi")
+      if (data.success) {
+        toast.success(data.message)
+        await fetchOrders(user.id)
+        setShowActionDialog(false)
+        setSelectedOrder(null)
+        setActionNotes("")
+        setPickupAddress("")
+      } else {
+        throw new Error(data.error)
       }
-
-      toast.success("Buyurtma holati yangilandi")
-      await fetchOrders(user.id)
-      setShowActionDialog(false)
-      setSelectedOrder(null)
-      setActionNotes("")
-      setPickupAddress("")
     } catch (error: any) {
       toast.error(error.message || "Xatolik yuz berdi")
     }
@@ -213,62 +227,33 @@ export default function SellerOrdersPage() {
     setShowActionDialog(true)
   }
 
-  const getOrderStage = (order: Order) => {
-    if (order.status === "cancelled") return 0
-    if (order.is_agree === null && order.status === "pending") return 1
-    if (order.is_agree === false && order.status === "cancelled") return 0
-    if (order.is_agree === true && order.status === "pending") return 2
-    if (order.is_agree === true && order.is_client_went === true && order.status === "pending") return 3
-    if (
-      order.is_agree === true &&
-      order.is_client_went === true &&
-      order.is_client_claimed === true &&
-      order.status === "completed"
-    )
-      return 4
-
-    // Error case
-    if (order.is_client_went === true && order.is_agree === false) return -1
-
-    return 1
-  }
-
   const getStatusBadge = (order: Order) => {
-    const stage = getOrderStage(order)
-
-    if (stage === -1) {
-      return <Badge variant="destructive">Xatolik</Badge>
-    }
-    if (stage === 4) {
+    if (order.stage === 4) {
       return <Badge className="bg-green-100 text-green-800">Yakunlandi</Badge>
     }
-    if (stage === 0) {
+    if (order.stage === 0) {
       return <Badge variant="destructive">Bekor qilingan</Badge>
     }
-    if (stage === 1) {
-      return <Badge className="bg-yellow-100 text-yellow-800">Javob kutilmoqda</Badge>
+    if (order.stage === 1) {
+      return <Badge className="bg-yellow-100 text-yellow-800 animate-pulse">Javob kutilmoqda</Badge>
     }
-    if (stage === 2) {
+    if (order.stage === 2) {
       return <Badge className="bg-blue-100 text-blue-800">Qabul qilingan</Badge>
     }
-    if (stage === 3) {
+    if (order.stage === 3) {
       return <Badge className="bg-purple-100 text-purple-800">Mijoz keldi</Badge>
     }
     return <Badge variant="secondary">Noma'lum</Badge>
   }
 
   const canTakeAction = (order: Order, action: string) => {
-    const stage = getOrderStage(order)
-
     switch (action) {
       case "agree":
-        return stage === 1
       case "reject":
-        return stage === 1
+        return order.stage === 1
       case "product_given":
-        return stage === 3
       case "product_not_given":
-        return stage === 3
+        return order.stage === 3
       default:
         return false
     }
@@ -702,12 +687,11 @@ export default function SellerOrdersPage() {
                 <div className="flex items-center gap-2">
                   {getStatusBadge(selectedOrder)}
                   <span className="text-sm text-gray-600">
-                    {getOrderStage(selectedOrder) === 1 && "Sizning javobingizni kutmoqda"}
-                    {getOrderStage(selectedOrder) === 2 && "Qabul qilingan, mijoz kelishini kutmoqda"}
-                    {getOrderStage(selectedOrder) === 3 && "Mijoz keldi, mahsulot berishni kutmoqda"}
-                    {getOrderStage(selectedOrder) === 4 && "Buyurtma muvaffaqiyatli yakunlandi"}
-                    {getOrderStage(selectedOrder) === 0 && "Buyurtma bekor qilingan"}
-                    {getOrderStage(selectedOrder) === -1 && "Buyurtmada xatolik mavjud"}
+                    {selectedOrder.stage === 1 && "Sizning javobingizni kutmoqda"}
+                    {selectedOrder.stage === 2 && "Qabul qilingan, mijoz kelishini kutmoqda"}
+                    {selectedOrder.stage === 3 && "Mijoz keldi, mahsulot berishni kutmoqda"}
+                    {selectedOrder.stage === 4 && "Buyurtma muvaffaqiyatli yakunlandi"}
+                    {selectedOrder.stage === 0 && "Buyurtma bekor qilingan"}
                   </span>
                 </div>
               </div>

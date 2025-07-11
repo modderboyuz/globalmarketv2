@@ -209,12 +209,14 @@ export default function ProductDetailPage() {
 
   const checkLikeStatus = async (userId: string) => {
     try {
-      const response = await fetch(`/api/likes?productId=${productId}&userId=${userId}`)
-      const result = await response.json()
+      const { data: userLike } = await supabase
+        .from("likes")
+        .select("id")
+        .eq("product_id", productId)
+        .eq("user_id", userId)
+        .single()
 
-      if (result.success) {
-        setIsLiked(result.isLiked)
-      }
+      setIsLiked(!!userLike)
     } catch (error) {
       console.error("Error checking like status:", error)
     }
@@ -230,31 +232,25 @@ export default function ProductDetailPage() {
     setLikeLoading(true)
 
     try {
-      const response = await fetch("/api/likes", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          productId,
-          userId: user.id,
-        }),
+      const { data, error } = await supabase.rpc("handle_like_toggle", {
+        product_id_param: productId,
+        user_id_param: user.id,
       })
 
-      const result = await response.json()
+      if (error) throw error
 
-      if (result.success) {
-        setIsLiked(result.liked)
+      if (data.success) {
+        setIsLiked(data.liked)
         // Update product like count
         if (product) {
           setProduct({
             ...product,
-            like_count: result.liked ? product.like_count + 1 : product.like_count - 1,
+            like_count: data.like_count,
           })
         }
-        toast.success(result.liked ? "Like qilindi" : "Like olib tashlandi")
+        toast.success(data.liked ? "Like qilindi" : "Like olib tashlandi")
       } else {
-        throw new Error(result.error)
+        throw new Error(data.error)
       }
     } catch (error: any) {
       console.error("Error handling like:", error)
@@ -275,27 +271,17 @@ export default function ProductDetailPage() {
     setCartLoading(true)
 
     try {
-      const response = await fetch("/api/cart", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          productId: product.id,
-          userId: user.id,
-          quantity: quantity,
-        }),
+      const { error } = await supabase.from("cart_items").insert({
+        product_id: product.id,
+        user_id: user.id,
+        quantity: quantity,
       })
 
-      const result = await response.json()
+      if (error) throw error
 
-      if (result.success) {
-        toast.success("Mahsulot savatga qo'shildi!")
-      } else {
-        throw new Error(result.error || "Savatga qo'shishda xatolik")
-      }
+      toast.success("Mahsulot savatga qo'shildi!")
     } catch (error: any) {
-      toast.error(error.message || "Savatga qo'shishda xatolik yuz berdi")
+      toast.error("Savatga qo'shishda xatolik yuz berdi")
     } finally {
       setCartLoading(false)
     }
@@ -326,45 +312,33 @@ export default function ProductDetailPage() {
     setOrderLoading(true)
 
     try {
-      const orderData = {
-        productId: product.id,
-        fullName: formData.fullName,
-        phone: formData.phone,
-        address: formData.address,
-        quantity: quantity,
-        userId: user?.id || null,
-        orderType: "immediate",
-      }
-
-      const response = await fetch("/api/orders", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(orderData),
+      const { data, error } = await supabase.rpc("create_order", {
+        product_id_param: product.id,
+        full_name_param: formData.fullName,
+        phone_param: formData.phone,
+        address_param: formData.address,
+        quantity_param: quantity,
+        user_id_param: user?.id || null,
       })
 
-      const result = await response.json()
+      if (error) throw error
 
-      if (!response.ok) {
-        throw new Error(result.error || "Buyurtma berishda xatolik")
-      }
+      if (data.success) {
+        toast.success("Buyurtma muvaffaqiyatli berildi! Sizga tez orada aloqaga chiqamiz.")
 
-      toast.success("Buyurtma muvaffaqiyatli berildi! Sizga tez orada aloqaga chiqamiz.")
+        // Reset form
+        setFormData({ fullName: "", phone: "", address: "" })
+        setQuantity(1)
+        setShowOrderDialog(false)
 
-      // Reset form
-      setFormData({ fullName: "", phone: "", address: "" })
-      setQuantity(1)
-      setShowOrderDialog(false)
-
-      // Update product stock in UI
-      setProduct((prev) => (prev ? { ...prev, stock_quantity: prev.stock_quantity - quantity } : null))
-
-      // Redirect to orders page if user is logged in
-      if (user) {
-        setTimeout(() => {
-          router.push("/orders")
-        }, 2000)
+        // Redirect to orders page if user is logged in
+        if (user) {
+          setTimeout(() => {
+            router.push("/orders")
+          }, 2000)
+        }
+      } else {
+        throw new Error(data.error)
       }
     } catch (error: any) {
       toast.error(error.message || "Xatolik yuz berdi")
