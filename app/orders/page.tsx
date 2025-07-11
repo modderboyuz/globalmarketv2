@@ -41,13 +41,12 @@ interface Order {
   quantity: number
   total_amount: number
   status: string
-  is_agree: boolean
+  is_agree: boolean | null
   is_client_went: boolean | null
   is_client_claimed: boolean | null
   pickup_address: string | null
   seller_notes: string | null
   client_notes: string | null
-  stage: number
   created_at: string
   products: {
     id: string
@@ -108,7 +107,7 @@ export default function OrdersPage() {
     const completedOrders = orders.filter(
       (order) =>
         order.status === "completed" &&
-        order.stage === 4 &&
+        getOrderStage(order) === 4 &&
         !localStorage.getItem(`order_completion_shown_${order.id}`),
     )
 
@@ -172,7 +171,7 @@ export default function OrdersPage() {
 
       // Check for orders that need client action
       const ordersNeedingAction = (data || []).filter(
-        (order) => order.is_agree === true && order.is_client_went === null && order.stage === 2,
+        (order) => order.is_agree === true && order.is_client_went === null && getOrderStage(order) === 2,
       )
 
       if (ordersNeedingAction.length > 0) {
@@ -302,31 +301,59 @@ export default function OrdersPage() {
     updateOrderStatus(selectedOrder!.id, confirmAction, actionNotes)
   }
 
-  const getOrderProgress = (order: Order) => {
+  const getOrderStage = (order: Order) => {
+    // New logic based on your requirements
     if (order.status === "cancelled") return 0
-    return (order.stage / 4) * 100
+    if (order.is_agree === null && order.status === "pending") return 1
+    if (order.is_agree === false && order.status === "cancelled") return 0
+    if (order.is_agree === true && order.status === "pending") return 2
+    if (order.is_agree === true && order.is_client_went === true && order.status === "pending") return 3
+    if (
+      order.is_agree === true &&
+      order.is_client_went === true &&
+      order.is_client_claimed === true &&
+      order.status === "completed"
+    )
+      return 4
+
+    // Error case
+    if (order.is_client_went === true && order.is_agree === false) return -1 // Error state
+
+    return 1
   }
 
-  const getOrderStage = (order: Order) => {
-    if (order.status === "cancelled") return "Bekor qilingan"
-    if (order.stage === 1) return "Sotuvchi javobini kutmoqda"
-    if (order.stage === 2 && order.is_client_went === null) return "Mahsulot olishga boring"
-    if (order.stage === 2 && order.is_client_went === false) return "Mahsulot olishga bormaganingizni bildirdingiz"
-    if (order.stage === 3) return "Sotuvchi mahsulot berishini kutmoqda"
-    if (order.stage === 4 && order.status === "completed") return "Buyurtma yakunlandi"
+  const getOrderProgress = (order: Order) => {
+    const stage = getOrderStage(order)
+    if (stage === -1) return 0 // Error state
+    if (stage === 0) return 0 // Cancelled
+    return (stage / 4) * 100
+  }
+
+  const getOrderStageText = (order: Order) => {
+    const stage = getOrderStage(order)
+
+    if (stage === -1) return "Buyurtmada xatolik mavjud"
+    if (stage === 0) return "Bekor qilingan"
+    if (stage === 1) return "Sotuvchi javobini kutmoqda"
+    if (stage === 2 && order.is_client_went === null) return "Mahsulot olishga boring"
+    if (stage === 2 && order.is_client_went === false) return "Mahsulot olishga bormaganingizni bildirdingiz"
+    if (stage === 3) return "Sotuvchi mahsulot berishini kutmoqda"
+    if (stage === 4) return "Buyurtma yakunlandi"
     return "Noma'lum holat"
   }
 
   const canTakeAction = (order: Order, action: string) => {
+    const stage = getOrderStage(order)
+
     switch (action) {
       case "client_went":
-        return order.is_agree && order.is_client_went === null && order.stage === 2
+        return stage === 2 && order.is_client_went === null
       case "client_not_went":
-        return order.is_agree && order.is_client_went === null && order.stage === 2
+        return stage === 2 && order.is_client_went === null
       case "reorder":
         return order.status === "cancelled"
       case "review":
-        return order.status === "completed" && order.stage === 4
+        return stage === 4 && order.status === "completed"
       case "complaint":
         return order.status === "cancelled" || order.status === "completed"
       default:
@@ -339,16 +366,21 @@ export default function OrdersPage() {
   }
 
   const getStatusBadge = (order: Order) => {
-    if (order.status === "completed") {
+    const stage = getOrderStage(order)
+
+    if (stage === -1) {
+      return <Badge variant="destructive">Xatolik</Badge>
+    }
+    if (stage === 4) {
       return <Badge className="bg-green-100 text-green-800">Yakunlandi</Badge>
     }
-    if (order.status === "cancelled") {
+    if (stage === 0) {
       return <Badge variant="destructive">Bekor qilingan</Badge>
     }
-    if (!order.is_agree) {
+    if (stage === 1) {
       return <Badge variant="secondary">Kutilmoqda</Badge>
     }
-    if (order.is_agree && order.is_client_went === null) {
+    if (stage === 2 && order.is_client_went === null) {
       return <Badge className="bg-yellow-100 text-yellow-800 animate-pulse">Harakatga tayyor</Badge>
     }
     return <Badge className="bg-blue-100 text-blue-800">Jarayonda</Badge>
@@ -462,59 +494,59 @@ export default function OrdersPage() {
                             </span>
                           </div>
                           <Progress value={getOrderProgress(order)} className="h-2 md:h-3 mb-2" />
-                          <p className="text-xs md:text-sm text-gray-600">{getOrderStage(order)}</p>
+                          <p className="text-xs md:text-sm text-gray-600">{getOrderStageText(order)}</p>
                         </div>
 
                         {/* Order Steps */}
                         <div className="space-y-2 md:space-y-3">
                           <div
                             className={`flex items-center gap-2 md:gap-3 p-2 md:p-3 rounded-lg text-sm ${
-                              order.stage >= 1
+                              getOrderStage(order) >= 1
                                 ? "bg-green-50 border border-green-200"
                                 : "bg-gray-50 border border-gray-200"
                             }`}
                           >
                             <CheckCircle
-                              className={`h-4 w-4 md:h-5 md:w-5 ${order.stage >= 1 ? "text-green-600" : "text-gray-400"}`}
+                              className={`h-4 w-4 md:h-5 md:w-5 ${getOrderStage(order) >= 1 ? "text-green-600" : "text-gray-400"}`}
                             />
                             <span>Buyurtma berildi</span>
                           </div>
 
                           <div
                             className={`flex items-center gap-2 md:gap-3 p-2 md:p-3 rounded-lg text-sm ${
-                              order.stage >= 2
+                              getOrderStage(order) >= 2
                                 ? "bg-green-50 border border-green-200"
                                 : "bg-gray-50 border border-gray-200"
                             }`}
                           >
                             <CheckCircle
-                              className={`h-4 w-4 md:h-5 md:w-5 ${order.stage >= 2 ? "text-green-600" : "text-gray-400"}`}
+                              className={`h-4 w-4 md:h-5 md:w-5 ${getOrderStage(order) >= 2 ? "text-green-600" : "text-gray-400"}`}
                             />
                             <span>Sotuvchi qabul qildi</span>
                           </div>
 
                           <div
                             className={`flex items-center gap-2 md:gap-3 p-2 md:p-3 rounded-lg text-sm ${
-                              order.stage >= 3
+                              getOrderStage(order) >= 3
                                 ? "bg-green-50 border border-green-200"
                                 : "bg-gray-50 border border-gray-200"
                             }`}
                           >
                             <Truck
-                              className={`h-4 w-4 md:h-5 md:w-5 ${order.stage >= 3 ? "text-green-600" : "text-gray-400"}`}
+                              className={`h-4 w-4 md:h-5 md:w-5 ${getOrderStage(order) >= 3 ? "text-green-600" : "text-gray-400"}`}
                             />
                             <span>Mahsulot olishga bordingiz</span>
                           </div>
 
                           <div
                             className={`flex items-center gap-2 md:gap-3 p-2 md:p-3 rounded-lg text-sm ${
-                              order.stage >= 4
+                              getOrderStage(order) >= 4
                                 ? "bg-green-50 border border-green-200"
                                 : "bg-gray-50 border border-gray-200"
                             }`}
                           >
                             <Package
-                              className={`h-4 w-4 md:h-5 md:w-5 ${order.stage >= 4 ? "text-green-600" : "text-gray-400"}`}
+                              className={`h-4 w-4 md:h-5 md:w-5 ${getOrderStage(order) >= 4 ? "text-green-600" : "text-gray-400"}`}
                             />
                             <span>Mahsulot berildi</span>
                           </div>

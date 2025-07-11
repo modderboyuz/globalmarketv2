@@ -17,7 +17,6 @@ import {
   Calendar,
   Star,
   Package,
-  MessageSquare,
   ExternalLink,
   Globe,
   Instagram,
@@ -150,55 +149,31 @@ export default function SellerProfilePage() {
     }
   }
 
-  const startConversation = async () => {
-    if (!currentUser) {
-      toast.error("Xabar yuborish uchun tizimga kiring")
-      router.push("/login")
-      return
-    }
+  const handleShare = async () => {
+    const url = window.location.href
 
-    if (currentUser.id === sellerId) {
-      toast.error("O'zingizga xabar yubora olmaysiz")
-      return
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: seller?.company_name || seller?.full_name,
+          text: seller?.bio,
+          url: url,
+        })
+      } catch (error) {
+        // Fallback to clipboard
+        copyToClipboard(url)
+      }
+    } else {
+      copyToClipboard(url)
     }
+  }
 
+  const copyToClipboard = async (text: string) => {
     try {
-      // Check if conversation already exists
-      const { data: existingConversation } = await supabase
-        .from("conversations")
-        .select("id")
-        .or(
-          `and(buyer_id.eq.${currentUser.id},seller_id.eq.${sellerId}),and(buyer_id.eq.${sellerId},seller_id.eq.${currentUser.id})`,
-        )
-        .single()
-
-      if (existingConversation) {
-        router.push(`/messages?conversation=${existingConversation.id}`)
-        return
-      }
-
-      // Create new conversation (need a product context)
-      if (products.length > 0) {
-        const { data: conversation, error } = await supabase
-          .from("conversations")
-          .insert({
-            product_id: products[0].id,
-            buyer_id: currentUser.id,
-            seller_id: sellerId,
-            status: "active",
-          })
-          .select()
-          .single()
-
-        if (error) throw error
-
-        router.push(`/messages?conversation=${conversation.id}`)
-      } else {
-        toast.error("Bu sotuvchining faol mahsulotlari yo'q")
-      }
+      await navigator.clipboard.writeText(text)
+      toast.success("Havola nusxalandi!")
     } catch (error) {
-      console.error("Error starting conversation:", error)
-      toast.error("Suhbat boshlashda xatolik")
+      toast.error("Havolani nusxalashda xatolik")
     }
   }
 
@@ -379,11 +354,7 @@ export default function SellerProfilePage() {
 
                   {/* Action Buttons */}
                   <div className="flex gap-3 justify-center md:justify-start">
-                    <Button onClick={startConversation} className="btn-primary">
-                      <MessageSquare className="h-4 w-4 mr-2" />
-                      Xabar yuborish
-                    </Button>
-                    <Button variant="outline" className="rounded-xl bg-transparent">
+                    <Button variant="outline" className="rounded-xl bg-transparent" onClick={handleShare}>
                       <Share2 className="h-4 w-4 mr-2" />
                       Ulashish
                     </Button>

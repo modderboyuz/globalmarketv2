@@ -36,7 +36,14 @@ export async function POST(request: NextRequest) {
       if (error) throw error
 
       // Update product like count
-      await supabase.rpc("decrement_like_count", { product_id: productId })
+      const { error: updateError } = await supabase
+        .from("products")
+        .update({
+          like_count: supabase.sql`GREATEST(COALESCE(like_count, 0) - 1, 0)`,
+        })
+        .eq("id", productId)
+
+      if (updateError) throw updateError
 
       return NextResponse.json({ success: true, liked: false })
     } else {
@@ -49,13 +56,20 @@ export async function POST(request: NextRequest) {
       if (error) throw error
 
       // Update product like count
-      await supabase.rpc("increment_like_count", { product_id: productId })
+      const { error: updateError } = await supabase
+        .from("products")
+        .update({
+          like_count: supabase.sql`COALESCE(like_count, 0) + 1`,
+        })
+        .eq("id", productId)
+
+      if (updateError) throw updateError
 
       return NextResponse.json({ success: true, liked: true })
     }
   } catch (error) {
     console.error("Like API Error:", error)
-    return NextResponse.json({ error: "Like qilishda xatolik" }, { status: 500 })
+    return NextResponse.json({ error: "Like qilishda xatolik yuz berdi" }, { status: 500 })
   }
 }
 

@@ -1,13 +1,13 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Dialog,
@@ -17,20 +17,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Progress } from "@/components/ui/progress"
 import {
   ShoppingCart,
   Package,
   CheckCircle,
   XCircle,
+  Clock,
   Phone,
   MapPin,
-  User,
   Search,
-  RefreshCw,
-  Truck,
+  Download,
+  Eye,
   AlertTriangle,
-  ArrowLeft,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
@@ -43,20 +41,21 @@ interface Order {
   quantity: number
   total_amount: number
   status: string
-  is_agree: boolean
+  is_agree: boolean | null
   is_client_went: boolean | null
   is_client_claimed: boolean | null
   pickup_address: string | null
   seller_notes: string | null
   client_notes: string | null
-  stage: number
   created_at: string
-  updated_at: string
   products: {
     id: string
     name: string
     image_url: string
     price: number
+    product_type: string
+    brand: string
+    author: string
   }
   users: {
     full_name: string
@@ -67,39 +66,34 @@ interface Order {
 
 export default function SellerOrdersPage() {
   const router = useRouter()
-  const searchParams = useSearchParams()
-  const orderId = searchParams.get("id")
-
   const [user, setUser] = useState<any>(null)
   const [orders, setOrders] = useState<Order[]>([])
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [showActionDialog, setShowActionDialog] = useState(false)
   const [actionType, setActionType] = useState<string>("")
   const [actionNotes, setActionNotes] = useState("")
   const [pickupAddress, setPickupAddress] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
+  const [stats, setStats] = useState({
+    total: 0,
+    pending: 0,
+    processing: 0,
+    completed: 0,
+    cancelled: 0,
+  })
 
   useEffect(() => {
-    checkUser()
+    checkSellerAccess()
   }, [])
-
-  useEffect(() => {
-    if (orderId && orders.length > 0) {
-      const order = orders.find((o) => o.id === orderId)
-      if (order) {
-        setSelectedOrder(order)
-      }
-    }
-  }, [orderId, orders])
 
   useEffect(() => {
     filterOrders()
   }, [orders, searchQuery, statusFilter])
 
-  const checkUser = async () => {
+  const checkSellerAccess = async () => {
     try {
       const {
         data: { user: currentUser },
@@ -121,8 +115,8 @@ export default function SellerOrdersPage() {
       setUser(userData)
       await fetchOrders(currentUser.id)
     } catch (error) {
-      console.error("Error checking user:", error)
-      router.push("/login")
+      console.error("Error checking seller access:", error)
+      router.push("/")
     } finally {
       setLoading(false)
     }
@@ -133,49 +127,54 @@ export default function SellerOrdersPage() {
       const response = await fetch(`/api/orders?sellerId=${sellerId}`)
       const result = await response.json()
 
-      if (result.orders) {
-        setOrders(result.orders)
+      if (!response.ok) {
+        throw new Error(result.error || "Buyurtmalarni olishda xatolik")
       }
+
+      setOrders(result.orders || [])
+      calculateStats(result.orders || [])
     } catch (error) {
       console.error("Error fetching orders:", error)
       toast.error("Buyurtmalarni olishda xatolik")
     }
   }
 
+  const calculateStats = (ordersData: Order[]) => {
+    const stats = {
+      total: ordersData.length,
+      pending: ordersData.filter((o) => o.status === "pending").length,
+      processing: ordersData.filter((o) => o.status === "processing").length,
+      completed: ordersData.filter((o) => o.status === "completed").length,
+      cancelled: ordersData.filter((o) => o.status === "cancelled").length,
+    }
+    setStats(stats)
+  }
+
   const filterOrders = () => {
     let filtered = orders
 
-    if (statusFilter !== "all") {
-      if (statusFilter === "pending") {
-        filtered = filtered.filter((order) => order.stage === 1)
-      } else if (statusFilter === "processing") {
-        filtered = filtered.filter((order) => order.stage >= 2 && order.stage < 4)
-      } else {
-        filtered = filtered.filter((order) => order.status === statusFilter)
-      }
-    }
-
+    // Filter by search query
     if (searchQuery) {
       filtered = filtered.filter(
         (order) =>
           order.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
           order.phone?.includes(searchQuery) ||
-          order.products?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          order.products.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
           order.id.includes(searchQuery),
       )
     }
 
-    // Sort by priority: pending orders first, then by updated_at
-    filtered.sort((a, b) => {
-      if (a.status === "pending" && b.status !== "pending") return -1
-      if (b.status === "pending" && a.status !== "pending") return 1
-      return new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime()
-    })
+    // Filter by status
+    if (statusFilter !== "all") {
+      filtered = filtered.filter((order) => order.status === statusFilter)
+    }
 
     setFilteredOrders(filtered)
   }
 
-  const handleOrderAction = async (orderId: string, action: string, notes?: string, address?: string) => {
+  const handleOrderAction = async (action: string) => {
+    if (!selectedOrder) return
+
     try {
       const response = await fetch("/api/orders", {
         method: "PUT",
@@ -183,11 +182,10 @@ export default function SellerOrdersPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          orderId,
+          orderId: selectedOrder.id,
           action,
-          userId: user.id,
-          notes,
-          pickupAddress: address,
+          notes: actionNotes,
+          pickupAddress: pickupAddress || selectedOrder.address,
         }),
       })
 
@@ -211,21 +209,68 @@ export default function SellerOrdersPage() {
   const openActionDialog = (order: Order, action: string) => {
     setSelectedOrder(order)
     setActionType(action)
-    setPickupAddress(order.address) // Default to order address
+    setPickupAddress(order.address)
     setShowActionDialog(true)
   }
 
-  const executeAction = () => {
-    if (!selectedOrder) return
+  const getOrderStage = (order: Order) => {
+    if (order.status === "cancelled") return 0
+    if (order.is_agree === null && order.status === "pending") return 1
+    if (order.is_agree === false && order.status === "cancelled") return 0
+    if (order.is_agree === true && order.status === "pending") return 2
+    if (order.is_agree === true && order.is_client_went === true && order.status === "pending") return 3
+    if (
+      order.is_agree === true &&
+      order.is_client_went === true &&
+      order.is_client_claimed === true &&
+      order.status === "completed"
+    )
+      return 4
 
-    if (actionType === "agree") {
-      handleOrderAction(selectedOrder.id, "agree", actionNotes, pickupAddress)
-    } else if (actionType === "reject") {
-      handleOrderAction(selectedOrder.id, "reject", actionNotes)
-    } else if (actionType === "product_given") {
-      handleOrderAction(selectedOrder.id, "product_given", actionNotes)
-    } else if (actionType === "product_not_given") {
-      handleOrderAction(selectedOrder.id, "product_not_given", actionNotes)
+    // Error case
+    if (order.is_client_went === true && order.is_agree === false) return -1
+
+    return 1
+  }
+
+  const getStatusBadge = (order: Order) => {
+    const stage = getOrderStage(order)
+
+    if (stage === -1) {
+      return <Badge variant="destructive">Xatolik</Badge>
+    }
+    if (stage === 4) {
+      return <Badge className="bg-green-100 text-green-800">Yakunlandi</Badge>
+    }
+    if (stage === 0) {
+      return <Badge variant="destructive">Bekor qilingan</Badge>
+    }
+    if (stage === 1) {
+      return <Badge className="bg-yellow-100 text-yellow-800">Javob kutilmoqda</Badge>
+    }
+    if (stage === 2) {
+      return <Badge className="bg-blue-100 text-blue-800">Qabul qilingan</Badge>
+    }
+    if (stage === 3) {
+      return <Badge className="bg-purple-100 text-purple-800">Mijoz keldi</Badge>
+    }
+    return <Badge variant="secondary">Noma'lum</Badge>
+  }
+
+  const canTakeAction = (order: Order, action: string) => {
+    const stage = getOrderStage(order)
+
+    switch (action) {
+      case "agree":
+        return stage === 1
+      case "reject":
+        return stage === 1
+      case "product_given":
+        return stage === 3
+      case "product_not_given":
+        return stage === 3
+      default:
+        return false
     }
   }
 
@@ -233,311 +278,46 @@ export default function SellerOrdersPage() {
     return new Intl.NumberFormat("uz-UZ").format(price) + " so'm"
   }
 
-  const getStatusBadge = (order: Order) => {
-    if (order.status === "completed") {
-      return <Badge className="bg-green-100 text-green-800">Yakunlandi</Badge>
-    }
-    if (order.status === "cancelled") {
-      return <Badge variant="destructive">Bekor qilingan</Badge>
-    }
-    if (order.stage === 1) {
-      return <Badge variant="secondary">Yangi buyurtma</Badge>
-    }
-    if (order.stage === 2) {
-      return <Badge className="bg-blue-100 text-blue-800">Qabul qilingan</Badge>
-    }
-    if (order.stage === 3) {
-      return <Badge className="bg-yellow-100 text-yellow-800">Mijoz kelishini kutmoqda</Badge>
-    }
-    return <Badge variant="secondary">Noma'lum</Badge>
-  }
+  const exportOrders = () => {
+    const csvContent = [
+      ["ID", "Mijoz", "Telefon", "Mahsulot", "Miqdor", "Summa", "Holat", "Sana"].join(","),
+      ...filteredOrders.map((order) =>
+        [
+          order.id.slice(-8),
+          order.full_name || "",
+          order.phone || "",
+          order.products.name || "",
+          order.quantity,
+          order.total_amount,
+          order.status,
+          new Date(order.created_at).toLocaleDateString(),
+        ].join(","),
+      ),
+    ].join("\n")
 
-  const getOrderStage = (order: Order) => {
-    if (order.status === "cancelled") return "Bekor qilingan"
-    if (order.stage === 1) return "Yangi buyurtma - javob bering"
-    if (order.stage === 2 && order.is_client_went === null) return "Mijoz kelishini kutmoqda"
-    if (order.stage === 2 && order.is_client_went === false) return "Mijoz kelmadi"
-    if (order.stage === 3) return "Mijoz keldi - mahsulot bering"
-    if (order.stage === 4) return "Yakunlandi"
-    return "Noma'lum holat"
-  }
-
-  const getOrderProgress = (order: Order) => {
-    if (order.status === "cancelled") return 0
-    return (order.stage / 4) * 100
-  }
-
-  const canTakeAction = (order: Order, action: string) => {
-    switch (action) {
-      case "agree":
-        return order.stage === 1 && !order.is_agree
-      case "reject":
-        return order.stage === 1 && !order.is_agree
-      case "product_given":
-        return order.stage === 3 && order.is_client_went === true && order.is_client_claimed === null
-      case "product_not_given":
-        return order.stage === 3 && order.is_client_went === true && order.is_client_claimed === null
-      default:
-        return false
-    }
+    const blob = new Blob([csvContent], { type: "text/csv" })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = "orders.csv"
+    a.click()
+    window.URL.revokeObjectURL(url)
   }
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="text-center">
-          <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
-          <p className="text-gray-600">Buyurtmalar yuklanmoqda...</p>
-        </div>
-      </div>
-    )
-  }
-
-  // Single order view
-  if (selectedOrder && orderId) {
-    return (
       <div className="space-y-6">
-        <div className="flex items-center gap-4">
-          <Button
-            variant="ghost"
-            onClick={() => {
-              setSelectedOrder(null)
-              router.push("/seller-panel/orders")
-            }}
-            className="flex items-center gap-2"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Orqaga
-          </Button>
-          <div>
-            <h1 className="text-2xl font-bold">Buyurtma #{selectedOrder.id.slice(-8)}</h1>
-            <p className="text-gray-600">
-              {new Date(selectedOrder.created_at).toLocaleDateString("uz-UZ", {
-                year: "numeric",
-                month: "long",
-                day: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </p>
+        <div className="animate-pulse space-y-6">
+          <div className="h-8 bg-gray-200 rounded w-1/4"></div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="h-24 bg-gray-200 rounded-2xl"></div>
+            ))}
           </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Order Details */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Product Info */}
-            <Card className="card-beautiful">
-              <CardHeader>
-                <CardTitle>Mahsulot ma'lumotlari</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex gap-4">
-                  <img
-                    src={selectedOrder.products.image_url || "/placeholder.svg?height=120&width=80"}
-                    alt={selectedOrder.products.name}
-                    className="w-20 h-28 object-cover rounded-lg"
-                  />
-                  <div className="flex-1">
-                    <h3 className="font-semibold text-lg mb-2">{selectedOrder.products.name}</h3>
-                    <p className="text-gray-600 mb-1">Miqdor: {selectedOrder.quantity} dona</p>
-                    <p className="text-2xl font-bold text-green-600">{formatPrice(selectedOrder.total_amount)}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Customer Info */}
-            <Card className="card-beautiful">
-              <CardHeader>
-                <CardTitle>Mijoz ma'lumotlari</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="flex items-center gap-2">
-                    <User className="h-4 w-4 text-gray-500" />
-                    <span>{selectedOrder.full_name}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Phone className="h-4 w-4 text-gray-500" />
-                    <span>{selectedOrder.phone}</span>
-                  </div>
-                  <div className="flex items-start gap-2 md:col-span-2">
-                    <MapPin className="h-4 w-4 text-gray-500 mt-1" />
-                    <span>{selectedOrder.address}</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Pickup Address */}
-            {selectedOrder.pickup_address && (
-              <Card className="card-beautiful border-blue-200">
-                <CardHeader>
-                  <CardTitle className="text-blue-800">Mahsulot olish manzili</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-blue-700">{selectedOrder.pickup_address}</p>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Notes */}
-            {selectedOrder.seller_notes && (
-              <Card className="card-beautiful">
-                <CardHeader>
-                  <CardTitle>Sizning eslatmangiz</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-gray-700">{selectedOrder.seller_notes}</p>
-                </CardContent>
-              </Card>
-            )}
-
-            {selectedOrder.client_notes && (
-              <Card className="card-beautiful border-yellow-200">
-                <CardHeader>
-                  <CardTitle className="text-yellow-800">Mijoz eslatmasi</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-gray-700">{selectedOrder.client_notes}</p>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-
-          {/* Order Status & Actions */}
-          <div className="space-y-6">
-            {/* Status Card */}
-            <Card className="card-beautiful">
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between">
-                  Buyurtma holati
-                  {getStatusBadge(selectedOrder)}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium">Jarayon</span>
-                    <span className="text-sm text-gray-600">{selectedOrder.stage}/4</span>
-                  </div>
-                  <Progress value={getOrderProgress(selectedOrder)} className="h-3" />
-                  <p className="text-sm text-gray-600 mt-2">{getOrderStage(selectedOrder)}</p>
-                </div>
-
-                {/* Order Steps */}
-                <div className="space-y-3">
-                  <div
-                    className={`flex items-center gap-3 p-3 rounded-lg ${
-                      selectedOrder.stage >= 1
-                        ? "bg-green-50 border border-green-200"
-                        : "bg-gray-50 border border-gray-200"
-                    }`}
-                  >
-                    <CheckCircle
-                      className={`h-5 w-5 ${selectedOrder.stage >= 1 ? "text-green-600" : "text-gray-400"}`}
-                    />
-                    <span className="text-sm">Buyurtma berildi</span>
-                  </div>
-
-                  <div
-                    className={`flex items-center gap-3 p-3 rounded-lg ${
-                      selectedOrder.stage >= 2
-                        ? "bg-green-50 border border-green-200"
-                        : "bg-gray-50 border border-gray-200"
-                    }`}
-                  >
-                    <CheckCircle
-                      className={`h-5 w-5 ${selectedOrder.stage >= 2 ? "text-green-600" : "text-gray-400"}`}
-                    />
-                    <span className="text-sm">Siz qabul qildingiz</span>
-                  </div>
-
-                  <div
-                    className={`flex items-center gap-3 p-3 rounded-lg ${
-                      selectedOrder.stage >= 3
-                        ? "bg-green-50 border border-green-200"
-                        : "bg-gray-50 border border-gray-200"
-                    }`}
-                  >
-                    <Truck className={`h-5 w-5 ${selectedOrder.stage >= 3 ? "text-green-600" : "text-gray-400"}`} />
-                    <span className="text-sm">Mijoz keldi</span>
-                  </div>
-
-                  <div
-                    className={`flex items-center gap-3 p-3 rounded-lg ${
-                      selectedOrder.stage >= 4
-                        ? "bg-green-50 border border-green-200"
-                        : "bg-gray-50 border border-gray-200"
-                    }`}
-                  >
-                    <Package className={`h-5 w-5 ${selectedOrder.stage >= 4 ? "text-green-600" : "text-gray-400"}`} />
-                    <span className="text-sm">Mahsulot berildi</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Contact Customer */}
-            <Card className="card-beautiful border-2 border-gray-100">
-              <CardContent className="p-4">
-                <h4 className="font-semibold mb-3">Mijoz bilan aloqa</h4>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="w-full bg-transparent"
-                  onClick={() => window.open(`tel:${selectedOrder.phone}`)}
-                >
-                  <Phone className="h-4 w-4 mr-2" />
-                  {selectedOrder.phone}
-                </Button>
-              </CardContent>
-            </Card>
-
-            {/* Action Buttons */}
-            <div className="space-y-3">
-              {canTakeAction(selectedOrder, "agree") && (
-                <div className="space-y-2">
-                  <Button
-                    className="w-full bg-green-600 hover:bg-green-700"
-                    onClick={() => openActionDialog(selectedOrder, "agree")}
-                  >
-                    <CheckCircle className="h-4 w-4 mr-2" />
-                    Buyurtmani qabul qilish
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="w-full border-red-200 text-red-600 hover:bg-red-50 bg-transparent"
-                    onClick={() => openActionDialog(selectedOrder, "reject")}
-                  >
-                    <XCircle className="h-4 w-4 mr-2" />
-                    Rad etish
-                  </Button>
-                </div>
-              )}
-
-              {canTakeAction(selectedOrder, "product_given") && (
-                <div className="space-y-2">
-                  <p className="text-sm text-gray-600 font-medium">Mahsulot berildimi?</p>
-                  <Button
-                    className="w-full bg-green-600 hover:bg-green-700"
-                    onClick={() => openActionDialog(selectedOrder, "product_given")}
-                  >
-                    <CheckCircle className="h-4 w-4 mr-2" />
-                    Ha, berildi
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="w-full border-red-200 text-red-600 hover:bg-red-50 bg-transparent"
-                    onClick={() => openActionDialog(selectedOrder, "product_not_given")}
-                  >
-                    <XCircle className="h-4 w-4 mr-2" />
-                    Yo'q, berilmadi
-                  </Button>
-                </div>
-              )}
-            </div>
+          <div className="space-y-4">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="h-32 bg-gray-200 rounded-2xl"></div>
+            ))}
           </div>
         </div>
       </div>
@@ -547,17 +327,66 @@ export default function SellerOrdersPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold gradient-text">Buyurtmalar</h1>
-          <p className="text-gray-600">Sizning mahsulotlaringizga berilgan buyurtmalar</p>
-        </div>
+      <div>
+        <h1 className="text-3xl font-bold gradient-text">Buyurtmalar</h1>
+        <p className="text-gray-600">Sizning mahsulotlaringizga berilgan buyurtmalar</p>
       </div>
 
-      {/* Filters */}
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex flex-col sm:flex-row gap-4">
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <Card className="card-beautiful">
+          <CardContent className="p-4 text-center">
+            <ShoppingCart className="h-6 w-6 text-blue-600 mx-auto mb-2" />
+            <div className="text-xl font-bold">{stats.total}</div>
+            <div className="text-sm text-gray-600">Jami</div>
+          </CardContent>
+        </Card>
+        <Card className="card-beautiful">
+          <CardContent className="p-4 text-center">
+            <Clock className="h-6 w-6 text-yellow-600 mx-auto mb-2" />
+            <div className="text-xl font-bold">{stats.pending}</div>
+            <div className="text-sm text-gray-600">Kutilmoqda</div>
+          </CardContent>
+        </Card>
+        <Card className="card-beautiful">
+          <CardContent className="p-4 text-center">
+            <Package className="h-6 w-6 text-blue-600 mx-auto mb-2" />
+            <div className="text-xl font-bold">{stats.processing}</div>
+            <div className="text-sm text-gray-600">Jarayonda</div>
+          </CardContent>
+        </Card>
+        <Card className="card-beautiful">
+          <CardContent className="p-4 text-center">
+            <CheckCircle className="h-6 w-6 text-green-600 mx-auto mb-2" />
+            <div className="text-xl font-bold">{stats.completed}</div>
+            <div className="text-sm text-gray-600">Yakunlangan</div>
+          </CardContent>
+        </Card>
+        <Card className="card-beautiful">
+          <CardContent className="p-4 text-center">
+            <XCircle className="h-6 w-6 text-red-600 mx-auto mb-2" />
+            <div className="text-xl font-bold">{stats.cancelled}</div>
+            <div className="text-sm text-gray-600">Bekor qilingan</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filters and Search */}
+      <Card className="card-beautiful">
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShoppingCart className="h-5 w-5" />
+              Buyurtmalar ro'yxati
+            </div>
+            <Button onClick={exportOrders} variant="outline" size="sm">
+              <Download className="h-4 w-4 mr-2" />
+              Export
+            </Button>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col sm:flex-row gap-4 mb-6">
             <div className="flex-1">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
@@ -575,163 +404,187 @@ export default function SellerOrdersPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Barchasi</SelectItem>
-                <SelectItem value="pending">Yangi</SelectItem>
+                <SelectItem value="pending">Kutilmoqda</SelectItem>
                 <SelectItem value="processing">Jarayonda</SelectItem>
                 <SelectItem value="completed">Yakunlangan</SelectItem>
                 <SelectItem value="cancelled">Bekor qilingan</SelectItem>
               </SelectContent>
             </Select>
           </div>
-        </CardContent>
-      </Card>
 
-      {/* Orders List */}
-      {filteredOrders.length === 0 ? (
-        <Card>
-          <CardContent className="text-center py-12">
-            <ShoppingCart className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold mb-2">Buyurtmalar yo'q</h3>
-            <p className="text-gray-600">Hozircha sizning mahsulotlaringizga buyurtma berilmagan</p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-4">
-          {filteredOrders.map((order) => (
-            <Card
-              key={order.id}
-              className="card-beautiful cursor-pointer hover:shadow-lg transition-shadow"
-              onClick={() => router.push(`/seller-panel/orders?id=${order.id}`)}
-            >
-              <CardHeader className="border-b border-gray-100">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle className="text-lg">Buyurtma #{order.id.slice(-8)}</CardTitle>
-                    <p className="text-gray-600 mt-1">
-                      {new Date(order.created_at).toLocaleDateString("uz-UZ", {
-                        year: "numeric",
-                        month: "long",
-                        day: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    {getStatusBadge(order)}
-                    <p className="text-2xl font-bold text-green-600 mt-2">{formatPrice(order.total_amount)}</p>
-                  </div>
-                </div>
-              </CardHeader>
-
-              <CardContent className="p-6">
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  {/* Product & Customer Info */}
-                  <div className="lg:col-span-2">
-                    <div className="flex gap-4 mb-4">
-                      <img
-                        src={order.products.image_url || "/placeholder.svg?height=120&width=80"}
-                        alt={order.products.name}
-                        className="w-16 h-20 object-cover rounded-lg"
-                      />
-                      <div className="flex-1">
-                        <h3 className="font-semibold text-lg mb-1">{order.products.name}</h3>
-                        <p className="text-gray-600 mb-1">Miqdor: {order.quantity} dona</p>
-                        <p className="text-xl font-bold text-green-600">{formatPrice(order.total_amount)}</p>
-                      </div>
-                    </div>
-
-                    {/* Customer Info */}
-                    <div className="bg-gray-50 p-3 rounded-lg">
-                      <h4 className="font-semibold mb-2 flex items-center gap-2">
-                        <User className="h-4 w-4" />
-                        Mijoz: {order.full_name}
-                      </h4>
-                      <div className="text-sm text-gray-600">
-                        <p className="flex items-center gap-2">
-                          <Phone className="h-3 w-3" />
-                          {order.phone}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Status */}
-                  <div className="flex flex-col justify-center">
-                    <div className="text-center">
-                      <div className="mb-2">
-                        <Progress value={getOrderProgress(order)} className="h-2" />
-                      </div>
-                      <p className="text-sm text-gray-600">{getOrderStage(order)}</p>
-
-                      {order.status === "pending" && order.stage === 1 && (
-                        <div className="mt-3">
-                          <Badge className="bg-red-100 text-red-800 animate-pulse">
-                            <AlertTriangle className="h-3 w-3 mr-1" />
-                            Javob kutilmoqda
-                          </Badge>
+          {/* Orders List */}
+          <div className="space-y-4">
+            {filteredOrders.length === 0 ? (
+              <div className="text-center py-8">
+                <ShoppingCart className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+                <p className="text-gray-500">Buyurtmalar topilmadi</p>
+              </div>
+            ) : (
+              filteredOrders.map((order) => (
+                <Card key={order.id} className="border hover:shadow-md transition-shadow">
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex items-start gap-4">
+                        <img
+                          src={order.products.image_url || "/placeholder.svg?height=80&width=60"}
+                          alt={order.products.name}
+                          className="w-16 h-20 object-cover rounded-lg"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <h3 className="font-semibold">Buyurtma #{order.id.slice(-8)}</h3>
+                            {getStatusBadge(order)}
+                          </div>
+                          <p className="text-sm text-gray-600 mb-1">
+                            <strong>Mahsulot:</strong> {order.products.name}
+                          </p>
+                          <p className="text-sm text-gray-600 mb-1">
+                            <strong>Mijoz:</strong> {order.full_name}
+                          </p>
+                          <p className="text-sm text-gray-600 mb-1">
+                            <strong>Telefon:</strong> {order.phone}
+                          </p>
+                          <p className="text-sm text-gray-600 mb-1">
+                            <strong>Miqdor:</strong> {order.quantity} dona
+                          </p>
+                          <p className="text-sm text-gray-600">
+                            <strong>Sana:</strong> {new Date(order.created_at).toLocaleDateString("uz-UZ")}
+                          </p>
                         </div>
+                      </div>
+
+                      <div className="text-right">
+                        <div className="text-xl font-bold text-green-600 mb-2">{formatPrice(order.total_amount)}</div>
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="outline" onClick={() => window.open(`tel:${order.phone}`)}>
+                            <Phone className="h-4 w-4" />
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => setSelectedOrder(order)}>
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Address */}
+                    <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+                      <div className="flex items-start gap-2">
+                        <MapPin className="h-4 w-4 text-gray-500 mt-0.5" />
+                        <div>
+                          <p className="text-sm font-medium text-gray-700">Manzil:</p>
+                          <p className="text-sm text-gray-600">{order.address}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Notes */}
+                    {order.seller_notes && (
+                      <div className="mb-4 p-3 bg-blue-50 rounded-lg">
+                        <p className="text-sm font-medium text-blue-700 mb-1">Sizning eslatmangiz:</p>
+                        <p className="text-sm text-blue-600">{order.seller_notes}</p>
+                      </div>
+                    )}
+
+                    {order.client_notes && (
+                      <div className="mb-4 p-3 bg-green-50 rounded-lg">
+                        <p className="text-sm font-medium text-green-700 mb-1">Mijoz eslatmasi:</p>
+                        <p className="text-sm text-green-600">{order.client_notes}</p>
+                      </div>
+                    )}
+
+                    {/* Action Buttons */}
+                    <div className="flex gap-2 flex-wrap">
+                      {canTakeAction(order, "agree") && (
+                        <Button
+                          size="sm"
+                          className="bg-green-600 hover:bg-green-700"
+                          onClick={() => openActionDialog(order, "agree")}
+                        >
+                          <CheckCircle className="h-4 w-4 mr-2" />
+                          Qabul qilish
+                        </Button>
+                      )}
+
+                      {canTakeAction(order, "reject") && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-red-200 text-red-600 hover:bg-red-50 bg-transparent"
+                          onClick={() => openActionDialog(order, "reject")}
+                        >
+                          <XCircle className="h-4 w-4 mr-2" />
+                          Rad etish
+                        </Button>
+                      )}
+
+                      {canTakeAction(order, "product_given") && (
+                        <Button
+                          size="sm"
+                          className="bg-blue-600 hover:bg-blue-700"
+                          onClick={() => openActionDialog(order, "product_given")}
+                        >
+                          <Package className="h-4 w-4 mr-2" />
+                          Mahsulot berildi
+                        </Button>
+                      )}
+
+                      {canTakeAction(order, "product_not_given") && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-orange-200 text-orange-600 hover:bg-orange-50 bg-transparent"
+                          onClick={() => openActionDialog(order, "product_not_given")}
+                        >
+                          <AlertTriangle className="h-4 w-4 mr-2" />
+                          Mahsulot berilmadi
+                        </Button>
                       )}
                     </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Action Dialog */}
       <Dialog open={showActionDialog} onOpenChange={setShowActionDialog}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {actionType === "agree"
-                ? "Buyurtmani qabul qilish"
-                : actionType === "reject"
-                  ? "Buyurtmani rad etish"
-                  : actionType === "product_given"
-                    ? "Mahsulot berildi"
-                    : "Mahsulot berilmadi"}
+              {actionType === "agree" && "Buyurtmani qabul qilish"}
+              {actionType === "reject" && "Buyurtmani rad etish"}
+              {actionType === "product_given" && "Mahsulot berilganini tasdiqlash"}
+              {actionType === "product_not_given" && "Mahsulot berilmaganini tasdiqlash"}
             </DialogTitle>
-            <DialogDescription>
-              {actionType === "agree"
-                ? "Buyurtmani qabul qilish va mahsulot olish manzilini belgilash"
-                : actionType === "reject"
-                  ? "Buyurtmani rad etish sababini kiriting"
-                  : actionType === "product_given"
-                    ? "Mahsulot mijozga berilganini tasdiqlash"
-                    : "Mahsulot berilmaganini tasdiqlash"}
-            </DialogDescription>
+            <DialogDescription>{selectedOrder && `Buyurtma #${selectedOrder.id.slice(-8)} uchun`}</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
             {actionType === "agree" && (
               <div>
-                <Label htmlFor="pickup_address">Mahsulot olish manzili *</Label>
+                <Label htmlFor="pickup-address">Mahsulot olish manzili</Label>
                 <Textarea
-                  id="pickup_address"
-                  placeholder="Mijoz mahsulotni qayerdan olishi kerak?"
+                  id="pickup-address"
+                  placeholder="Mijoz mahsulotni qayerdan olishi kerak..."
                   value={pickupAddress}
                   onChange={(e) => setPickupAddress(e.target.value)}
-                  required
                 />
               </div>
             )}
 
             <div>
               <Label htmlFor="notes">
-                {actionType === "reject" ? "Rad etish sababi *" : "Qo'shimcha eslatma (ixtiyoriy)"}
+                {actionType === "reject" ? "Rad etish sababi" : "Qo'shimcha eslatma"} (ixtiyoriy)
               </Label>
               <Textarea
                 id="notes"
                 placeholder={
-                  actionType === "reject"
-                    ? "Buyurtmani rad etish sababini kiriting..."
-                    : "Mijoz uchun qo'shimcha ma'lumot..."
+                  actionType === "reject" ? "Buyurtmani nima uchun rad etyapsiz..." : "Qo'shimcha ma'lumot..."
                 }
                 value={actionNotes}
                 onChange={(e) => setActionNotes(e.target.value)}
-                required={actionType === "reject"}
               />
             </div>
           </div>
@@ -740,26 +593,134 @@ export default function SellerOrdersPage() {
             <Button variant="outline" onClick={() => setShowActionDialog(false)}>
               Bekor qilish
             </Button>
-            <Button
-              onClick={executeAction}
-              disabled={
-                (actionType === "agree" && !pickupAddress.trim()) || (actionType === "reject" && !actionNotes.trim())
-              }
-              className={
-                actionType === "product_given"
-                  ? "bg-green-600 hover:bg-green-700"
-                  : actionType === "product_not_given" || actionType === "reject"
-                    ? "bg-red-600 hover:bg-red-700"
-                    : ""
-              }
-            >
-              {actionType === "agree"
-                ? "Qabul qilish"
-                : actionType === "reject"
-                  ? "Rad etish"
-                  : actionType === "product_given"
-                    ? "Ha, berildi"
-                    : "Yo'q, berilmadi"}
+            <Button onClick={() => handleOrderAction(actionType)}>
+              {actionType === "agree" && "Qabul qilish"}
+              {actionType === "reject" && "Rad etish"}
+              {actionType === "product_given" && "Tasdiqlash"}
+              {actionType === "product_not_given" && "Tasdiqlash"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Order Details Dialog */}
+      <Dialog open={!!selectedOrder && !showActionDialog} onOpenChange={() => setSelectedOrder(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Buyurtma tafsilotlari</DialogTitle>
+            <DialogDescription>{selectedOrder && `Buyurtma #${selectedOrder.id.slice(-8)}`}</DialogDescription>
+          </DialogHeader>
+
+          {selectedOrder && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <h4 className="font-semibold mb-2">Mijoz ma'lumotlari</h4>
+                  <p className="text-sm">
+                    <strong>Ism:</strong> {selectedOrder.full_name}
+                  </p>
+                  <p className="text-sm">
+                    <strong>Telefon:</strong> {selectedOrder.phone}
+                  </p>
+                  {selectedOrder.users?.email && (
+                    <p className="text-sm">
+                      <strong>Email:</strong> {selectedOrder.users.email}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <h4 className="font-semibold mb-2">Buyurtma ma'lumotlari</h4>
+                  <p className="text-sm">
+                    <strong>Sana:</strong> {new Date(selectedOrder.created_at).toLocaleString("uz-UZ")}
+                  </p>
+                  <p className="text-sm">
+                    <strong>Miqdor:</strong> {selectedOrder.quantity} dona
+                  </p>
+                  <p className="text-sm">
+                    <strong>Summa:</strong> {formatPrice(selectedOrder.total_amount)}
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="font-semibold mb-2">Mahsulot</h4>
+                <div className="flex gap-3 p-3 bg-gray-50 rounded-lg">
+                  <img
+                    src={selectedOrder.products.image_url || "/placeholder.svg?height=80&width=60"}
+                    alt={selectedOrder.products.name}
+                    className="w-16 h-20 object-cover rounded-lg"
+                  />
+                  <div>
+                    <h5 className="font-medium">{selectedOrder.products.name}</h5>
+                    {selectedOrder.products.author && (
+                      <p className="text-sm text-gray-600">Muallif: {selectedOrder.products.author}</p>
+                    )}
+                    {selectedOrder.products.brand && (
+                      <p className="text-sm text-gray-600">Brend: {selectedOrder.products.brand}</p>
+                    )}
+                    <p className="text-sm text-gray-600">Narx: {formatPrice(selectedOrder.products.price)}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="font-semibold mb-2">Yetkazib berish manzili</h4>
+                <div className="p-3 bg-gray-50 rounded-lg">
+                  <p className="text-sm">{selectedOrder.address}</p>
+                </div>
+              </div>
+
+              {selectedOrder.pickup_address && (
+                <div>
+                  <h4 className="font-semibold mb-2">Mahsulot olish manzili</h4>
+                  <div className="p-3 bg-blue-50 rounded-lg">
+                    <p className="text-sm">{selectedOrder.pickup_address}</p>
+                  </div>
+                </div>
+              )}
+
+              {selectedOrder.seller_notes && (
+                <div>
+                  <h4 className="font-semibold mb-2">Sizning eslatmangiz</h4>
+                  <div className="p-3 bg-blue-50 rounded-lg">
+                    <p className="text-sm">{selectedOrder.seller_notes}</p>
+                  </div>
+                </div>
+              )}
+
+              {selectedOrder.client_notes && (
+                <div>
+                  <h4 className="font-semibold mb-2">Mijoz eslatmasi</h4>
+                  <div className="p-3 bg-green-50 rounded-lg">
+                    <p className="text-sm">{selectedOrder.client_notes}</p>
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <h4 className="font-semibold mb-2">Holat</h4>
+                <div className="flex items-center gap-2">
+                  {getStatusBadge(selectedOrder)}
+                  <span className="text-sm text-gray-600">
+                    {getOrderStage(selectedOrder) === 1 && "Sizning javobingizni kutmoqda"}
+                    {getOrderStage(selectedOrder) === 2 && "Qabul qilingan, mijoz kelishini kutmoqda"}
+                    {getOrderStage(selectedOrder) === 3 && "Mijoz keldi, mahsulot berishni kutmoqda"}
+                    {getOrderStage(selectedOrder) === 4 && "Buyurtma muvaffaqiyatli yakunlandi"}
+                    {getOrderStage(selectedOrder) === 0 && "Buyurtma bekor qilingan"}
+                    {getOrderStage(selectedOrder) === -1 && "Buyurtmada xatolik mavjud"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSelectedOrder(null)}>
+              Yopish
+            </Button>
+            <Button onClick={() => window.open(`tel:${selectedOrder?.phone}`)}>
+              <Phone className="h-4 w-4 mr-2" />
+              Qo'ng'iroq qilish
             </Button>
           </DialogFooter>
         </DialogContent>

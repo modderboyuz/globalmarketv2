@@ -7,7 +7,20 @@ import { useRouter, usePathname } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { BarChart3, Package, Plus, Settings, LogOut, Menu, X, Home, User, ArrowLeft } from "lucide-react"
+import {
+  BarChart3,
+  Package,
+  Plus,
+  Settings,
+  LogOut,
+  Menu,
+  X,
+  Home,
+  User,
+  ArrowLeft,
+  ShoppingCart,
+  Users,
+} from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 
@@ -94,6 +107,16 @@ export default function SellerPanelLayout({ children }: SellerLayoutProps) {
       name: "Yangi mahsulot",
       href: "/seller-panel/add-product",
       icon: Plus,
+    },
+    {
+      name: "Buyurtmalar",
+      href: "/seller-panel/orders",
+      icon: ShoppingCart,
+    },
+    {
+      name: "Mijozlar",
+      href: "/seller-panel/customers",
+      icon: Users,
     },
     {
       name: "Analitika",

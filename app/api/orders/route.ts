@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
     // Get product details
     const { data: product, error: productError } = await supabase
       .from("products")
-      .select("*")
+      .select("*, users!products_seller_id_fkey(username)")
       .eq("id", productId)
       .single()
 
@@ -47,8 +47,7 @@ export async function POST(request: NextRequest) {
       status: "pending",
       order_type: orderType,
       anon_temp_id: anonTempId,
-      stage: 1,
-      is_agree: false,
+      is_agree: null,
       is_client_went: null,
       is_client_claimed: null,
     }
@@ -57,7 +56,7 @@ export async function POST(request: NextRequest) {
 
     if (orderError) {
       console.error("Order creation error:", orderError)
-      return NextResponse.json({ error: "Buyurtma yaratishda xatolik" }, { status: 500 })
+      return NextResponse.json({ error: "Buyurtma yaratishda xatolik yuz berdi" }, { status: 500 })
     }
 
     // Update product order count and decrease stock
@@ -80,13 +79,17 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    // Generate tracking URL for globalmarket seller
+    let tracking_url = null
+    if (product.users?.username === "globalmarket") {
+      tracking_url = `https://t.me/${process.env.NEXT_PUBLIC_BOT_USERNAME || "globalmarketshopbot"}?start=order_${anonTempId || order.id}_${order.id}`
+    }
+
     return NextResponse.json({
       success: true,
       order: order,
       message: "Buyurtma muvaffaqiyatli yaratildi",
-      tracking_url: anonTempId
-        ? `https://t.me/${process.env.NEXT_PUBLIC_BOT_USERNAME || "globalmarketshopbot"}?start=order_${anonTempId}_${order.id}`
-        : null,
+      tracking_url,
     })
   } catch (error) {
     console.error("API Error:", error)
@@ -218,7 +221,6 @@ export async function PUT(request: NextRequest) {
           status: "processing",
           pickup_address: pickupAddress || order.address,
           seller_notes: notes,
-          stage: 2,
         }
         notificationTitle = "Buyurtma qabul qilindi"
         notificationMessage = `${order.products.name} buyurtmangiz qabul qilindi. Mahsulotni olish manzili: ${pickupAddress || order.address}`
@@ -232,7 +234,6 @@ export async function PUT(request: NextRequest) {
           is_agree: false,
           status: "cancelled",
           seller_notes: notes,
-          stage: 1,
         }
         notificationTitle = "Buyurtma rad etildi"
         notificationMessage = `${order.products.name} buyurtmangiz rad etildi. Sabab: ${notes || "Belgilanmagan"}`
@@ -245,7 +246,6 @@ export async function PUT(request: NextRequest) {
         updateData = {
           is_client_went: true,
           client_notes: notes,
-          stage: 3,
         }
         notificationTitle = "Mijoz mahsulot olishga keldi"
         notificationMessage = `${order.full_name} mahsulot olishga kelganini tasdiqladi`
@@ -259,7 +259,6 @@ export async function PUT(request: NextRequest) {
           is_client_went: false,
           client_notes: notes,
           status: "cancelled",
-          stage: 2,
         }
         notificationTitle = "Mijoz mahsulot olishga kelmadi"
         notificationMessage = `${order.full_name} mahsulot olishga kelmaganini bildirdi`
@@ -273,7 +272,6 @@ export async function PUT(request: NextRequest) {
           is_client_claimed: true,
           status: "completed",
           seller_notes: notes,
-          stage: 4,
         }
         notificationTitle = "Mahsulot berildi"
         notificationMessage = `${order.products.name} mahsuloti muvaffaqiyatli berildi. Fikr qoldiring!`
@@ -287,7 +285,6 @@ export async function PUT(request: NextRequest) {
           is_client_claimed: false,
           status: "cancelled",
           seller_notes: notes,
-          stage: 4,
         }
         notificationTitle = "Mahsulot berilmadi"
         notificationMessage = `${order.products.name} mahsuloti berilmadi. Qayta buyurtma qilishingiz mumkin.`

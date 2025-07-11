@@ -26,10 +26,7 @@ import {
   LogOut,
   Settings,
   Package,
-  MessageSquare,
   Store,
-  Users,
-  BarChart3,
   Home,
   Phone,
   Info,
@@ -65,7 +62,7 @@ export function Header() {
   const router = useRouter()
   const pathname = usePathname()
 
-  const isSellerRoute = pathname?.startsWith("/seller")
+  const isSellerRoute = pathname?.startsWith("/seller-panel")
 
   useEffect(() => {
     checkUser()
@@ -137,7 +134,7 @@ export function Header() {
   }
 
   const switchToSeller = () => {
-    router.push("/seller/dashboard")
+    router.push("/seller-panel/dashboard")
   }
 
   const switchToCustomer = () => {
@@ -150,14 +147,6 @@ export function Header() {
     { href: "/sellers", label: "Sotuvchilar", icon: Store },
     { href: "/about", label: "Biz haqimizda", icon: Info },
     { href: "/contact", label: "Aloqa", icon: Phone },
-  ]
-
-  const sellerNavigationItems = [
-    { href: "/seller/dashboard", label: "Boshqaruv paneli", icon: BarChart3 },
-    { href: "/seller/products", label: "Mahsulotlarim", icon: Package },
-    { href: "/seller/add-product", label: "Mahsulot qo'shish", icon: Package },
-    { href: "/seller/customers", label: "Mijozlar", icon: Users },
-    { href: "/seller/analytics", label: "Analitika", icon: BarChart3 },
   ]
 
   return (
@@ -179,18 +168,20 @@ export function Header() {
           </Link>
 
           {/* Search Bar - Desktop */}
-          <form onSubmit={handleSearch} className="hidden md:flex flex-1 max-w-md mx-8">
-            <div className="relative w-full">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <Input
-                type="search"
-                placeholder="Mahsulotlarni qidiring..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 pr-4"
-              />
-            </div>
-          </form>
+          {!isSellerRoute && (
+            <form onSubmit={handleSearch} className="hidden md:flex flex-1 max-w-md mx-8">
+              <div className="relative w-full">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <Input
+                  type="search"
+                  placeholder="Mahsulotlarni qidiring..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10 pr-4"
+                />
+              </div>
+            </form>
+          )}
 
           {/* Desktop Navigation */}
           <nav className="hidden lg:flex items-center space-x-6">
@@ -209,22 +200,7 @@ export function Header() {
                   </Link>
                 ))}
               </>
-            ) : (
-              <>
-                {sellerNavigationItems.map((item) => (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`flex items-center space-x-1 text-sm font-medium transition-colors hover:text-blue-600 ${
-                      pathname === item.href ? "text-blue-600" : "text-gray-700"
-                    }`}
-                  >
-                    <item.icon className="w-4 h-4" />
-                    <span>{item.label}</span>
-                  </Link>
-                ))}
-              </>
-            )}
+            ) : null}
           </nav>
 
           {/* Right Side Actions */}
@@ -317,21 +293,12 @@ export function Header() {
                   </DropdownMenuItem>
 
                   {!isSellerRoute && (
-                    <>
-                      <DropdownMenuItem asChild>
-                        <Link href="/orders" className="flex items-center">
-                          <Package className="mr-2 h-4 w-4" />
-                          <span>Buyurtmalar</span>
-                        </Link>
-                      </DropdownMenuItem>
-
-                      <DropdownMenuItem asChild>
-                        <Link href="/messages" className="flex items-center">
-                          <MessageSquare className="mr-2 h-4 w-4" />
-                          <span>Xabarlar</span>
-                        </Link>
-                      </DropdownMenuItem>
-                    </>
+                    <DropdownMenuItem asChild>
+                      <Link href="/orders" className="flex items-center">
+                        <Package className="mr-2 h-4 w-4" />
+                        <span>Buyurtmalar</span>
+                      </Link>
+                    </DropdownMenuItem>
                   )}
 
                   {user.is_admin && (
@@ -377,18 +344,20 @@ export function Header() {
               <SheetContent side="right" className="w-80">
                 <div className="flex flex-col space-y-4 mt-4">
                   {/* Mobile Search */}
-                  <form onSubmit={handleSearch} className="md:hidden">
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                      <Input
-                        type="search"
-                        placeholder="Qidirish..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="pl-10"
-                      />
-                    </div>
-                  </form>
+                  {!isSellerRoute && (
+                    <form onSubmit={handleSearch} className="md:hidden">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                        <Input
+                          type="search"
+                          placeholder="Qidirish..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          className="pl-10"
+                        />
+                      </div>
+                    </form>
+                  )}
 
                   {/* Mode Switch - Mobile */}
                   {user?.is_verified_seller && (
@@ -416,21 +385,23 @@ export function Header() {
                   )}
 
                   {/* Mobile Navigation */}
-                  <nav className="flex flex-col space-y-2">
-                    {(!isSellerRoute ? navigationItems : sellerNavigationItems).map((item) => (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        onClick={() => setIsOpen(false)}
-                        className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                          pathname === item.href ? "bg-blue-100 text-blue-600" : "text-gray-700 hover:bg-gray-100"
-                        }`}
-                      >
-                        <item.icon className="w-4 h-4" />
-                        <span>{item.label}</span>
-                      </Link>
-                    ))}
-                  </nav>
+                  {!isSellerRoute && (
+                    <nav className="flex flex-col space-y-2">
+                      {navigationItems.map((item) => (
+                        <Link
+                          key={item.href}
+                          href={item.href}
+                          onClick={() => setIsOpen(false)}
+                          className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                            pathname === item.href ? "bg-blue-100 text-blue-600" : "text-gray-700 hover:bg-gray-100"
+                          }`}
+                        >
+                          <item.icon className="w-4 h-4" />
+                          <span>{item.label}</span>
+                        </Link>
+                      ))}
+                    </nav>
+                  )}
                 </div>
               </SheetContent>
             </Sheet>

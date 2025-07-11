@@ -13,6 +13,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
   Star,
   User,
   Phone,
@@ -29,6 +37,8 @@ import {
   Zap,
   Eye,
   ShoppingCart,
+  LogIn,
+  MessageSquare,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
@@ -56,6 +66,7 @@ interface Product {
     is_verified_seller: boolean
     company_name: string
     id: string
+    username: string
   }
 }
 
@@ -84,6 +95,8 @@ export default function ProductDetailPage() {
   const [quantity, setQuantity] = useState(1)
   const [user, setUser] = useState<any>(null)
   const [isLiked, setIsLiked] = useState(false)
+  const [showOrderDialog, setShowOrderDialog] = useState(false)
+  const [showLoginDialog, setShowLoginDialog] = useState(false)
 
   const [formData, setFormData] = useState({
     fullName: "",
@@ -131,7 +144,8 @@ export default function ProductDetailPage() {
             full_name,
             is_verified_seller,
             company_name,
-            id
+            id,
+            username
           )
         `)
         .eq("id", productId)
@@ -165,7 +179,8 @@ export default function ProductDetailPage() {
               full_name,
               is_verified_seller,
               company_name,
-              id
+              id,
+              username
             )
           `)
           .eq("category_id", productData.category_id)
@@ -248,8 +263,7 @@ export default function ProductDetailPage() {
 
   const handleAddToCart = async () => {
     if (!user) {
-      toast.error("Savatga qo'shish uchun tizimga kiring")
-      router.push("/login")
+      setShowLoginDialog(true)
       return
     }
 
@@ -277,6 +291,14 @@ export default function ProductDetailPage() {
     } finally {
       setCartLoading(false)
     }
+  }
+
+  const handleOrderClick = () => {
+    if (!user) {
+      setShowLoginDialog(true)
+      return
+    }
+    setShowOrderDialog(true)
   }
 
   const handleImmediateOrder = async (e: React.FormEvent) => {
@@ -325,6 +347,7 @@ export default function ProductDetailPage() {
       // Reset form
       setFormData({ fullName: "", phone: "", address: "" })
       setQuantity(1)
+      setShowOrderDialog(false)
 
       // Update product stock in UI
       setProduct((prev) => (prev ? { ...prev, stock_quantity: prev.stock_quantity - quantity } : null))
@@ -339,6 +362,41 @@ export default function ProductDetailPage() {
       toast.error(error.message || "Xatolik yuz berdi")
     } finally {
       setOrderLoading(false)
+    }
+  }
+
+  const handleShare = async () => {
+    const url = window.location.href
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: product?.name,
+          text: product?.description,
+          url: url,
+        })
+      } catch (error) {
+        // Fallback to clipboard
+        copyToClipboard(url)
+      }
+    } else {
+      copyToClipboard(url)
+    }
+  }
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      toast.success("Havola nusxalandi!")
+    } catch (error) {
+      toast.error("Havolani nusxalashda xatolik")
+    }
+  }
+
+  const handleTelegramOrder = () => {
+    if (product?.users?.username === "globalmarket") {
+      const botUrl = `https://t.me/${process.env.NEXT_PUBLIC_BOT_USERNAME || "globalmarketshopbot"}?start=product_${productId}`
+      window.open(botUrl, "_blank")
     }
   }
 
@@ -427,7 +485,12 @@ export default function ProductDetailPage() {
                     >
                       <Heart className={`h-4 w-4 ${isLiked ? "fill-red-500 text-red-500" : ""}`} />
                     </Button>
-                    <Button size="icon" variant="secondary" className="rounded-full bg-white/90 backdrop-blur-sm">
+                    <Button
+                      size="icon"
+                      variant="secondary"
+                      className="rounded-full bg-white/90 backdrop-blur-sm"
+                      onClick={handleShare}
+                    >
                       <Share2 className="h-4 w-4" />
                     </Button>
                   </div>
@@ -630,94 +693,45 @@ export default function ProductDetailPage() {
               </CardContent>
             </Card>
 
-            {/* Immediate Order */}
+            {/* Order Options */}
             <Card className="card-beautiful">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Zap className="h-5 w-5" />
-                  Darhol buyurtma berish
+                  Buyurtma berish
                 </CardTitle>
               </CardHeader>
-              <CardContent>
-                <form onSubmit={handleImmediateOrder} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="fullName">To'liq ism *</Label>
-                    <div className="relative">
-                      <User className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                      <Input
-                        id="fullName"
-                        placeholder="Ism Familiya"
-                        className="input-beautiful pl-10"
-                        value={formData.fullName}
-                        onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                        required
-                      />
-                    </div>
-                  </div>
+              <CardContent className="space-y-3">
+                <Button
+                  onClick={handleOrderClick}
+                  className="w-full btn-primary text-lg py-6"
+                  disabled={product.stock_quantity === 0 || quantity > product.stock_quantity}
+                >
+                  {product.stock_quantity === 0 ? (
+                    "Mahsulot tugagan"
+                  ) : (
+                    <>
+                      <Zap className="mr-2 h-5 w-5" />
+                      Buyurtma berish
+                    </>
+                  )}
+                </Button>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="phone">Telefon raqam *</Label>
-                    <div className="relative">
-                      <Phone className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                      <Input
-                        id="phone"
-                        placeholder="+998 90 123 45 67"
-                        className="input-beautiful pl-10"
-                        value={formData.phone}
-                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="address">Manzil *</Label>
-                    <div className="relative">
-                      <MapPin className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                      <Textarea
-                        id="address"
-                        placeholder="To'liq manzil: shahar, tuman, ko'cha, uy raqami"
-                        className="input-beautiful pl-10 min-h-[80px]"
-                        value={formData.address}
-                        onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <Separator />
-
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-lg font-semibold">
-                      <span>Jami:</span>
-                      <span className="text-blue-600">{formatPrice(product.price * quantity)}</span>
-                    </div>
-                  </div>
-
+                {product.users?.username === "globalmarket" && (
                   <Button
-                    type="submit"
-                    className="w-full btn-primary text-lg py-6"
-                    disabled={orderLoading || product.stock_quantity === 0 || quantity > product.stock_quantity}
+                    onClick={handleTelegramOrder}
+                    variant="outline"
+                    className="w-full bg-transparent border-blue-200 text-blue-600 hover:bg-blue-50"
+                    disabled={product.stock_quantity === 0}
                   >
-                    {orderLoading ? (
-                      <>
-                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                        Buyurtma berilmoqda...
-                      </>
-                    ) : product.stock_quantity === 0 ? (
-                      "Mahsulot tugagan"
-                    ) : (
-                      <>
-                        <Zap className="mr-2 h-5 w-5" />
-                        Darhol buyurtma berish
-                      </>
-                    )}
+                    <MessageSquare className="mr-2 h-4 w-4" />
+                    Telegram orqali buyurtma
                   </Button>
+                )}
 
-                  <p className="text-xs text-gray-500 text-center">
-                    Buyurtma bergandan so'ng sizga tez orada aloqaga chiqamiz
-                  </p>
-                </form>
+                <p className="text-xs text-gray-500 text-center">
+                  Buyurtma bergandan so'ng sizga tez orada aloqaga chiqamiz
+                </p>
               </CardContent>
             </Card>
           </div>
@@ -764,6 +778,122 @@ export default function ProductDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Login Dialog */}
+      <Dialog open={showLoginDialog} onOpenChange={setShowLoginDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Buyurtma berish</DialogTitle>
+            <DialogDescription>
+              Buyurtma berish uchun tizimga kirishingiz yoki Telegram bot orqali buyurtma berishingiz mumkin
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Button onClick={() => router.push("/login")} className="w-full">
+              <LogIn className="mr-2 h-4 w-4" />
+              Google orqali kirish
+            </Button>
+            {product?.users?.username === "globalmarket" && (
+              <Button onClick={handleTelegramOrder} variant="outline" className="w-full bg-transparent">
+                <MessageSquare className="mr-2 h-4 w-4" />
+                Telegram bot orqali buyurtma
+              </Button>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowLoginDialog(false)}>
+              Bekor qilish
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Order Dialog */}
+      <Dialog open={showOrderDialog} onOpenChange={setShowOrderDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Buyurtma berish</DialogTitle>
+            <DialogDescription>{product?.name} mahsuloti uchun buyurtma ma'lumotlarini kiriting</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleImmediateOrder} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="fullName">To'liq ism *</Label>
+              <div className="relative">
+                <User className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                <Input
+                  id="fullName"
+                  placeholder="Ism Familiya"
+                  className="input-beautiful pl-10"
+                  value={formData.fullName}
+                  onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="phone">Telefon raqam *</Label>
+              <div className="relative">
+                <Phone className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                <Input
+                  id="phone"
+                  placeholder="+998 90 123 45 67"
+                  className="input-beautiful pl-10"
+                  value={formData.phone}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="address">Manzil *</Label>
+              <div className="relative">
+                <MapPin className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                <Textarea
+                  id="address"
+                  placeholder="To'liq manzil: shahar, tuman, ko'cha, uy raqami"
+                  className="input-beautiful pl-10 min-h-[80px]"
+                  value={formData.address}
+                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  required
+                />
+              </div>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-2">
+              <div className="flex justify-between text-lg font-semibold">
+                <span>Jami:</span>
+                <span className="text-blue-600">{formatPrice(product?.price * quantity || 0)}</span>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setShowOrderDialog(false)}>
+                Bekor qilish
+              </Button>
+              <Button
+                type="submit"
+                disabled={orderLoading || product?.stock_quantity === 0 || quantity > (product?.stock_quantity || 0)}
+              >
+                {orderLoading ? (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                    Buyurtma berilmoqda...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="mr-2 h-4 w-4" />
+                    Buyurtma berish
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
