@@ -4,6 +4,7 @@ import type React from "react"
 import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import Image from "next/image"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -27,10 +28,10 @@ import {
   Award,
   Zap,
   Eye,
+  ShoppingCart,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
-import Link from "next/link"
 
 interface Product {
   id: string
@@ -75,8 +76,10 @@ export default function ProductDetailPage() {
 
   const [product, setProduct] = useState<Product | null>(null)
   const [reviews, setReviews] = useState<Review[]>([])
+  const [similarProducts, setSimilarProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [orderLoading, setOrderLoading] = useState(false)
+  const [cartLoading, setCartLoading] = useState(false)
   const [likeLoading, setLikeLoading] = useState(false)
   const [quantity, setQuantity] = useState(1)
   const [user, setUser] = useState<any>(null)
@@ -148,6 +151,31 @@ export default function ProductDetailPage() {
         .order("created_at", { ascending: false })
 
       setReviews(reviewsData || [])
+
+      // Fetch similar products from same category
+      if (productData.category_id) {
+        const { data: similarData } = await supabase
+          .from("products")
+          .select(`
+            *,
+            categories!products_category_id_fkey (
+              name_uz
+            ),
+            users!products_seller_id_fkey (
+              full_name,
+              is_verified_seller,
+              company_name,
+              id
+            )
+          `)
+          .eq("category_id", productData.category_id)
+          .neq("id", productId)
+          .eq("is_active", true)
+          .limit(30)
+          .order("order_count", { ascending: false })
+
+        setSimilarProducts(similarData || [])
+      }
     } catch (error) {
       console.error("Error fetching product details:", error)
       toast.error("Mahsulot ma'lumotlarini olishda xatolik")
@@ -215,6 +243,39 @@ export default function ProductDetailPage() {
       toast.error("Like qilishda xatolik")
     } finally {
       setLikeLoading(false)
+    }
+  }
+
+  const handleAddToCart = async () => {
+    if (!user) {
+      toast.error("Savatga qo'shish uchun tizimga kiring")
+      router.push("/login")
+      return
+    }
+
+    if (!product) return
+
+    setCartLoading(true)
+
+    try {
+      const { data, error } = await supabase.from("cart_items").upsert(
+        {
+          user_id: user.id,
+          product_id: product.id,
+          quantity: quantity,
+        },
+        {
+          onConflict: "user_id,product_id",
+        },
+      )
+
+      if (error) throw error
+
+      toast.success("Mahsulot savatga qo'shildi!")
+    } catch (error: any) {
+      toast.error("Savatga qo'shishda xatolik yuz berdi")
+    } finally {
+      setCartLoading(false)
     }
   }
 
@@ -373,11 +434,11 @@ export default function ProductDetailPage() {
                   <div className="absolute bottom-4 left-4 flex gap-2">
                     <Badge className="bg-white/90 text-gray-800 flex items-center gap-1">
                       <Eye className="h-3 w-3" />
-                      {product.view_count}
+                      {product.view_count || 0}
                     </Badge>
                     <Badge className="bg-white/90 text-gray-800 flex items-center gap-1">
                       <Heart className="h-3 w-3" />
-                      {product.like_count}
+                      {product.like_count || 0}
                     </Badge>
                   </div>
                 </div>
@@ -405,8 +466,8 @@ export default function ProductDetailPage() {
 
                   <div className="flex items-center space-x-4 mb-4">
                     <div className="flex items-center space-x-1">
-                      <div className="flex">{renderStars(Math.round(product.average_rating))}</div>
-                      <span className="font-semibold">{product.average_rating.toFixed(1)}</span>
+                      <div className="flex">{renderStars(Math.round(product.average_rating || 0))}</div>
+                      <span className="font-semibold">{(product.average_rating || 0).toFixed(1)}</span>
                       <span className="text-gray-500">({reviews.length} sharh)</span>
                     </div>
                     <Separator orientation="vertical" className="h-4" />
@@ -531,6 +592,44 @@ export default function ProductDetailPage() {
               </CardContent>
             </Card>
 
+            {/* Add to Cart */}
+            <Card className="card-beautiful">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ShoppingCart className="h-5 w-5" />
+                  Savatga qo'shish
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-blue-600 mb-2">{formatPrice(product.price * quantity)}</div>
+                    <p className="text-sm text-gray-500">Jami summa</p>
+                  </div>
+
+                  <Button
+                    onClick={handleAddToCart}
+                    className="w-full btn-primary text-lg py-6"
+                    disabled={cartLoading || product.stock_quantity === 0 || quantity > product.stock_quantity}
+                  >
+                    {cartLoading ? (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                        Qo'shilmoqda...
+                      </>
+                    ) : product.stock_quantity === 0 ? (
+                      "Mahsulot tugagan"
+                    ) : (
+                      <>
+                        <ShoppingCart className="mr-2 h-5 w-5" />
+                        Savatga qo'shish
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Immediate Order */}
             <Card className="card-beautiful">
               <CardHeader>
@@ -623,6 +722,47 @@ export default function ProductDetailPage() {
             </Card>
           </div>
         </div>
+
+        {/* Similar Products */}
+        {similarProducts.length > 0 && (
+          <div className="mt-16">
+            <h2 className="text-3xl font-bold mb-8">Shunga o'xshash mahsulotlar</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+              {similarProducts.slice(0, 10).map((similarProduct) => (
+                <Link key={similarProduct.id} href={`/product/${similarProduct.id}`}>
+                  <Card className="card-beautiful hover:shadow-lg transition-all duration-300 cursor-pointer">
+                    <div className="relative aspect-square rounded-t-2xl overflow-hidden bg-gray-100">
+                      <Image
+                        src={similarProduct.image_url || "/placeholder.svg?height=200&width=200"}
+                        alt={similarProduct.name}
+                        fill
+                        className="object-cover"
+                      />
+                      <div className="absolute top-2 right-2">
+                        <Badge className="bg-white/90 text-gray-800 text-xs">
+                          {getProductTypeIcon(similarProduct.product_type)}
+                        </Badge>
+                      </div>
+                    </div>
+                    <CardContent className="p-4">
+                      <h3 className="font-semibold text-sm mb-2 line-clamp-2">{similarProduct.name}</h3>
+                      <div className="flex items-center gap-1 mb-2">
+                        <div className="flex">
+                          {renderStars(Math.round(similarProduct.average_rating || 0)).slice(0, 5)}
+                        </div>
+                        <span className="text-xs text-gray-500">({similarProduct.order_count || 0})</span>
+                      </div>
+                      <div className="text-lg font-bold text-blue-600">{formatPrice(similarProduct.price)}</div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {similarProduct.users?.company_name || similarProduct.users?.full_name}
+                      </p>
+                    </CardContent>
+                  </Card>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -220,13 +220,13 @@ export default function CartPage() {
     }
   }
 
-  const subtotal = cartItems.reduce((sum, item) => sum + item.products.price * item.quantity, 0)
+  const subtotal = cartItems.reduce((sum, item) => sum + (item.products?.price || 0) * item.quantity, 0)
   const deliveryTotal = cartItems.reduce(
-    (sum, item) => (item.products.has_delivery ? sum + item.products.delivery_price : sum),
+    (sum, item) => (item.products?.has_delivery ? sum + (item.products?.delivery_price || 0) : sum),
     0,
   )
   const totalAmount = subtotal + deliveryTotal
-  const hasDeliveryItems = cartItems.some((item) => item.products.has_delivery)
+  const hasDeliveryItems = cartItems.some((item) => item.products?.has_delivery)
 
   if (loading) {
     return (
@@ -288,8 +288,8 @@ export default function CartPage() {
                           {/* Product Image */}
                           <div className="relative w-24 h-24 rounded-2xl overflow-hidden bg-gray-100 flex-shrink-0 border-2 border-gray-200">
                             <Image
-                              src={item.products.image_url || "/placeholder.svg?height=100&width=100"}
-                              alt={item.products.name}
+                              src={item.products?.image_url || "/placeholder.svg?height=100&width=100"}
+                              alt={item.products?.name || "Product"}
                               fill
                               className="object-cover"
                             />
@@ -301,20 +301,20 @@ export default function CartPage() {
                               <div>
                                 <div className="flex items-center gap-2 mb-2">
                                   <Badge className="badge-beautiful border-blue-200 text-blue-700">
-                                    {getProductTypeIcon(item.products.product_type)}
+                                    {getProductTypeIcon(item.products?.product_type || "")}
                                   </Badge>
-                                  {item.products.has_delivery && (
+                                  {item.products?.has_delivery && (
                                     <Badge className="badge-beautiful border-green-200 text-green-700">
                                       <Truck className="h-3 w-3 mr-1" />
                                       Yetkazib berish
                                     </Badge>
                                   )}
                                 </div>
-                                <h3 className="font-bold text-xl text-gray-800">{item.products.name}</h3>
-                                {item.products.author && (
+                                <h3 className="font-bold text-xl text-gray-800">{item.products?.name}</h3>
+                                {item.products?.author && (
                                   <p className="text-gray-600 mt-1">Muallif: {item.products.author}</p>
                                 )}
-                                {item.products.brand && (
+                                {item.products?.brand && (
                                   <p className="text-gray-600 mt-1">Brend: {item.products.brand}</p>
                                 )}
                               </div>
@@ -348,22 +348,24 @@ export default function CartPage() {
                                     variant="outline"
                                     size="icon"
                                     onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                                    disabled={item.quantity >= item.products.stock_quantity}
+                                    disabled={item.quantity >= (item.products?.stock_quantity || 0)}
                                     className="h-8 w-8 rounded-full border-2"
                                   >
                                     <Plus className="h-3 w-3" />
                                   </Button>
                                 </div>
-                                <span className="text-sm text-gray-500">(Mavjud: {item.products.stock_quantity})</span>
+                                <span className="text-sm text-gray-500">
+                                  (Mavjud: {item.products?.stock_quantity || 0})
+                                </span>
                               </div>
 
                               <div className="text-right">
                                 <div className="text-2xl font-bold text-blue-600">
-                                  {formatPrice(item.products.price * item.quantity)}
+                                  {formatPrice((item.products?.price || 0) * item.quantity)}
                                 </div>
-                                {item.products.has_delivery && (
+                                {item.products?.has_delivery && (
                                   <div className="text-sm text-green-600">
-                                    + {formatPrice(item.products.delivery_price)} yetkazib berish
+                                    + {formatPrice(item.products?.delivery_price || 0)} yetkazib berish
                                   </div>
                                 )}
                               </div>
