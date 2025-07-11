@@ -35,16 +35,6 @@ export async function POST(request: NextRequest) {
 
       if (error) throw error
 
-      // Update product like count
-      const { error: updateError } = await supabase
-        .from("products")
-        .update({
-          like_count: supabase.sql`GREATEST(COALESCE(like_count, 0) - 1, 0)`,
-        })
-        .eq("id", productId)
-
-      if (updateError) throw updateError
-
       return NextResponse.json({ success: true, liked: false })
     } else {
       // Add like
@@ -54,16 +44,6 @@ export async function POST(request: NextRequest) {
       })
 
       if (error) throw error
-
-      // Update product like count
-      const { error: updateError } = await supabase
-        .from("products")
-        .update({
-          like_count: supabase.sql`COALESCE(like_count, 0) + 1`,
-        })
-        .eq("id", productId)
-
-      if (updateError) throw updateError
 
       return NextResponse.json({ success: true, liked: true })
     }

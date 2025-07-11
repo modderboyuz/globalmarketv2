@@ -35,6 +35,8 @@ export async function POST(request: NextRequest) {
       full_name: fullName,
       phone: phone,
       address: address,
+      delivery_address: address,
+      delivery_phone: phone,
       quantity: quantity,
       total_amount: totalAmount,
       status: "pending",
@@ -81,7 +83,7 @@ export async function GET(request: NextRequest) {
     const userId = searchParams.get("userId")
 
     if (sellerId) {
-      // Get orders for seller
+      // Get orders for seller using product relationship
       const { data: orders, error } = await supabase
         .from("orders")
         .select(`
@@ -93,7 +95,8 @@ export async function GET(request: NextRequest) {
             price,
             product_type,
             brand,
-            author
+            author,
+            seller_id
           ),
           users!orders_user_id_fkey (
             full_name,

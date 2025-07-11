@@ -7,73 +7,58 @@ export async function POST(request: NextRequest) {
     const { orderId, complaintText, userId } = body
 
     if (!orderId || !complaintText || !userId) {
-      return NextResponse.json({ error: "Barcha maydonlar to'ldirilishi kerak" }, { status: 400 })
+      return NextResponse.json({ error: "Barcha maydonlar talab qilinadi" }, { status: 400 })
     }
 
-    // Check if the order exists and belongs to the user
-    const { data: order, error: orderError } = await supabase
-      .from("orders")
-      .select("id, status")
-      .eq("id", orderId)
-      .eq("user_id", userId)
-      .single()
-
-    if (orderError || !order) {
-      return NextResponse.json({ error: "Buyurtma topilmadi yoki sizga tegishli emas" }, { status: 404 })
-    }
-
-    // Insert the complaint
-    const { data: complaint, error: complaintError } = await supabase
+    // Insert complaint
+    const { data, error } = await supabase
       .from("complaints")
       .insert({
-        order_id: orderId,
         user_id: userId,
+        order_id: orderId,
         complaint_text: complaintText,
         status: "pending",
       })
       .select()
       .single()
 
-    if (complaintError) {
-      console.error("Complaint creation error:", complaintError)
-      return NextResponse.json({ error: "Shikoyat yaratishda xatolik" }, { status: 500 })
-    }
+    if (error) throw error
 
-    return NextResponse.json({ success: true, complaint })
+    return NextResponse.json({ success: true, complaint: data })
   } catch (error) {
-    console.error("API Error:", error)
-    return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
+    console.error("Complaint API Error:", error)
+    return NextResponse.json({ error: "Shikoyat yuborishda xatolik" }, { status: 500 })
   }
 }
 
 export async function GET(request: NextRequest) {
   try {
-    const { data: complaints, error } = await supabase
+    const { searchParams } = new URL(request.url)
+    const userId = searchParams.get("userId")
+
+    if (!userId) {
+      return NextResponse.json({ error: "User ID talab qilinadi" }, { status: 400 })
+    }
+
+    const { data, error } = await supabase
       .from("complaints")
       .select(`
         *,
         orders (
           id,
-          products (
-            name
-          )
-        ),
-        users (
-          full_name,
-          email
+          total_amount,
+          products (name, image_url)
         )
       `)
+      .eq("user_id", userId)
       .order("created_at", { ascending: false })
 
-    if (error) {
-      console.error("Complaints fetch error:", error)
-      return NextResponse.json({ error: "Shikoyatlarni olishda xatolik" }, { status: 500 })
-    }
+    if (error) throw error
 
-    return NextResponse.json({ complaints: complaints || [] })
+    return NextResponse.json({ success: true, complaints: data || [] })
   } catch (error) {
-    console.error("API Error:", error)
-    return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
+    console.error("Complaints GET Error:", error)
+    return NextResponse.json({ error: "Shikoyatlarni olishda xatolik" }, { status: 500 })
   }
 }
 
