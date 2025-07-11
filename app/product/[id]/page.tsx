@@ -400,7 +400,7 @@ export default function ProductDetailPage() {
 
   const handleTelegramOrder = () => {
     if (product?.users?.username === "admin") {
-      const botUrl = `https://t.me/${process.env.NEXT_PUBLIC_BOT_USERNAME || "globalmarketshopbot"}?start=product_${productId}`
+      const botUrl = `https://t.me/${process.env.NEXT_PUBLIC_BOT_USERNAME || "globalmarketshopbot"}?start=order_${productId}`
       window.open(botUrl, "_blank")
     }
   }
