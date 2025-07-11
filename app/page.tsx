@@ -1,7 +1,6 @@
 "use client"
 
-import { Suspense, useState } from "react"
-import { createSupabaseClient } from "@/lib/supabase-server"
+import { Suspense, useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -10,6 +9,7 @@ import Link from "next/link"
 import Image from "next/image"
 import { AdBanner } from "@/components/layout/ad-banner"
 import { BookCategorySection } from "@/components/home/book-category-section"
+import { supabase } from "@/lib/supabase"
 
 interface Product {
   id: string
@@ -33,123 +33,6 @@ interface Category {
   slug: string
   icon: string
   sort_order: number
-}
-
-async function fetchData() {
-  const supabase = createSupabaseClient()
-
-  try {
-    // Fetch categories - only first 6 for initial display
-    const { data: categories, error: categoriesError } = await supabase
-      .from("categories")
-      .select("*")
-      .eq("is_active", true)
-      .order("sort_order")
-      .limit(6)
-
-    if (categoriesError) {
-      console.error("Categories error:", categoriesError)
-    }
-
-    // Fetch all categories for "show more" functionality
-    const { data: allCategories, error: allCategoriesError } = await supabase
-      .from("categories")
-      .select("*")
-      .eq("is_active", true)
-      .order("sort_order")
-
-    if (allCategoriesError) {
-      console.error("All categories error:", allCategoriesError)
-    }
-
-    // Fetch featured products
-    const { data: featuredProducts, error: featuredError } = await supabase
-      .from("products")
-      .select(`
-        *,
-        seller:users!products_seller_id_fkey(full_name, company_name, is_verified_seller)
-      `)
-      .eq("is_active", true)
-      .eq("is_approved", true)
-      .eq("is_featured", true)
-      .order("popularity_score", { ascending: false })
-      .limit(8)
-
-    if (featuredError) {
-      console.error("Featured products error:", featuredError)
-    }
-
-    // Fetch popular products
-    const { data: popularProducts, error: popularError } = await supabase
-      .from("products")
-      .select(`
-        *,
-        seller:users!products_seller_id_fkey(full_name, company_name, is_verified_seller)
-      `)
-      .eq("is_active", true)
-      .eq("is_approved", true)
-      .order("popularity_score", { ascending: false })
-      .limit(12)
-
-    if (popularError) {
-      console.error("Popular products error:", popularError)
-    }
-
-    // Fetch books specifically
-    const { data: books, error: booksError } = await supabase
-      .from("products")
-      .select(`
-        *,
-        seller:users!products_seller_id_fkey(full_name, company_name, is_verified_seller),
-        category:categories!products_category_id_fkey(name, slug)
-      `)
-      .eq("is_active", true)
-      .eq("is_approved", true)
-      .eq("product_type", "book")
-      .order("created_at", { ascending: false })
-      .limit(8)
-
-    if (booksError) {
-      console.error("Books error:", booksError)
-    }
-
-    // Fetch other products (non-books)
-    const { data: otherProducts, error: otherError } = await supabase
-      .from("products")
-      .select(`
-        *,
-        seller:users!products_seller_id_fkey(full_name, company_name, is_verified_seller),
-        category:categories!products_category_id_fkey(name, slug)
-      `)
-      .eq("is_active", true)
-      .eq("is_approved", true)
-      .neq("product_type", "book")
-      .order("created_at", { ascending: false })
-      .limit(8)
-
-    if (otherError) {
-      console.error("Other products error:", otherError)
-    }
-
-    return {
-      categories: categories || [],
-      allCategories: allCategories || [],
-      featuredProducts: featuredProducts || [],
-      popularProducts: popularProducts || [],
-      books: books || [],
-      otherProducts: otherProducts || [],
-    }
-  } catch (error) {
-    console.error("Database error:", error)
-    return {
-      categories: [],
-      allCategories: [],
-      featuredProducts: [],
-      popularProducts: [],
-      books: [],
-      otherProducts: [],
-    }
-  }
 }
 
 function ProductCard({ product }: { product: Product }) {
@@ -274,8 +157,122 @@ function CategoriesSection({ categories, allCategories }: { categories: Category
   )
 }
 
-export default async function HomePage() {
-  const data = await fetchData()
+export default function HomePage() {
+  const [data, setData] = useState({
+    categories: [] as Category[],
+    allCategories: [] as Category[],
+    featuredProducts: [] as Product[],
+    popularProducts: [] as Product[],
+    books: [] as Product[],
+    otherProducts: [] as Product[],
+  })
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetchData()
+  }, [])
+
+  const fetchData = async () => {
+    try {
+      // Fetch categories - only first 6 for initial display
+      const { data: categories } = await supabase
+        .from("categories")
+        .select("*")
+        .eq("is_active", true)
+        .order("sort_order")
+        .limit(6)
+
+      // Fetch all categories for "show more" functionality
+      const { data: allCategories } = await supabase
+        .from("categories")
+        .select("*")
+        .eq("is_active", true)
+        .order("sort_order")
+
+      // Fetch featured products
+      const { data: featuredProducts } = await supabase
+        .from("products")
+        .select(`
+          *,
+          seller:users!products_seller_id_fkey(full_name, company_name, is_verified_seller)
+        `)
+        .eq("is_active", true)
+        .eq("is_approved", true)
+        .eq("is_featured", true)
+        .order("popularity_score", { ascending: false })
+        .limit(8)
+
+      // Fetch popular products
+      const { data: popularProducts } = await supabase
+        .from("products")
+        .select(`
+          *,
+          seller:users!products_seller_id_fkey(full_name, company_name, is_verified_seller)
+        `)
+        .eq("is_active", true)
+        .eq("is_approved", true)
+        .order("popularity_score", { ascending: false })
+        .limit(12)
+
+      // Fetch books specifically
+      const { data: books } = await supabase
+        .from("products")
+        .select(`
+          *,
+          seller:users!products_seller_id_fkey(full_name, company_name, is_verified_seller),
+          category:categories!products_category_id_fkey(name, slug)
+        `)
+        .eq("is_active", true)
+        .eq("is_approved", true)
+        .eq("product_type", "book")
+        .order("created_at", { ascending: false })
+        .limit(8)
+
+      // Fetch other products (non-books)
+      const { data: otherProducts } = await supabase
+        .from("products")
+        .select(`
+          *,
+          seller:users!products_seller_id_fkey(full_name, company_name, is_verified_seller),
+          category:categories!products_category_id_fkey(name, slug)
+        `)
+        .eq("is_active", true)
+        .eq("is_approved", true)
+        .neq("product_type", "book")
+        .order("created_at", { ascending: false })
+        .limit(8)
+
+      setData({
+        categories: categories || [],
+        allCategories: allCategories || [],
+        featuredProducts: featuredProducts || [],
+        popularProducts: popularProducts || [],
+        books: books || [],
+        otherProducts: otherProducts || [],
+      })
+    } catch (error) {
+      console.error("Database error:", error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <div className="animate-pulse space-y-8">
+          <div className="h-32 bg-gray-200 rounded"></div>
+          <div className="container mx-auto px-4">
+            <div className="grid grid-cols-3 md:grid-cols-6 gap-4">
+              {[...Array(6)].map((_, i) => (
+                <div key={i} className="h-24 bg-gray-200 rounded"></div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">

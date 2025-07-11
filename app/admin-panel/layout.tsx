@@ -7,20 +7,30 @@ import { useRouter, usePathname } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Home,
   Package,
   Users,
   FileText,
   Settings,
-  BarChart3,
   ShoppingCart,
   Menu,
   X,
   Shield,
   Bell,
-  Search,
+  LogOut,
+  Store,
+  UserCheck,
+  UserX,
+  Crown,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
@@ -30,6 +40,7 @@ interface AdminUser {
   full_name: string
   email: string
   is_admin: boolean
+  avatar_url?: string
 }
 
 const sidebarItems = [
@@ -40,28 +51,87 @@ const sidebarItems = [
   },
   {
     title: "Mahsulotlar",
-    href: "/admin-panel/products-management",
     icon: Package,
+    children: [
+      {
+        title: "GlobalMarket mahsulotlari",
+        href: "/admin-panel/products/globalmarket",
+        icon: Package,
+      },
+      {
+        title: "Boshqa sotuvchilar",
+        href: "/admin-panel/products/others",
+        icon: Store,
+      },
+    ],
   },
   {
     title: "Buyurtmalar",
-    href: "/admin-panel/orders",
     icon: ShoppingCart,
+    children: [
+      {
+        title: "GlobalMarket buyurtmalari",
+        href: "/admin-panel/orders/globalmarket",
+        icon: ShoppingCart,
+      },
+      {
+        title: "Boshqa sotuvchilarga",
+        href: "/admin-panel/orders/others",
+        icon: Store,
+      },
+    ],
   },
   {
     title: "Foydalanuvchilar",
-    href: "/admin-panel/users",
     icon: Users,
+    children: [
+      {
+        title: "Barchasini boshqarish",
+        href: "/admin-panel/users",
+        icon: Users,
+      },
+      {
+        title: "Sotuvchilarni boshqarish",
+        href: "/admin-panel/users/sellers",
+        icon: UserCheck,
+      },
+      {
+        title: "Mijozlarni boshqarish",
+        href: "/admin-panel/users/customers",
+        icon: UserX,
+      },
+      {
+        title: "Adminlarni boshqarish",
+        href: "/admin-panel/users/admins",
+        icon: Crown,
+      },
+    ],
   },
   {
     title: "Arizalar",
-    href: "/admin-panel/applications",
     icon: FileText,
-  },
-  {
-    title: "Statistika",
-    href: "/admin-panel/analytics",
-    icon: BarChart3,
+    children: [
+      {
+        title: "Barcha arizalar",
+        href: "/admin-panel/applications",
+        icon: FileText,
+      },
+      {
+        title: "Sotuvchilik arizalari",
+        href: "/admin-panel/applications/seller",
+        icon: UserCheck,
+      },
+      {
+        title: "Mahsulot sotish arizalari",
+        href: "/admin-panel/applications/product",
+        icon: Package,
+      },
+      {
+        title: "Murojaatlar",
+        href: "/admin-panel/applications/contact",
+        icon: Bell,
+      },
+    ],
   },
   {
     title: "Sozlamalar",
@@ -80,6 +150,7 @@ export default function AdminPanelLayout({
   const [user, setUser] = useState<AdminUser | null>(null)
   const [loading, setLoading] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [expandedItems, setExpandedItems] = useState<string[]>([])
   const [stats, setStats] = useState({
     pendingApplications: 0,
     newMessages: 0,
@@ -104,7 +175,7 @@ export default function AdminPanelLayout({
 
       const { data: userData, error } = await supabase
         .from("users")
-        .select("id, full_name, email, is_admin")
+        .select("id, full_name, email, is_admin, avatar_url")
         .eq("id", currentUser.id)
         .single()
 
@@ -126,7 +197,7 @@ export default function AdminPanelLayout({
   const fetchStats = async () => {
     try {
       const [applicationsResult, ordersResult] = await Promise.all([
-        supabase.from("sell_requests").select("*", { count: "exact", head: true }).eq("status", "pending"),
+        supabase.from("seller_applications").select("*", { count: "exact", head: true }).eq("status", "pending"),
         supabase.from("orders").select("*", { count: "exact", head: true }).eq("status", "pending"),
       ])
 
@@ -140,9 +211,18 @@ export default function AdminPanelLayout({
     }
   }
 
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    router.push("/")
+  }
+
+  const toggleExpanded = (title: string) => {
+    setExpandedItems((prev) => (prev.includes(title) ? prev.filter((item) => item !== title) : [...prev, title]))
+  }
+
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p>Yuklanmoqda...</p>
@@ -157,21 +237,70 @@ export default function AdminPanelLayout({
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Mobile Header */}
-      <div className="lg:hidden bg-white border-b px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => setSidebarOpen(true)}>
+      {/* Top Bar */}
+      <div className="bg-white border-b px-4 lg:px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="sm" className="lg:hidden" onClick={() => setSidebarOpen(true)}>
             <Menu className="h-5 w-5" />
           </Button>
-          <h1 className="font-semibold">Admin Panel</h1>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
+              <Shield className="h-5 w-5 text-white" />
+            </div>
+            <h1 className="font-bold text-xl">Admin Panel</h1>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm">
+
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="sm" className="relative">
             <Bell className="h-5 w-5" />
+            {stats.pendingApplications > 0 && (
+              <Badge className="absolute -top-2 -right-2 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs">
+                {stats.pendingApplications}
+              </Badge>
+            )}
           </Button>
-          <Button variant="ghost" size="sm">
-            <Search className="h-5 w-5" />
-          </Button>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+                <Avatar className="h-8 w-8">
+                  <AvatarImage src={user.avatar_url || "/placeholder.svg"} alt={user.full_name} />
+                  <AvatarFallback>{user.full_name?.charAt(0) || user.email?.charAt(0)}</AvatarFallback>
+                </Avatar>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-56" align="end" forceMount>
+              <div className="flex items-center justify-start gap-2 p-2">
+                <div className="flex flex-col space-y-1 leading-none">
+                  <p className="font-medium">{user.full_name}</p>
+                  <p className="w-[200px] truncate text-sm text-muted-foreground">{user.email}</p>
+                  <Badge variant="destructive" className="text-xs w-fit">
+                    <Shield className="h-3 w-3 mr-1" />
+                    Admin
+                  </Badge>
+                </div>
+              </div>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link href="/profile" className="flex items-center">
+                  <Settings className="mr-2 h-4 w-4" />
+                  <span>Profil</span>
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/" className="flex items-center">
+                  <Home className="mr-2 h-4 w-4" />
+                  <span>Bosh sahifaga qaytish</span>
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleLogout}>
+                <LogOut className="mr-2 h-4 w-4" />
+                <span>Chiqish</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -180,47 +309,58 @@ export default function AdminPanelLayout({
         <div
           className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r transform transition-transform duration-200 ease-in-out lg:translate-x-0 lg:static lg:inset-0 ${
             sidebarOpen ? "translate-x-0" : "-translate-x-full"
-          }`}
+          } mt-[73px] lg:mt-0`}
         >
-          <div className="flex flex-col h-full">
-            {/* Sidebar Header */}
-            <div className="p-6 border-b">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-                    <Shield className="h-5 w-5 text-white" />
-                  </div>
-                  <div>
-                    <h2 className="font-bold text-lg">Admin Panel</h2>
-                    <p className="text-sm text-gray-500">GlobalMarket</p>
-                  </div>
-                </div>
-                <Button variant="ghost" size="sm" className="lg:hidden" onClick={() => setSidebarOpen(false)}>
-                  <X className="h-5 w-5" />
-                </Button>
-              </div>
-            </div>
-
-            {/* User Info */}
-            <div className="p-4 border-b">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
-                  <span className="text-white font-bold">{user.full_name?.charAt(0) || user.email?.charAt(0)}</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium truncate">{user.full_name}</p>
-                  <p className="text-sm text-gray-500 truncate">{user.email}</p>
-                  <Badge variant="secondary" className="text-xs mt-1">
-                    <Shield className="h-3 w-3 mr-1" />
-                    Admin
-                  </Badge>
-                </div>
-              </div>
+          <div className="flex flex-col h-full pt-4">
+            {/* Close button for mobile */}
+            <div className="flex justify-end px-4 lg:hidden">
+              <Button variant="ghost" size="sm" onClick={() => setSidebarOpen(false)}>
+                <X className="h-5 w-5" />
+              </Button>
             </div>
 
             {/* Navigation */}
-            <nav className="flex-1 p-4 space-y-2">
+            <nav className="flex-1 px-4 space-y-2">
               {sidebarItems.map((item) => {
+                const isExpanded = expandedItems.includes(item.title)
+                const hasChildren = item.children && item.children.length > 0
+
+                if (hasChildren) {
+                  return (
+                    <div key={item.title}>
+                      <Button
+                        variant="ghost"
+                        className="w-full justify-start text-left"
+                        onClick={() => toggleExpanded(item.title)}
+                      >
+                        <item.icon className="h-5 w-5 mr-3" />
+                        <span className="flex-1">{item.title}</span>
+                        <span className={`transform transition-transform ${isExpanded ? "rotate-90" : ""}`}>▶</span>
+                      </Button>
+                      {isExpanded && (
+                        <div className="ml-8 space-y-1 mt-1">
+                          {item.children.map((child) => {
+                            const isActive = pathname === child.href
+                            return (
+                              <Link
+                                key={child.href}
+                                href={child.href}
+                                onClick={() => setSidebarOpen(false)}
+                                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                                  isActive ? "bg-blue-100 text-blue-700" : "text-gray-700 hover:bg-gray-100"
+                                }`}
+                              >
+                                <child.icon className="h-4 w-4" />
+                                <span>{child.title}</span>
+                              </Link>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )
+                }
+
                 const isActive = pathname === item.href
                 return (
                   <Link
@@ -247,18 +387,6 @@ export default function AdminPanelLayout({
                 )
               })}
             </nav>
-
-            <Separator />
-
-            {/* Footer */}
-            <div className="p-4">
-              <Link href="/">
-                <Button variant="outline" className="w-full bg-transparent">
-                  <Home className="h-4 w-4 mr-2" />
-                  Bosh sahifaga qaytish
-                </Button>
-              </Link>
-            </div>
           </div>
         </div>
 

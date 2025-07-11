@@ -62,6 +62,7 @@ export function Header() {
   const pathname = usePathname()
 
   const isSellerRoute = pathname?.startsWith("/seller-panel")
+  const isAdminRoute = pathname?.startsWith("/admin-panel")
 
   useEffect(() => {
     checkUser()
@@ -76,7 +77,7 @@ export function Header() {
 
   const fetchCompanyInfo = async () => {
     try {
-      const { data } = await supabase.from("company").select("name, logo_url, favicon_url").single()
+      const { data } = await supabase.from("company").select("name, logo_url, favicon_url").limit(1).single()
       if (data) {
         setCompany(data)
         // Update favicon
@@ -147,6 +148,11 @@ export function Header() {
     { href: "/about", label: "Biz haqimizda", icon: Info },
     { href: "/contact", label: "Aloqa", icon: Phone },
   ]
+
+  // Don't show header on admin panel
+  if (isAdminRoute) {
+    return null
+  }
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60">

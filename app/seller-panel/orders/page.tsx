@@ -56,7 +56,7 @@ interface Order {
     product_type: string
     brand: string
     author: string
-  }
+  } | null
   users: {
     full_name: string
     email: string
@@ -159,7 +159,7 @@ export default function SellerOrdersPage() {
         (order) =>
           order.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
           order.phone?.includes(searchQuery) ||
-          order.products.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          order.products?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
           order.id.includes(searchQuery),
       )
     }
@@ -286,7 +286,7 @@ export default function SellerOrdersPage() {
           order.id.slice(-8),
           order.full_name || "",
           order.phone || "",
-          order.products.name || "",
+          order.products?.name || "",
           order.quantity,
           order.total_amount,
           order.status,
@@ -426,8 +426,8 @@ export default function SellerOrdersPage() {
                     <div className="flex items-start justify-between mb-4">
                       <div className="flex items-start gap-4">
                         <img
-                          src={order.products.image_url || "/placeholder.svg?height=80&width=60"}
-                          alt={order.products.name}
+                          src={order.products?.image_url || "/placeholder.svg?height=80&width=60"}
+                          alt={order.products?.name || "Mahsulot"}
                           className="w-16 h-20 object-cover rounded-lg"
                         />
                         <div className="flex-1">
@@ -436,7 +436,7 @@ export default function SellerOrdersPage() {
                             {getStatusBadge(order)}
                           </div>
                           <p className="text-sm text-gray-600 mb-1">
-                            <strong>Mahsulot:</strong> {order.products.name}
+                            <strong>Mahsulot:</strong> {order.products?.name || "Noma'lum"}
                           </p>
                           <p className="text-sm text-gray-600 mb-1">
                             <strong>Mijoz:</strong> {order.full_name}
@@ -646,19 +646,19 @@ export default function SellerOrdersPage() {
                 <h4 className="font-semibold mb-2">Mahsulot</h4>
                 <div className="flex gap-3 p-3 bg-gray-50 rounded-lg">
                   <img
-                    src={selectedOrder.products.image_url || "/placeholder.svg?height=80&width=60"}
-                    alt={selectedOrder.products.name}
+                    src={selectedOrder.products?.image_url || "/placeholder.svg?height=80&width=60"}
+                    alt={selectedOrder.products?.name || "Mahsulot"}
                     className="w-16 h-20 object-cover rounded-lg"
                   />
                   <div>
-                    <h5 className="font-medium">{selectedOrder.products.name}</h5>
-                    {selectedOrder.products.author && (
+                    <h5 className="font-medium">{selectedOrder.products?.name || "Noma'lum mahsulot"}</h5>
+                    {selectedOrder.products?.author && (
                       <p className="text-sm text-gray-600">Muallif: {selectedOrder.products.author}</p>
                     )}
-                    {selectedOrder.products.brand && (
+                    {selectedOrder.products?.brand && (
                       <p className="text-sm text-gray-600">Brend: {selectedOrder.products.brand}</p>
                     )}
-                    <p className="text-sm text-gray-600">Narx: {formatPrice(selectedOrder.products.price)}</p>
+                    <p className="text-sm text-gray-600">Narx: {formatPrice(selectedOrder.products?.price || 0)}</p>
                   </div>
                 </div>
               </div>

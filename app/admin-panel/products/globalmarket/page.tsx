@@ -56,7 +56,7 @@ interface Product {
   }
 }
 
-export default function SellerProductsPage() {
+export default function AdminGlobalMarketProductsPage() {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [products, setProducts] = useState<Product[]>([])
@@ -73,14 +73,14 @@ export default function SellerProductsPage() {
   })
 
   useEffect(() => {
-    checkSellerAccess()
+    checkAdminAccess()
   }, [])
 
   useEffect(() => {
     filterProducts()
   }, [products, searchQuery, statusFilter])
 
-  const checkSellerAccess = async () => {
+  const checkAdminAccess = async () => {
     try {
       const {
         data: { user: currentUser },
@@ -93,8 +93,8 @@ export default function SellerProductsPage() {
 
       const { data: userData } = await supabase.from("users").select("*").eq("id", currentUser.id).single()
 
-      if (!userData?.is_verified_seller) {
-        toast.error("Sizda sotuvchi huquqi yo'q")
+      if (!userData?.is_admin) {
+        toast.error("Sizda admin huquqi yo'q")
         router.push("/")
         return
       }
@@ -102,14 +102,14 @@ export default function SellerProductsPage() {
       setUser(userData)
       await fetchProducts(currentUser.id)
     } catch (error) {
-      console.error("Error checking seller access:", error)
+      console.error("Error checking admin access:", error)
       router.push("/")
     } finally {
       setLoading(false)
     }
   }
 
-  const fetchProducts = async (sellerId: string) => {
+  const fetchProducts = async (adminId: string) => {
     try {
       const { data, error } = await supabase
         .from("products")
@@ -117,7 +117,7 @@ export default function SellerProductsPage() {
           *,
           categories (name, icon)
         `)
-        .eq("seller_id", sellerId)
+        .eq("seller_id", adminId)
         .order("created_at", { ascending: false })
 
       if (error) throw error
@@ -143,7 +143,6 @@ export default function SellerProductsPage() {
   const filterProducts = () => {
     let filtered = products
 
-    // Filter by search query
     if (searchQuery) {
       filtered = filtered.filter(
         (product) =>
@@ -152,7 +151,6 @@ export default function SellerProductsPage() {
       )
     }
 
-    // Filter by status
     if (statusFilter !== "all") {
       if (statusFilter === "active") {
         filtered = filtered.filter((product) => product.is_active && product.is_approved)
@@ -244,11 +242,11 @@ export default function SellerProductsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold gradient-text">Mahsulotlarim</h1>
-          <p className="text-gray-600">Sizning barcha mahsulotlaringizni boshqaring</p>
+          <h1 className="text-3xl font-bold gradient-text">GlobalMarket Mahsulotlari</h1>
+          <p className="text-gray-600">GlobalMarket tomonidan sotiladigan mahsulotlar</p>
         </div>
         <Button asChild className="btn-primary">
-          <Link href="/seller-panel/add-product">
+          <Link href="/admin-panel/products/add">
             <Plus className="h-4 w-4 mr-2" />
             Yangi mahsulot
           </Link>
@@ -328,7 +326,7 @@ export default function SellerProductsPage() {
               <h3 className="text-xl font-semibold mb-2">Mahsulotlar yo'q</h3>
               <p className="text-gray-600 mb-6">Hozircha hech qanday mahsulot qo'shmagansiz</p>
               <Button asChild className="btn-primary">
-                <Link href="/seller-panel/add-product">
+                <Link href="/admin-panel/products/add">
                   <Plus className="h-4 w-4 mr-2" />
                   Birinchi mahsulotni qo'shish
                 </Link>
@@ -367,7 +365,7 @@ export default function SellerProductsPage() {
                             </Link>
                           </DropdownMenuItem>
                           <DropdownMenuItem asChild>
-                            <Link href={`/seller-panel/products/${product.id}/edit`}>
+                            <Link href={`/admin-panel/products/${product.id}/edit`}>
                               <Edit className="h-4 w-4 mr-2" />
                               Tahrirlash
                             </Link>
@@ -440,7 +438,7 @@ export default function SellerProductsPage() {
                         </Link>
                       </Button>
                       <Button asChild className="flex-1 btn-primary">
-                        <Link href={`/seller-panel/products/${product.id}/edit`}>
+                        <Link href={`/admin-panel/products/${product.id}/edit`}>
                           <Edit className="h-4 w-4 mr-2" />
                           Tahrirlash
                         </Link>

@@ -18,7 +18,7 @@ import Link from "next/link"
 
 interface Category {
   id: string
-  name_uz: string
+  name: string
   icon: string
 }
 
@@ -90,7 +90,11 @@ export default function AddProduct() {
 
   const fetchCategories = async () => {
     try {
-      const { data, error } = await supabase.from("categories").select("*").eq("is_active", true).order("sort_order")
+      const { data, error } = await supabase
+        .from("categories")
+        .select("id, name, icon")
+        .eq("is_active", true)
+        .order("sort_order")
 
       if (error) throw error
       setCategories(data || [])
@@ -226,7 +230,7 @@ export default function AddProduct() {
                   <SelectContent>
                     {categories.map((category) => (
                       <SelectItem key={category.id} value={category.id}>
-                        {category.icon} {category.name_uz}
+                        {category.icon} {category.name}
                       </SelectItem>
                     ))}
                   </SelectContent>

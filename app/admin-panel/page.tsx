@@ -26,9 +26,14 @@ import { toast } from "sonner"
 
 interface AdminStats {
   totalUsers: number
+  totalCustomers: number
   totalSellers: number
   totalProducts: number
+  globalMarketProducts: number
+  otherSellerProducts: number
   totalOrders: number
+  globalMarketOrders: number
+  otherSellerOrders: number
   pendingApplications: number
   recentUsers: any[]
   recentOrders: any[]
@@ -40,9 +45,14 @@ export default function AdminPanelPage() {
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState<AdminStats>({
     totalUsers: 0,
+    totalCustomers: 0,
     totalSellers: 0,
     totalProducts: 0,
+    globalMarketProducts: 0,
+    otherSellerProducts: 0,
     totalOrders: 0,
+    globalMarketOrders: 0,
+    otherSellerOrders: 0,
     pendingApplications: 0,
     recentUsers: [],
     recentOrders: [],
@@ -72,7 +82,7 @@ export default function AdminPanelPage() {
       }
 
       setUser(userData)
-      await fetchStats()
+      await fetchStats(userData.id)
     } catch (error) {
       console.error("Error checking admin access:", error)
       router.push("/")
@@ -81,14 +91,74 @@ export default function AdminPanelPage() {
     }
   }
 
-  const fetchStats = async () => {
+  const fetchStats = async (adminId: string) => {
     try {
-      const response = await fetch("/api/admin/stats")
-      const result = await response.json()
+      // Get all stats in parallel
+      const [
+        usersResult,
+        customersResult,
+        sellersResult,
+        productsResult,
+        globalMarketProductsResult,
+        ordersResult,
+        globalMarketOrdersResult,
+        pendingApplicationsResult,
+        recentUsersResult,
+        recentOrdersResult,
+      ] = await Promise.all([
+        supabase.from("users").select("*", { count: "exact", head: true }),
+        supabase
+          .from("users")
+          .select("*", { count: "exact", head: true })
+          .eq("is_seller", false)
+          .eq("is_verified_seller", false),
+        supabase.from("users").select("*", { count: "exact", head: true }).eq("is_verified_seller", true),
+        supabase.from("products").select("*", { count: "exact", head: true }),
+        supabase.from("products").select("*", { count: "exact", head: true }).eq("seller_id", adminId),
+        supabase.from("orders").select("*", { count: "exact", head: true }),
+        supabase
+          .from("orders")
+          .select("*, products!inner(seller_id)", { count: "exact", head: true })
+          .eq("products.seller_id", adminId),
+        Promise.all([
+          supabase.from("seller_applications").select("*", { count: "exact", head: true }).eq("status", "pending"),
+          supabase.from("product_applications").select("*", { count: "exact", head: true }).eq("status", "pending"),
+          supabase.from("contact_messages").select("*", { count: "exact", head: true }).eq("status", "pending"),
+        ]),
+        supabase
+          .from("users")
+          .select("*")
+          .gte("created_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
+          .order("created_at", { ascending: false })
+          .limit(5),
+        supabase
+          .from("orders")
+          .select(`*, products(name), users(full_name)`)
+          .in("status", ["completed", "cancelled"])
+          .gte("updated_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
+          .order("updated_at", { ascending: false })
+          .limit(10),
+      ])
 
-      if (result.success) {
-        setStats(result.stats)
+      const newStats = {
+        totalUsers: usersResult.count || 0,
+        totalCustomers: customersResult.count || 0,
+        totalSellers: sellersResult.count || 0,
+        totalProducts: productsResult.count || 0,
+        globalMarketProducts: globalMarketProductsResult.count || 0,
+        otherSellerProducts: (productsResult.count || 0) - (globalMarketProductsResult.count || 0),
+        totalOrders: ordersResult.count || 0,
+        globalMarketOrders: globalMarketOrdersResult.count || 0,
+        otherSellerOrders: (ordersResult.count || 0) - (globalMarketOrdersResult.count || 0),
+        pendingApplications:
+          (pendingApplicationsResult[0].count || 0) +
+          (pendingApplicationsResult[1].count || 0) +
+          (pendingApplicationsResult[2].count || 0),
+        recentUsers: recentUsersResult.data || [],
+        recentOrders: recentOrdersResult.data || [],
       }
+
+      setStats(newStats)
     } catch (error) {
       console.error("Error fetching stats:", error)
       toast.error("Statistikani olishda xatolik")
@@ -153,7 +223,7 @@ export default function AdminPanelPage() {
         <p className="text-gray-600">Tizimni boshqarish va nazorat qilish</p>
       </div>
 
-      {/* Stats Cards */}
+      {/* Main Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <Link href="/admin-panel/users">
           <Card className="card-beautiful hover:shadow-lg transition-all duration-300 cursor-pointer group">
@@ -161,36 +231,41 @@ export default function AdminPanelPage() {
               <Users className="h-8 w-8 text-blue-600 mx-auto mb-2 group-hover:scale-110 transition-transform" />
               <div className="text-2xl font-bold">{stats.totalUsers}</div>
               <div className="text-sm text-gray-600">Jami foydalanuvchilar</div>
+              <div className="text-xs text-gray-500 mt-1">
+                Sotuvchilar: {stats.totalSellers} | Mijozlar: {stats.totalCustomers}
+              </div>
             </CardContent>
           </Card>
         </Link>
 
-        <Link href="/admin-panel/sellers">
-          <Card className="card-beautiful hover:shadow-lg transition-all duration-300 cursor-pointer group">
-            <CardContent className="p-6 text-center">
-              <Store className="h-8 w-8 text-green-600 mx-auto mb-2 group-hover:scale-110 transition-transform" />
-              <div className="text-2xl font-bold">{stats.totalSellers}</div>
-              <div className="text-sm text-gray-600">Sotuvchilar</div>
-            </CardContent>
-          </Card>
-        </Link>
+        <Card className="card-beautiful">
+          <CardContent className="p-6 text-center">
+            <Package className="h-8 w-8 text-purple-600 mx-auto mb-2" />
+            <div className="text-2xl font-bold">{stats.totalProducts}</div>
+            <div className="text-sm text-gray-600">Jami mahsulotlar</div>
+            <div className="text-xs text-gray-500 mt-1">
+              GlobalMarket: {stats.globalMarketProducts} | Boshqalar: {stats.otherSellerProducts}
+            </div>
+          </CardContent>
+        </Card>
 
-        <Link href="/admin-panel/products">
-          <Card className="card-beautiful hover:shadow-lg transition-all duration-300 cursor-pointer group">
-            <CardContent className="p-6 text-center">
-              <Package className="h-8 w-8 text-purple-600 mx-auto mb-2 group-hover:scale-110 transition-transform" />
-              <div className="text-2xl font-bold">{stats.totalProducts}</div>
-              <div className="text-sm text-gray-600">Mahsulotlar</div>
-            </CardContent>
-          </Card>
-        </Link>
+        <Card className="card-beautiful">
+          <CardContent className="p-6 text-center">
+            <ShoppingCart className="h-8 w-8 text-orange-600 mx-auto mb-2" />
+            <div className="text-2xl font-bold">{stats.totalOrders}</div>
+            <div className="text-sm text-gray-600">Jami buyurtmalar</div>
+            <div className="text-xs text-gray-500 mt-1">
+              GlobalMarket: {stats.globalMarketOrders} | Boshqalar: {stats.otherSellerOrders}
+            </div>
+          </CardContent>
+        </Card>
 
-        <Link href="/admin-panel/orders">
+        <Link href="/admin-panel/applications">
           <Card className="card-beautiful hover:shadow-lg transition-all duration-300 cursor-pointer group">
             <CardContent className="p-6 text-center">
-              <ShoppingCart className="h-8 w-8 text-orange-600 mx-auto mb-2 group-hover:scale-110 transition-transform" />
-              <div className="text-2xl font-bold">{stats.totalOrders}</div>
-              <div className="text-sm text-gray-600">Buyurtmalar</div>
+              <FileText className="h-8 w-8 text-red-600 mx-auto mb-2 group-hover:scale-110 transition-transform" />
+              <div className="text-2xl font-bold">{stats.pendingApplications}</div>
+              <div className="text-sm text-gray-600">Kutilayotgan arizalar</div>
             </CardContent>
           </Card>
         </Link>
