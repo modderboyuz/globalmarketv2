@@ -126,9 +126,47 @@ export default function SearchPage() {
 
       // Apply search filter with improved fuzzy matching
       if (searchQuery) {
-        query = query.or(
-          `name.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%,author.ilike.%${searchQuery}%,brand.ilike.%${searchQuery}%`,
-        )
+        // First try exact matches
+        const exactQuery = supabase
+          .from("products")
+          .select(`
+            *,
+            categories (
+              name,
+              icon
+            ),
+            users (
+              full_name,
+              company_name,
+              is_verified_seller,
+              seller_rating
+            )
+          `)
+          .eq("is_active", true)
+          .eq("is_approved", true)
+          .gt("stock_quantity", 0)
+          .or(
+            `name.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%,author.ilike.%${searchQuery}%,brand.ilike.%${searchQuery}%`,
+          )
+
+        const { data: exactResults } = await exactQuery
+
+        if (exactResults && exactResults.length > 0) {
+          query = exactQuery
+        } else {
+          // If no exact matches, try partial matches with individual words
+          const words = searchQuery.split(" ").filter((word) => word.length > 1)
+          if (words.length > 0) {
+            const partialConditions = words
+              .map(
+                (word) =>
+                  `name.ilike.%${word}%,description.ilike.%${word}%,author.ilike.%${word}%,brand.ilike.%${word}%`,
+              )
+              .join(",")
+
+            query = query.or(partialConditions)
+          }
+        }
       }
 
       // Apply category filter

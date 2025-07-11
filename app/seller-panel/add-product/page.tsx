@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -18,7 +18,7 @@ import Link from "next/link"
 
 interface Category {
   id: string
-  name: string
+  name_uz: string
   icon: string
 }
 
@@ -38,7 +38,6 @@ interface ProductData {
 
 export default function AddProduct() {
   const router = useRouter()
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const [user, setUser] = useState<any>(null)
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(false)
@@ -181,7 +180,7 @@ export default function AddProduct() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 p-4">
+    <div className="max-w-4xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
         <Link href="/seller-panel/products">
@@ -227,7 +226,7 @@ export default function AddProduct() {
                   <SelectContent>
                     {categories.map((category) => (
                       <SelectItem key={category.id} value={category.id}>
-                        {category.icon} {category.name}
+                        {category.icon} {category.name_uz}
                       </SelectItem>
                     ))}
                   </SelectContent>

@@ -1,13 +1,14 @@
 "use client"
 
-import { Suspense } from "react"
+import { Suspense, useState } from "react"
 import { createSupabaseClient } from "@/lib/supabase-server"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Star, Heart, ShoppingCart, Phone, MapPin, Mail } from "lucide-react"
+import { Star, Heart, ShoppingCart, Phone, MapPin, Mail, ChevronDown, ChevronUp } from "lucide-react"
 import Link from "next/link"
 import Image from "next/image"
+import { AdBanner } from "@/components/layout/ad-banner"
 import { BookCategorySection } from "@/components/home/book-category-section"
 
 interface Product {
@@ -48,6 +49,17 @@ async function fetchData() {
 
     if (categoriesError) {
       console.error("Categories error:", categoriesError)
+    }
+
+    // Fetch all categories for "show more" functionality
+    const { data: allCategories, error: allCategoriesError } = await supabase
+      .from("categories")
+      .select("*")
+      .eq("is_active", true)
+      .order("sort_order")
+
+    if (allCategoriesError) {
+      console.error("All categories error:", allCategoriesError)
     }
 
     // Fetch featured products
@@ -121,6 +133,7 @@ async function fetchData() {
 
     return {
       categories: categories || [],
+      allCategories: allCategories || [],
       featuredProducts: featuredProducts || [],
       popularProducts: popularProducts || [],
       books: books || [],
@@ -130,6 +143,7 @@ async function fetchData() {
     console.error("Database error:", error)
     return {
       categories: [],
+      allCategories: [],
       featuredProducts: [],
       popularProducts: [],
       books: [],
@@ -227,15 +241,35 @@ function CategoryCard({ category }: { category: Category }) {
   )
 }
 
-function CategoriesSection({ categories }: { categories: Category[] }) {
+function CategoriesSection({ categories, allCategories }: { categories: Category[]; allCategories: Category[] }) {
+  const [showAll, setShowAll] = useState(false)
+  const displayCategories = showAll ? allCategories : categories
+
   return (
     <section className="container mx-auto px-4 py-6 sm:py-8">
       <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">📂 Kategoriyalar</h2>
       <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
-        {categories.map((category) => (
+        {displayCategories.map((category) => (
           <CategoryCard key={category.id} category={category} />
         ))}
       </div>
+      {allCategories.length > 6 && (
+        <div className="text-center mt-6">
+          <Button variant="outline" onClick={() => setShowAll(!showAll)} className="bg-transparent">
+            {showAll ? (
+              <>
+                <ChevronUp className="h-4 w-4 mr-2" />
+                Kamroq ko'rsatish
+              </>
+            ) : (
+              <>
+                <ChevronDown className="h-4 w-4 mr-2" />
+                Boshqa kategoriyalar
+              </>
+            )}
+          </Button>
+        </div>
+      )}
     </section>
   )
 }
@@ -245,34 +279,13 @@ export default async function HomePage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Simple Hero Banner */}
-      <section className="bg-gradient-to-r from-blue-600 to-purple-600 text-white py-12 sm:py-16">
-        <div className="container mx-auto px-4 text-center">
-          <h1 className="text-3xl sm:text-5xl font-bold mb-4">GlobalMarket</h1>
-          <p className="text-lg sm:text-xl mb-8 max-w-2xl mx-auto">
-            Qashqadaryo viloyatining eng yirik onlayn bozori. Kitoblar, maktab va ofis buyumlari va boshqa mahsulotlar.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link href="/products">
-              <Button size="lg" className="bg-white text-blue-600 hover:bg-gray-100">
-                Mahsulotlarni ko'rish
-              </Button>
-            </Link>
-            <Link href="/contact">
-              <Button
-                size="lg"
-                variant="outline"
-                className="border-white text-white hover:bg-white hover:text-blue-600 bg-transparent"
-              >
-                Biz bilan bog'laning
-              </Button>
-            </Link>
-          </div>
-        </div>
-      </section>
+      {/* Ad Banner */}
+      <AdBanner />
 
       {/* Categories */}
-      {data.categories.length > 0 && <CategoriesSection categories={data.categories} />}
+      {data.categories.length > 0 && (
+        <CategoriesSection categories={data.categories} allCategories={data.allCategories} />
+      )}
 
       {/* Featured Products */}
       {data.featuredProducts.length > 0 && (
