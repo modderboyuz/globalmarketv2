@@ -51,8 +51,7 @@ interface Product {
   image_url: string
   category_id: string
   order_count: number
-  stock_quantity: number // Initial stock
-  remaining_stock: number // Calculated remaining stock
+  stock_quantity: number
   product_type: string
   brand: string
   author: string
@@ -62,8 +61,7 @@ interface Product {
   categories: {
     name_uz: string
   }
-  seller: {
-    // Changed from 'users' to 'seller' to match API response
+  users: {
     full_name: string
     is_verified_seller: boolean
     company_name: string
@@ -135,34 +133,63 @@ export default function ProductDetailPage() {
 
   const fetchProductDetails = async () => {
     try {
-      const response = await fetch(`/api/products?id=${productId}`)
-      const result = await response.json()
+      const { data: productData, error: productError } = await supabase
+        .from("products")
+        .select(`
+          *,
+          categories!products_category_id_fkey (
+            name_uz
+          ),
+          users!products_seller_id_fkey (
+            full_name,
+            is_verified_seller,
+            company_name,
+            id,
+            username
+          )
+        `)
+        .eq("id", productId)
+        .single()
 
-      if (result.success && result.products && result.products.length > 0) {
-        const productData = result.products[0]
-        setProduct(productData)
+      if (productError) throw productError
+      setProduct(productData)
 
-        const { data: reviewsData } = await supabase
-          .from("product_reviews")
+      // Fetch reviews
+      const { data: reviewsData } = await supabase
+        .from("product_reviews")
+        .select(`
+          *,
+          users (full_name)
+        `)
+        .eq("product_id", productId)
+        .order("created_at", { ascending: false })
+
+      setReviews(reviewsData || [])
+
+      // Fetch similar products from same category
+      if (productData.category_id) {
+        const { data: similarData } = await supabase
+          .from("products")
           .select(`
             *,
-            users (full_name)
+            categories!products_category_id_fkey (
+              name_uz
+            ),
+            users!products_seller_id_fkey (
+              full_name,
+              is_verified_seller,
+              company_name,
+              id,
+              username
+            )
           `)
-          .eq("product_id", productId)
-          .order("created_at", { ascending: false })
+          .eq("category_id", productData.category_id)
+          .neq("id", productId)
+          .eq("is_active", true)
+          .limit(30)
+          .order("order_count", { ascending: false })
 
-        setReviews(reviewsData || [])
-
-        if (productData.category_id) {
-          const similarProductsResponse = await fetch(`/api/products?category=${productData.category.slug}&limit=10`)
-          const similarProductsResult = await similarProductsResponse.json()
-
-          if (similarProductsResult.success) {
-            setSimilarProducts(similarProductsResult.products.filter((p: Product) => p.id !== productId) || [])
-          }
-        }
-      } else {
-        throw new Error(result.error || "Mahsulot topilmadi")
+        setSimilarProducts(similarData || [])
       }
     } catch (error) {
       console.error("Error fetching product details:", error)
@@ -217,10 +244,11 @@ export default function ProductDetailPage() {
 
       if (result.success) {
         setIsLiked(result.liked)
+        // Update product like count
         if (product) {
           setProduct({
             ...product,
-            like_count: result.liked ? (product.like_count || 0) + 1 : (product.like_count || 0) - 1,
+            like_count: result.liked ? product.like_count + 1 : product.like_count - 1,
           })
         }
         toast.success(result.liked ? "Like qilindi" : "Like olib tashlandi")
@@ -287,7 +315,7 @@ export default function ProductDetailPage() {
       return
     }
 
-    if (product.remaining_stock < quantity) {
+    if (product.stock_quantity < quantity) {
       toast.error("Yetarli miqdorda mahsulot yo'q")
       return
     }
@@ -301,7 +329,8 @@ export default function ProductDetailPage() {
         phone: formData.phone,
         address: formData.address,
         quantity: quantity,
-        userId: user.id, // userId is guaranteed to be present due to checkUser
+        userId: user?.id || null,
+        orderType: "immediate",
       }
 
       const response = await fetch("/api/orders", {
@@ -320,16 +349,20 @@ export default function ProductDetailPage() {
 
       toast.success("Buyurtma muvaffaqiyatli berildi! Sizga tez orada aloqaga chiqamiz.")
 
+      // Reset form
       setFormData({ fullName: "", phone: "", address: "" })
       setQuantity(1)
       setShowOrderDialog(false)
 
-      // Re-fetch product details to update remaining stock
-      fetchProductDetails()
+      // Update product stock in UI
+      setProduct((prev) => (prev ? { ...prev, stock_quantity: prev.stock_quantity - quantity } : null))
 
-      setTimeout(() => {
-        router.push("/orders")
-      }, 2000)
+      // Redirect to orders page if user is logged in
+      if (user) {
+        setTimeout(() => {
+          router.push("/orders")
+        }, 2000)
+      }
     } catch (error: any) {
       toast.error(error.message || "Xatolik yuz berdi")
     } finally {
@@ -348,6 +381,7 @@ export default function ProductDetailPage() {
           url: url,
         })
       } catch (error) {
+        // Fallback to clipboard
         copyToClipboard(url)
       }
     } else {
@@ -365,7 +399,7 @@ export default function ProductDetailPage() {
   }
 
   const handleTelegramOrder = () => {
-    if (product?.seller?.username === "admin") {
+    if (product?.users?.username === "admin") {
       const botUrl = `https://t.me/${process.env.NEXT_PUBLIC_BOT_USERNAME || "globalmarketshopbot"}?start=order_${productId}`
       window.open(botUrl, "_blank")
     }
@@ -420,11 +454,13 @@ export default function ProductDetailPage() {
     )
   }
 
-  const isAdminProduct = product.seller?.username === "admin"
+  // Check if this product is from admin (username === 'admin')
+  const isAdminProduct = product.users?.username === "admin"
 
   return (
     <div className="page-container">
       <div className="container mx-auto px-4 py-8">
+        {/* Back Button */}
         <Button
           variant="ghost"
           onClick={() => router.back()}
@@ -435,8 +471,10 @@ export default function ProductDetailPage() {
         </Button>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Product Details */}
           <div className="lg:col-span-2">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {/* Product Image */}
               <div className="space-y-4">
                 <div className="relative aspect-square rounded-3xl overflow-hidden bg-gray-100 border-2 border-gray-200">
                   <Image
@@ -477,13 +515,14 @@ export default function ProductDetailPage() {
                 </div>
               </div>
 
+              {/* Product Info */}
               <div className="space-y-6">
                 <div>
                   <div className="flex items-center gap-2 mb-3">
                     <Badge className="badge-beautiful border-blue-200 text-blue-700">
                       {getProductTypeIcon(product.product_type)} {product.categories?.name_uz || "Kategoriya"}
                     </Badge>
-                    {product.seller?.is_verified_seller && (
+                    {product.users?.is_verified_seller && (
                       <Badge className="badge-beautiful border-green-200 text-green-700">
                         <Award className="h-3 w-3 mr-1" />
                         Tasdiqlangan sotuvchi
@@ -509,22 +548,23 @@ export default function ProductDetailPage() {
                   <div className="text-4xl font-bold text-blue-600 mb-6">{formatPrice(product.price)}</div>
                 </div>
 
+                {/* Seller Info */}
                 <div className="card-beautiful p-4">
                   <h3 className="font-semibold mb-2">Sotuvchi ma'lumotlari</h3>
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-                      <span className="text-white font-bold">{product.seller?.full_name?.charAt(0) || "?"}</span>
+                      <span className="text-white font-bold">{product.users?.full_name?.charAt(0) || "?"}</span>
                     </div>
                     <div>
                       <p className="font-medium">
                         <Link
-                          href={`/seller/${product.seller.id}`}
+                          href={`/seller/${product.users.id}`}
                           className="hover:text-blue-600 transition-colors cursor-pointer"
                         >
-                          {product.seller?.company_name || product.seller?.full_name || "Noma'lum sotuvchi"}
+                          {product.users?.company_name || product.users?.full_name || "Noma'lum sotuvchi"}
                         </Link>
                       </p>
-                      {product.seller?.is_verified_seller && (
+                      {product.users?.is_verified_seller && (
                         <p className="text-sm text-green-600 flex items-center gap-1">
                           <Award className="h-3 w-3" />
                           Tasdiqlangan sotuvchi
@@ -534,6 +574,7 @@ export default function ProductDetailPage() {
                   </div>
                 </div>
 
+                {/* Features */}
                 <div className="space-y-3">
                   <div className="flex items-center space-x-3">
                     <Package className="h-5 w-5 text-blue-600" />
@@ -549,6 +590,7 @@ export default function ProductDetailPage() {
                   </div>
                 </div>
 
+                {/* Description */}
                 {product.description && (
                   <div>
                     <h3 className="font-semibold mb-2">Tavsif</h3>
@@ -558,6 +600,7 @@ export default function ProductDetailPage() {
               </div>
             </div>
 
+            {/* Reviews Section */}
             {reviews.length > 0 && (
               <div className="mt-12">
                 <h3 className="text-2xl font-bold mb-6">Sharhlar ({reviews.length})</h3>
@@ -585,7 +628,9 @@ export default function ProductDetailPage() {
             )}
           </div>
 
+          {/* Order Options */}
           <div className="lg:col-span-1 space-y-6">
+            {/* Quantity Selector */}
             <Card className="card-beautiful">
               <CardHeader>
                 <CardTitle>Miqdor</CardTitle>
@@ -604,20 +649,21 @@ export default function ProductDetailPage() {
                   <Button
                     variant="outline"
                     size="icon"
-                    onClick={() => setQuantity(Math.min(product.remaining_stock, quantity + 1))}
+                    onClick={() => setQuantity(Math.min(product.stock_quantity, quantity + 1))}
                     className="rounded-full border-2"
-                    disabled={quantity >= product.remaining_stock}
+                    disabled={quantity >= product.stock_quantity}
                   >
                     <Plus className="h-4 w-4" />
                   </Button>
                 </div>
-                <p className="text-center text-sm text-gray-500 mt-2">Mavjud: {product.remaining_stock} dona</p>
-                {product.remaining_stock === 0 && (
+                <p className="text-center text-sm text-gray-500 mt-2">Mavjud: {product.stock_quantity} dona</p>
+                {product.stock_quantity === 0 && (
                   <p className="text-center text-sm text-red-500 mt-2 font-medium">Mahsulot tugagan</p>
                 )}
               </CardContent>
             </Card>
 
+            {/* Add to Cart */}
             <Card className="card-beautiful">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -635,14 +681,14 @@ export default function ProductDetailPage() {
                   <Button
                     onClick={handleAddToCart}
                     className="w-full btn-primary text-lg py-6"
-                    disabled={cartLoading || product.remaining_stock === 0 || quantity > product.remaining_stock}
+                    disabled={cartLoading || product.stock_quantity === 0 || quantity > product.stock_quantity}
                   >
                     {cartLoading ? (
                       <>
                         <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
                         Qo'shilmoqda...
                       </>
-                    ) : product.remaining_stock === 0 ? (
+                    ) : product.stock_quantity === 0 ? (
                       "Mahsulot tugagan"
                     ) : (
                       <>
@@ -655,6 +701,7 @@ export default function ProductDetailPage() {
               </CardContent>
             </Card>
 
+            {/* Order Options */}
             <Card className="card-beautiful">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -666,9 +713,9 @@ export default function ProductDetailPage() {
                 <Button
                   onClick={handleOrderClick}
                   className="w-full btn-primary text-lg py-6"
-                  disabled={product.remaining_stock === 0 || quantity > product.remaining_stock}
+                  disabled={product.stock_quantity === 0 || quantity > product.stock_quantity}
                 >
-                  {product.remaining_stock === 0 ? (
+                  {product.stock_quantity === 0 ? (
                     "Mahsulot tugagan"
                   ) : (
                     <>
@@ -678,12 +725,13 @@ export default function ProductDetailPage() {
                   )}
                 </Button>
 
+                {/* Only show Telegram option for admin products */}
                 {isAdminProduct && (
                   <Button
                     onClick={handleTelegramOrder}
                     variant="outline"
                     className="w-full bg-transparent border-blue-200 text-blue-600 hover:bg-blue-50"
-                    disabled={product.remaining_stock === 0}
+                    disabled={product.stock_quantity === 0}
                   >
                     <MessageSquare className="mr-2 h-4 w-4" />
                     Telegram orqali buyurtma
@@ -698,6 +746,7 @@ export default function ProductDetailPage() {
           </div>
         </div>
 
+        {/* Similar Products */}
         {similarProducts.length > 0 && (
           <div className="mt-16">
             <h2 className="text-3xl font-bold mb-8">Shunga o'xshash mahsulotlar</h2>
@@ -728,7 +777,7 @@ export default function ProductDetailPage() {
                       </div>
                       <div className="text-lg font-bold text-blue-600">{formatPrice(similarProduct.price)}</div>
                       <p className="text-xs text-gray-500 mt-1">
-                        {similarProduct.seller?.company_name || similarProduct.seller?.full_name}
+                        {similarProduct.users?.company_name || similarProduct.users?.full_name}
                       </p>
                     </CardContent>
                   </Card>
@@ -739,6 +788,7 @@ export default function ProductDetailPage() {
         )}
       </div>
 
+      {/* Login Dialog */}
       <Dialog open={showLoginDialog} onOpenChange={setShowLoginDialog}>
         <DialogContent>
           <DialogHeader>
@@ -751,7 +801,7 @@ export default function ProductDetailPage() {
           <div className="space-y-4">
             <Button onClick={() => router.push("/login")} className="w-full">
               <LogIn className="mr-2 h-4 w-4" />
-              Tizimga kirish
+              Google orqali kirish
             </Button>
             {isAdminProduct && (
               <Button onClick={handleTelegramOrder} variant="outline" className="w-full bg-transparent">
@@ -768,6 +818,7 @@ export default function ProductDetailPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Order Dialog */}
       <Dialog open={showOrderDialog} onOpenChange={setShowOrderDialog}>
         <DialogContent>
           <DialogHeader>
@@ -835,7 +886,7 @@ export default function ProductDetailPage() {
               </Button>
               <Button
                 type="submit"
-                disabled={orderLoading || product?.remaining_stock === 0 || quantity > (product?.remaining_stock || 0)}
+                disabled={orderLoading || product?.stock_quantity === 0 || quantity > (product?.stock_quantity || 0)}
               >
                 {orderLoading ? (
                   <>

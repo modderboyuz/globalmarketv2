@@ -147,11 +147,13 @@ export default function AdminPanelPage() {
 
   return (
     <div className="space-y-8">
+      {/* Header */}
       <div>
         <h1 className="text-3xl font-bold gradient-text">Admin Panel</h1>
         <p className="text-gray-600">Tizimni boshqarish va nazorat qilish</p>
       </div>
 
+      {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <Link href="/admin-panel/users">
           <Card className="card-beautiful hover:shadow-lg transition-all duration-300 cursor-pointer group">
@@ -194,6 +196,7 @@ export default function AdminPanelPage() {
         </Link>
       </div>
 
+      {/* Applications Card */}
       {stats.pendingApplications > 0 && (
         <Link href="/admin-panel/applications">
           <Card className="card-beautiful hover:shadow-lg transition-all duration-300 cursor-pointer border-l-4 border-l-red-500 bg-red-50/50">
@@ -216,6 +219,7 @@ export default function AdminPanelPage() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Recent Users */}
         <Card className="card-beautiful">
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
@@ -279,6 +283,7 @@ export default function AdminPanelPage() {
           </CardContent>
         </Card>
 
+        {/* Recent Orders */}
         <Card className="card-beautiful">
           <CardHeader>
             <CardTitle className="flex items-center justify-between">

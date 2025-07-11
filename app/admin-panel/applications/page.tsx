@@ -33,17 +33,20 @@ interface Application {
     phone: string
     username: string
   }
+  // Seller application fields
   company_name?: string
   business_type?: string
   description?: string
+  // Product application fields
   product_data?: any
+  // Contact message fields
   name?: string
   email?: string
   subject?: string
   message?: string
+  // Complaint fields
   complaint_text?: string
   orders?: {
-    id: string
     products: {
       name: string
     }
@@ -249,11 +252,13 @@ export default function AdminApplicationsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div>
         <h1 className="text-3xl font-bold gradient-text">Arizalar</h1>
         <p className="text-gray-600">Barcha arizalar va murojaatlarni boshqaring</p>
       </div>
 
+      {/* Filters */}
       <Card className="card-beautiful">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -290,6 +295,7 @@ export default function AdminApplicationsPage() {
             </Select>
           </div>
 
+          {/* Applications List */}
           <div className="space-y-4">
             {loading ? (
               <div className="text-center py-8">

@@ -42,8 +42,7 @@ interface Product {
   description: string
   price: number
   image_url: string
-  stock_quantity: number // Initial stock
-  remaining_stock: number // Calculated remaining stock
+  stock_quantity: number
   order_count: number
   view_count: number
   like_count: number
@@ -61,6 +60,7 @@ export default function SellerProductsPage() {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [products, setProducts] = useState<Product[]>([])
+  const [filteredProducts, setFilteredProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
@@ -77,10 +77,8 @@ export default function SellerProductsPage() {
   }, [])
 
   useEffect(() => {
-    if (user) {
-      fetchProducts(user.id)
-    }
-  }, [user, searchQuery, statusFilter])
+    filterProducts()
+  }, [products, searchQuery, statusFilter])
 
   const checkSellerAccess = async () => {
     try {
@@ -102,6 +100,7 @@ export default function SellerProductsPage() {
       }
 
       setUser(userData)
+      await fetchProducts(currentUser.id)
     } catch (error) {
       console.error("Error checking seller access:", error)
       router.push("/")
@@ -111,40 +110,23 @@ export default function SellerProductsPage() {
   }
 
   const fetchProducts = async (sellerId: string) => {
-    setLoading(true)
     try {
-      const params = new URLSearchParams({
-        sellerId: sellerId,
-        search: searchQuery,
-        filter: statusFilter,
-      })
-      const response = await fetch(`/api/products?${params.toString()}`)
-      const result = await response.json()
+      const { data, error } = await supabase
+        .from("products")
+        .select(`
+          *,
+          categories (name_uz, icon)
+        `)
+        .eq("seller_id", sellerId)
+        .order("created_at", { ascending: false })
 
-      if (result.success) {
-        let filteredData = result.products || []
+      if (error) throw error
 
-        // Apply client-side filtering for status, as API might return all for sellerId
-        if (statusFilter !== "all") {
-          if (statusFilter === "active") {
-            filteredData = filteredData.filter((p: Product) => p.is_active && p.is_approved)
-          } else if (statusFilter === "inactive") {
-            filteredData = filteredData.filter((p: Product) => !p.is_active)
-          } else if (statusFilter === "pending") {
-            filteredData = filteredData.filter((p: Product) => p.is_active && !p.is_approved)
-          }
-        }
-
-        setProducts(filteredData)
-        calculateStats(filteredData)
-      } else {
-        toast.error(result.error || "Mahsulotlarni olishda xatolik")
-      }
+      setProducts(data || [])
+      calculateStats(data || [])
     } catch (error) {
       console.error("Error fetching products:", error)
       toast.error("Mahsulotlarni olishda xatolik")
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -156,6 +138,32 @@ export default function SellerProductsPage() {
       pending: productsData.filter((p) => p.is_active && !p.is_approved).length,
     }
     setStats(stats)
+  }
+
+  const filterProducts = () => {
+    let filtered = products
+
+    // Filter by search query
+    if (searchQuery) {
+      filtered = filtered.filter(
+        (product) =>
+          product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          product.description?.toLowerCase().includes(searchQuery.toLowerCase()),
+      )
+    }
+
+    // Filter by status
+    if (statusFilter !== "all") {
+      if (statusFilter === "active") {
+        filtered = filtered.filter((product) => product.is_active && product.is_approved)
+      } else if (statusFilter === "inactive") {
+        filtered = filtered.filter((product) => !product.is_active)
+      } else if (statusFilter === "pending") {
+        filtered = filtered.filter((product) => product.is_active && !product.is_approved)
+      }
+    }
+
+    setFilteredProducts(filtered)
   }
 
   const toggleProductStatus = async (productId: string, currentStatus: boolean) => {
@@ -211,7 +219,7 @@ export default function SellerProductsPage() {
     return <Badge className="bg-green-100 text-green-800">Mavjud</Badge>
   }
 
-  if (loading && products.length === 0) {
+  if (loading) {
     return (
       <div className="space-y-6">
         <div className="animate-pulse space-y-6">
@@ -233,6 +241,7 @@ export default function SellerProductsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold gradient-text">Mahsulotlarim</h1>
@@ -246,6 +255,7 @@ export default function SellerProductsPage() {
         </Button>
       </div>
 
+      {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <Card className="card-beautiful">
           <CardContent className="p-6 text-center">
@@ -277,6 +287,7 @@ export default function SellerProductsPage() {
         </Card>
       </div>
 
+      {/* Filters and Search */}
       <Card className="card-beautiful">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -310,7 +321,8 @@ export default function SellerProductsPage() {
             </Select>
           </div>
 
-          {products.length === 0 ? (
+          {/* Products Grid */}
+          {filteredProducts.length === 0 ? (
             <div className="text-center py-12">
               <Package className="h-16 w-16 text-gray-300 mx-auto mb-4" />
               <h3 className="text-xl font-semibold mb-2">Mahsulotlar yo'q</h3>
@@ -324,7 +336,7 @@ export default function SellerProductsPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {products.map((product) => (
+              {filteredProducts.map((product) => (
                 <Card key={product.id} className="card-beautiful group hover:shadow-lg transition-all duration-300">
                   <div className="relative">
                     <div className="aspect-square overflow-hidden rounded-t-2xl bg-gray-100">
@@ -387,13 +399,13 @@ export default function SellerProductsPage() {
                       <div className="text-2xl font-bold text-green-600">{formatPrice(product.price)}</div>
                       <div className="flex items-center gap-1">
                         <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                        <span className="text-sm font-medium">{(product.average_rating || 0).toFixed(1)}</span>
+                        <span className="text-sm font-medium">{product.average_rating.toFixed(1)}</span>
                       </div>
                     </div>
 
                     <div className="flex items-center justify-between mb-4">
-                      {getStockBadge(product.remaining_stock)}
-                      <span className="text-sm text-gray-600">{product.remaining_stock} dona</span>
+                      {getStockBadge(product.stock_quantity)}
+                      <span className="text-sm text-gray-600">{product.stock_quantity} dona</span>
                     </div>
 
                     <div className="grid grid-cols-3 gap-4 text-center text-sm text-gray-600 mb-4">
@@ -442,6 +454,7 @@ export default function SellerProductsPage() {
         </CardContent>
       </Card>
 
+      {/* Delete Confirmation Dialog */}
       <AlertDialog open={!!deleteProductId} onOpenChange={() => setDeleteProductId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>

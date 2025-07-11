@@ -4,18 +4,13 @@ import { supabase } from "@/lib/supabase"
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { productId, quantity = 1 } = body
+    const { productId, userId, quantity = 1 } = body
 
-    const { data: authUser, error: authError } = await supabase.auth.getUser()
-    if (authError || !authUser.user) {
-      return NextResponse.json({ error: "Avtorizatsiya talab qilinadi" }, { status: 401 })
-    }
-    const userId = authUser.user.id
-
-    if (!productId) {
-      return NextResponse.json({ error: "Mahsulot ID talab qilinadi" }, { status: 400 })
+    if (!productId || !userId) {
+      return NextResponse.json({ error: "Product ID va User ID talab qilinadi" }, { status: 400 })
     }
 
+    // Ensure user exists in users table
     const { data: existingUser, error: userCheckError } = await supabase
       .from("users")
       .select("id")
@@ -23,20 +18,25 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (userCheckError || !existingUser) {
-      const { error: createUserError } = await supabase.from("users").insert({
-        id: userId,
-        email: authUser.user.email,
-        full_name: authUser.user.user_metadata?.full_name || "",
-        phone: authUser.user.user_metadata?.phone || "",
-        address: authUser.user.user_metadata?.address || "",
-      })
+      // Create user record if it doesn't exist
+      const { data: authUser } = await supabase.auth.getUser()
+      if (authUser.user && authUser.user.id === userId) {
+        const { error: createUserError } = await supabase.from("users").insert({
+          id: userId,
+          email: authUser.user.email,
+          full_name: authUser.user.user_metadata?.full_name || "",
+          phone: authUser.user.user_metadata?.phone || "",
+          address: authUser.user.user_metadata?.address || "",
+        })
 
-      if (createUserError) {
-        console.error("Error creating user:", createUserError)
-        return NextResponse.json({ error: "Foydalanuvchi yaratishda xatolik" }, { status: 500 })
+        if (createUserError) {
+          console.error("Error creating user:", createUserError)
+          return NextResponse.json({ error: "Foydalanuvchi yaratishda xatolik" }, { status: 500 })
+        }
       }
     }
 
+    // Check if item already exists in cart_items
     const { data: existingItem, error: checkError } = await supabase
       .from("cart_items")
       .select("*")
@@ -49,6 +49,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (existingItem) {
+      // Update quantity
       const { data, error } = await supabase
         .from("cart_items")
         .update({
@@ -62,6 +63,7 @@ export async function POST(request: NextRequest) {
       if (error) throw error
       return NextResponse.json({ success: true, cartItem: data })
     } else {
+      // Add new item
       const { data, error } = await supabase
         .from("cart_items")
         .insert({
@@ -111,39 +113,7 @@ export async function GET(request: NextRequest) {
 
     if (error) throw error
 
-    const productIdsInCart = data?.map((item) => item.product_id) || []
-    let productsWithRemainingStock = data || []
-
-    if (productIdsInCart.length > 0) {
-      const { data: completedOrders, error: ordersError } = await supabase
-        .from("orders")
-        .select("product_id, quantity")
-        .in("product_id", productIdsInCart)
-        .eq("status", "completed")
-
-      if (ordersError) {
-        console.error("Error fetching completed orders for cart stock calculation:", ordersError)
-      } else {
-        const completedQuantities = new Map<string, number>()
-        completedOrders?.forEach((order) => {
-          completedQuantities.set(order.product_id, (completedQuantities.get(order.product_id) || 0) + order.quantity)
-        })
-
-        productsWithRemainingStock = productsWithRemainingStock.map((item) => {
-          const completed = completedQuantities.get(item.product_id) || 0
-          const remaining_stock = (item.products?.stock_quantity || 0) - completed
-          return {
-            ...item,
-            products: {
-              ...item.products,
-              remaining_stock: remaining_stock,
-            },
-          }
-        })
-      }
-    }
-
-    return NextResponse.json({ success: true, items: productsWithRemainingStock })
+    return NextResponse.json({ success: true, items: data || [] })
   } catch (error) {
     console.error("Cart GET Error:", error)
     return NextResponse.json({ error: "Savatcha ma'lumotlarini olishda xatolik" }, { status: 500 })

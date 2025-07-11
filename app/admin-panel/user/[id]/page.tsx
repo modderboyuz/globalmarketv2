@@ -168,6 +168,7 @@ export default function AdminUserDetailPage() {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" onClick={() => router.back()}>
           <ArrowLeft className="h-4 w-4 mr-2" />
@@ -179,6 +180,7 @@ export default function AdminUserDetailPage() {
         </div>
       </div>
 
+      {/* User Info Card */}
       <Card className="card-beautiful">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -258,6 +260,7 @@ export default function AdminUserDetailPage() {
       </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Orders */}
         <Card className="card-beautiful">
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
@@ -304,6 +307,7 @@ export default function AdminUserDetailPage() {
           </CardContent>
         </Card>
 
+        {/* Products (if seller) */}
         {userDetails.is_verified_seller && (
           <Card className="card-beautiful">
             <CardHeader>
