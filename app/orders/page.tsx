@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
+import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
 import {
   Dialog,
   DialogContent,
@@ -14,20 +16,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Textarea } from "@/components/ui/textarea"
-import { Label } from "@/components/ui/label"
 import {
   ShoppingCart,
   Package,
-  Truck,
   CheckCircle,
   XCircle,
   Star,
-  AlertTriangle,
   RefreshCw,
   Phone,
   MapPin,
   User,
+  Truck,
+  AlertTriangle,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
@@ -82,6 +82,7 @@ export default function OrdersPage() {
   const [showReviewDialog, setShowReviewDialog] = useState(false)
   const [showComplaintDialog, setShowComplaintDialog] = useState(false)
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
+  const [showCompletionDialog, setShowCompletionDialog] = useState(false)
   const [confirmAction, setConfirmAction] = useState<string>("")
   const [confirmTimer, setConfirmTimer] = useState(0)
   const [review, setReview] = useState<Review>({ rating: 5, comment: "" })
@@ -101,6 +102,22 @@ export default function OrdersPage() {
     }
     return () => clearInterval(interval)
   }, [confirmTimer])
+
+  useEffect(() => {
+    // Check for completed orders and show popup
+    const completedOrders = orders.filter(
+      (order) =>
+        order.status === "completed" &&
+        order.stage === 4 &&
+        !localStorage.getItem(`order_completion_shown_${order.id}`),
+    )
+
+    if (completedOrders.length > 0) {
+      setSelectedOrder(completedOrders[0])
+      setShowCompletionDialog(true)
+      localStorage.setItem(`order_completion_shown_${completedOrders[0].id}`, "true")
+    }
+  }, [orders])
 
   const checkUser = async () => {
     try {
@@ -152,6 +169,28 @@ export default function OrdersPage() {
 
       if (error) throw error
       setOrders(data || [])
+
+      // Check for orders that need client action
+      const ordersNeedingAction = (data || []).filter(
+        (order) => order.is_agree === true && order.is_client_went === null && order.stage === 2,
+      )
+
+      if (ordersNeedingAction.length > 0) {
+        // Show popup for first order needing action
+        const order = ordersNeedingAction[0]
+        if (!localStorage.getItem(`order_action_shown_${order.id}`)) {
+          toast.info(`Buyurtmangiz tayyor! ${order.pickup_address || order.address} ga keling`, {
+            duration: 10000,
+            action: {
+              label: "Ko'rish",
+              onClick: () => {
+                setSelectedOrder(order)
+                localStorage.setItem(`order_action_shown_${order.id}`, "true")
+              },
+            },
+          })
+        }
+      }
     } catch (error) {
       console.error("Error fetching orders:", error)
       toast.error("Buyurtmalarni olishda xatolik")
@@ -265,11 +304,7 @@ export default function OrdersPage() {
 
   const getOrderProgress = (order: Order) => {
     if (order.status === "cancelled") return 0
-    if (order.stage === 1) return 25
-    if (order.stage === 2) return 50
-    if (order.stage === 3) return 75
-    if (order.stage === 4) return 100
-    return 25
+    return (order.stage / 4) * 100
   }
 
   const getOrderStage = (order: Order) => {
@@ -313,12 +348,15 @@ export default function OrdersPage() {
     if (!order.is_agree) {
       return <Badge variant="secondary">Kutilmoqda</Badge>
     }
+    if (order.is_agree && order.is_client_went === null) {
+      return <Badge className="bg-yellow-100 text-yellow-800 animate-pulse">Harakatga tayyor</Badge>
+    }
     return <Badge className="bg-blue-100 text-blue-800">Jarayonda</Badge>
   }
 
   if (loading) {
     return (
-      <div className="page-container flex items-center justify-center min-h-[60vh]">
+      <div className="min-h-screen flex items-center justify-center px-4">
         <div className="text-center">
           <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
           <p className="text-gray-600">Buyurtmalar yuklanmoqda...</p>
@@ -328,45 +366,48 @@ export default function OrdersPage() {
   }
 
   return (
-    <div className="page-container">
+    <div className="min-h-screen bg-gray-50">
       {user && <NotificationPopup userId={user.id} />}
 
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-4 py-4 md:py-8">
         <div className="max-w-6xl mx-auto">
           {/* Header */}
-          <div className="mb-8">
-            <h1 className="text-4xl font-bold gradient-text mb-2 flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
-                <ShoppingCart className="h-6 w-6 text-white" />
+          <div className="mb-6 md:mb-8">
+            <h1 className="text-2xl md:text-4xl font-bold gradient-text mb-2 flex items-center gap-2 md:gap-3">
+              <div className="w-8 h-8 md:w-12 md:h-12 rounded-xl md:rounded-2xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
+                <ShoppingCart className="h-4 w-4 md:h-6 md:w-6 text-white" />
               </div>
               Buyurtmalarim
             </h1>
-            <p className="text-gray-600 text-lg">Barcha buyurtmalaringizni bu yerda ko'rishingiz mumkin</p>
+            <p className="text-gray-600 text-sm md:text-lg">Barcha buyurtmalaringizni bu yerda ko'rishingiz mumkin</p>
           </div>
 
           {orders.length === 0 ? (
-            <div className="text-center py-20">
-              <div className="w-32 h-32 mx-auto bg-gradient-to-br from-gray-100 to-gray-200 rounded-3xl flex items-center justify-center mb-8">
-                <ShoppingCart className="h-16 w-16 text-gray-400" />
+            <div className="text-center py-12 md:py-20">
+              <div className="w-24 h-24 md:w-32 md:h-32 mx-auto bg-gradient-to-br from-gray-100 to-gray-200 rounded-2xl md:rounded-3xl flex items-center justify-center mb-6 md:mb-8">
+                <ShoppingCart className="h-12 w-12 md:h-16 md:w-16 text-gray-400" />
               </div>
-              <h2 className="text-3xl font-bold mb-4 text-gray-800">Buyurtmalar yo'q</h2>
-              <p className="text-gray-600 mb-8 text-lg max-w-md mx-auto">
+              <h2 className="text-xl md:text-3xl font-bold mb-4 text-gray-800">Buyurtmalar yo'q</h2>
+              <p className="text-gray-600 mb-6 md:mb-8 text-base md:text-lg max-w-md mx-auto px-4">
                 Hozircha hech qanday buyurtma bermadingiz. Xarid qilishni boshlang!
               </p>
-              <Button onClick={() => router.push("/")} className="btn-primary text-lg px-8 py-4">
-                <Package className="mr-2 h-5 w-5" />
+              <Button
+                onClick={() => router.push("/")}
+                className="btn-primary text-base md:text-lg px-6 md:px-8 py-3 md:py-4"
+              >
+                <Package className="mr-2 h-4 w-4 md:h-5 md:w-5" />
                 Xarid qilishni boshlash
               </Button>
             </div>
           ) : (
-            <div className="space-y-6">
+            <div className="space-y-4 md:space-y-6">
               {orders.map((order) => (
                 <Card key={order.id} className="card-beautiful overflow-hidden">
-                  <CardHeader className="border-b border-gray-100">
+                  <CardHeader className="border-b border-gray-100 p-4 md:p-6">
                     <div className="flex items-center justify-between">
                       <div>
-                        <CardTitle className="text-xl">Buyurtma #{order.id.slice(-8)}</CardTitle>
-                        <p className="text-gray-600 mt-1">
+                        <CardTitle className="text-base md:text-xl">Buyurtma #{order.id.slice(-8)}</CardTitle>
+                        <p className="text-gray-600 mt-1 text-sm md:text-base">
                           {new Date(order.created_at).toLocaleDateString("uz-UZ", {
                             year: "numeric",
                             month: "long",
@@ -378,103 +419,117 @@ export default function OrdersPage() {
                       </div>
                       <div className="text-right">
                         {getStatusBadge(order)}
-                        <p className="text-2xl font-bold text-blue-600 mt-2">{formatPrice(order.total_amount)}</p>
+                        <p className="text-lg md:text-2xl font-bold text-blue-600 mt-2">
+                          {formatPrice(order.total_amount)}
+                        </p>
                       </div>
                     </div>
                   </CardHeader>
 
-                  <CardContent className="p-6">
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <CardContent className="p-4 md:p-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
                       {/* Product Info */}
                       <div className="lg:col-span-2">
-                        <div className="flex gap-4 mb-6">
+                        <div className="flex gap-3 md:gap-4 mb-4 md:mb-6">
                           <img
                             src={order.products.image_url || "/placeholder.svg?height=120&width=80"}
                             alt={order.products.name}
-                            className="w-20 h-28 object-cover rounded-lg"
+                            className="w-16 h-20 md:w-20 md:h-28 object-cover rounded-lg"
                           />
-                          <div className="flex-1">
-                            <h3 className="font-semibold text-lg text-gray-800 mb-1">{order.products.name}</h3>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-semibold text-base md:text-lg text-gray-800 mb-1 line-clamp-2">
+                              {order.products.name}
+                            </h3>
                             {order.products.author && (
-                              <p className="text-gray-600 mb-1">Muallif: {order.products.author}</p>
+                              <p className="text-gray-600 mb-1 text-sm">Muallif: {order.products.author}</p>
                             )}
                             {order.products.brand && (
-                              <p className="text-gray-600 mb-2">Brend: {order.products.brand}</p>
+                              <p className="text-gray-600 mb-2 text-sm">Brend: {order.products.brand}</p>
                             )}
                             <p className="text-sm text-muted-foreground mb-2">Miqdor: {order.quantity} dona</p>
-                            <p className="text-2xl font-bold text-primary">{formatPrice(order.total_amount)}</p>
+                            <p className="text-lg md:text-2xl font-bold text-primary">
+                              {formatPrice(order.total_amount)}
+                            </p>
                           </div>
                         </div>
 
                         {/* Order Progress */}
-                        <div className="mb-6">
+                        <div className="mb-4 md:mb-6">
                           <div className="flex items-center justify-between mb-2">
-                            <h4 className="font-semibold text-gray-800">Buyurtma holati</h4>
-                            <span className="text-sm text-gray-600">{getOrderProgress(order)}%</span>
+                            <h4 className="font-semibold text-gray-800 text-sm md:text-base">Buyurtma holati</h4>
+                            <span className="text-xs md:text-sm text-gray-600">
+                              {getOrderProgress(order).toFixed(0)}%
+                            </span>
                           </div>
-                          <Progress value={getOrderProgress(order)} className="h-3 mb-2" />
-                          <p className="text-sm text-gray-600">{getOrderStage(order)}</p>
+                          <Progress value={getOrderProgress(order)} className="h-2 md:h-3 mb-2" />
+                          <p className="text-xs md:text-sm text-gray-600">{getOrderStage(order)}</p>
                         </div>
 
                         {/* Order Steps */}
-                        <div className="space-y-3">
+                        <div className="space-y-2 md:space-y-3">
                           <div
-                            className={`flex items-center gap-3 p-3 rounded-lg ${
+                            className={`flex items-center gap-2 md:gap-3 p-2 md:p-3 rounded-lg text-sm ${
                               order.stage >= 1
                                 ? "bg-green-50 border border-green-200"
                                 : "bg-gray-50 border border-gray-200"
                             }`}
                           >
                             <CheckCircle
-                              className={`h-5 w-5 ${order.stage >= 1 ? "text-green-600" : "text-gray-400"}`}
+                              className={`h-4 w-4 md:h-5 md:w-5 ${order.stage >= 1 ? "text-green-600" : "text-gray-400"}`}
                             />
-                            <span className="text-sm">Buyurtma berildi</span>
+                            <span>Buyurtma berildi</span>
                           </div>
 
                           <div
-                            className={`flex items-center gap-3 p-3 rounded-lg ${
+                            className={`flex items-center gap-2 md:gap-3 p-2 md:p-3 rounded-lg text-sm ${
                               order.stage >= 2
                                 ? "bg-green-50 border border-green-200"
                                 : "bg-gray-50 border border-gray-200"
                             }`}
                           >
                             <CheckCircle
-                              className={`h-5 w-5 ${order.stage >= 2 ? "text-green-600" : "text-gray-400"}`}
+                              className={`h-4 w-4 md:h-5 md:w-5 ${order.stage >= 2 ? "text-green-600" : "text-gray-400"}`}
                             />
-                            <span className="text-sm">Sotuvchi qabul qildi</span>
+                            <span>Sotuvchi qabul qildi</span>
                           </div>
 
                           <div
-                            className={`flex items-center gap-3 p-3 rounded-lg ${
+                            className={`flex items-center gap-2 md:gap-3 p-2 md:p-3 rounded-lg text-sm ${
                               order.stage >= 3
                                 ? "bg-green-50 border border-green-200"
                                 : "bg-gray-50 border border-gray-200"
                             }`}
                           >
-                            <Truck className={`h-5 w-5 ${order.stage >= 3 ? "text-green-600" : "text-gray-400"}`} />
-                            <span className="text-sm">Mahsulot olishga bordingiz</span>
+                            <Truck
+                              className={`h-4 w-4 md:h-5 md:w-5 ${order.stage >= 3 ? "text-green-600" : "text-gray-400"}`}
+                            />
+                            <span>Mahsulot olishga bordingiz</span>
                           </div>
 
                           <div
-                            className={`flex items-center gap-3 p-3 rounded-lg ${
+                            className={`flex items-center gap-2 md:gap-3 p-2 md:p-3 rounded-lg text-sm ${
                               order.stage >= 4
                                 ? "bg-green-50 border border-green-200"
                                 : "bg-gray-50 border border-gray-200"
                             }`}
                           >
-                            <Package className={`h-5 w-5 ${order.stage >= 4 ? "text-green-600" : "text-gray-400"}`} />
-                            <span className="text-sm">Mahsulot berildi</span>
+                            <Package
+                              className={`h-4 w-4 md:h-5 md:w-5 ${order.stage >= 4 ? "text-green-600" : "text-gray-400"}`}
+                            />
+                            <span>Mahsulot berildi</span>
                           </div>
                         </div>
 
                         {/* Pickup Address */}
                         {order.pickup_address && (
-                          <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                          <div className="mt-4 p-3 md:p-4 bg-blue-50 border border-blue-200 rounded-lg">
                             <div className="flex items-start gap-2">
-                              <MapPin className="h-5 w-5 text-blue-600 mt-0.5" />
+                              <MapPin className="h-4 w-4 md:h-5 md:w-5 text-blue-600 mt-0.5" />
                               <div>
-                                <h5 className="font-semibold text-blue-800 mb-1">Mahsulot olish manzili:</h5>
-                                <p className="text-blue-700">{order.pickup_address}</p>
+                                <h5 className="font-semibold text-blue-800 mb-1 text-sm md:text-base">
+                                  Mahsulot olish manzili:
+                                </h5>
+                                <p className="text-blue-700 text-sm md:text-base">{order.pickup_address}</p>
                               </div>
                             </div>
                           </div>
@@ -482,33 +537,35 @@ export default function OrdersPage() {
 
                         {/* Seller Notes */}
                         {order.seller_notes && (
-                          <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
-                            <h5 className="font-semibold text-gray-800 mb-1">Sotuvchi eslatmasi:</h5>
-                            <p className="text-gray-700">{order.seller_notes}</p>
+                          <div className="mt-4 p-3 md:p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                            <h5 className="font-semibold text-gray-800 mb-1 text-sm md:text-base">
+                              Sotuvchi eslatmasi:
+                            </h5>
+                            <p className="text-gray-700 text-sm md:text-base">{order.seller_notes}</p>
                           </div>
                         )}
                       </div>
 
                       {/* Actions */}
-                      <div className="space-y-4">
+                      <div className="space-y-3 md:space-y-4">
                         {/* Seller Contact */}
                         <Card className="border-2 border-gray-100">
-                          <CardContent className="p-4">
-                            <h4 className="font-semibold mb-3 flex items-center gap-2">
-                              <User className="h-4 w-4" />
+                          <CardContent className="p-3 md:p-4">
+                            <h4 className="font-semibold mb-2 md:mb-3 flex items-center gap-2 text-sm md:text-base">
+                              <User className="h-3 w-3 md:h-4 md:w-4" />
                               Sotuvchi
                             </h4>
                             <div className="space-y-2">
-                              <p className="font-medium">
+                              <p className="font-medium text-sm md:text-base">
                                 {order.products.users.company_name || order.products.users.full_name}
                               </p>
                               <Button
                                 size="sm"
                                 variant="outline"
-                                className="w-full bg-transparent"
+                                className="w-full bg-transparent text-xs md:text-sm"
                                 onClick={() => window.open(`tel:${order.products.users.phone}`)}
                               >
-                                <Phone className="h-4 w-4 mr-2" />
+                                <Phone className="h-3 w-3 md:h-4 md:w-4 mr-2" />
                                 {order.products.users.phone}
                               </Button>
                             </div>
@@ -516,29 +573,31 @@ export default function OrdersPage() {
                         </Card>
 
                         {/* Action Buttons */}
-                        <div className="space-y-3">
+                        <div className="space-y-2 md:space-y-3">
                           {canTakeAction(order, "client_went") && (
                             <div className="space-y-2">
-                              <p className="text-sm text-gray-600 font-medium">Mahsulot olishga bordingizmi?</p>
+                              <p className="text-xs md:text-sm text-gray-600 font-medium">
+                                Mahsulot olishga bordingizmi?
+                              </p>
                               <Button
-                                className="w-full bg-green-600 hover:bg-green-700"
+                                className="w-full bg-green-600 hover:bg-green-700 text-xs md:text-sm py-2 md:py-3"
                                 onClick={() => {
                                   setSelectedOrder(order)
                                   handleConfirmAction("client_went")
                                 }}
                               >
-                                <CheckCircle className="h-4 w-4 mr-2" />
+                                <CheckCircle className="h-3 w-3 md:h-4 md:w-4 mr-2" />
                                 Ha, bordim
                               </Button>
                               <Button
                                 variant="outline"
-                                className="w-full border-red-200 text-red-600 hover:bg-red-50 bg-transparent"
+                                className="w-full border-red-200 text-red-600 hover:bg-red-50 bg-transparent text-xs md:text-sm py-2 md:py-3"
                                 onClick={() => {
                                   setSelectedOrder(order)
                                   handleConfirmAction("client_not_went")
                                 }}
                               >
-                                <XCircle className="h-4 w-4 mr-2" />
+                                <XCircle className="h-3 w-3 md:h-4 md:w-4 mr-2" />
                                 Yo'q, bormayman
                               </Button>
                             </div>
@@ -546,23 +605,23 @@ export default function OrdersPage() {
 
                           {canTakeAction(order, "review") && (
                             <Button
-                              className="w-full bg-yellow-500 hover:bg-yellow-600"
+                              className="w-full bg-yellow-500 hover:bg-yellow-600 text-xs md:text-sm py-2 md:py-3"
                               onClick={() => {
                                 setSelectedOrder(order)
                                 setShowReviewDialog(true)
                               }}
                             >
-                              <Star className="h-4 w-4 mr-2" />
+                              <Star className="h-3 w-3 md:h-4 md:w-4 mr-2" />
                               Sharh qoldirish
                             </Button>
                           )}
 
                           {canTakeAction(order, "reorder") && (
                             <Button
-                              className="w-full bg-blue-600 hover:bg-blue-700"
+                              className="w-full bg-blue-600 hover:bg-blue-700 text-xs md:text-sm py-2 md:py-3"
                               onClick={() => router.push(`/product/${order.products.id}`)}
                             >
-                              <RefreshCw className="h-4 w-4 mr-2" />
+                              <RefreshCw className="h-3 w-3 md:h-4 md:w-4 mr-2" />
                               Qayta buyurtma qilish
                             </Button>
                           )}
@@ -570,13 +629,13 @@ export default function OrdersPage() {
                           {canTakeAction(order, "complaint") && (
                             <Button
                               variant="outline"
-                              className="w-full border-red-200 text-red-600 hover:bg-red-50 bg-transparent"
+                              className="w-full border-red-200 text-red-600 hover:bg-red-50 bg-transparent text-xs md:text-sm py-2 md:py-3"
                               onClick={() => {
                                 setSelectedOrder(order)
                                 setShowComplaintDialog(true)
                               }}
                             >
-                              <AlertTriangle className="h-4 w-4 mr-2" />
+                              <AlertTriangle className="h-3 w-3 md:h-4 md:w-4 mr-2" />
                               Shikoyat qilish
                             </Button>
                           )}
@@ -590,6 +649,49 @@ export default function OrdersPage() {
           )}
         </div>
       </div>
+
+      {/* Completion Dialog */}
+      <Dialog open={showCompletionDialog} onOpenChange={setShowCompletionDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-green-600">🎉 Tabriklaymiz!</DialogTitle>
+            <DialogDescription>
+              Siz buyurtmangizni olganingiz bilan tabriklaymiz! Mahsulot haqida fikringizni bildiring.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="text-center">
+              <h3 className="font-semibold text-lg">{selectedOrder?.products.name}</h3>
+              <p className="text-gray-600">Buyurtma #{selectedOrder?.id.slice(-8)}</p>
+            </div>
+          </div>
+          <DialogFooter className="flex-col space-y-2">
+            <Button
+              onClick={() => {
+                setShowCompletionDialog(false)
+                setShowReviewDialog(true)
+              }}
+              className="w-full bg-yellow-500 hover:bg-yellow-600"
+            >
+              <Star className="h-4 w-4 mr-2" />
+              Sharh qoldirish
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowCompletionDialog(false)
+                setShowComplaintDialog(true)
+              }}
+              className="w-full border-red-200 text-red-600 hover:bg-red-50 bg-transparent"
+            >
+              Yo'q, men buyurtmamni olmadim
+            </Button>
+            <Button variant="ghost" onClick={() => setShowCompletionDialog(false)} className="w-full">
+              Keyinroq
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Confirmation Dialog */}
       <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
@@ -674,28 +776,36 @@ export default function OrdersPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Shikoyat qilish</DialogTitle>
-            <DialogDescription>
-              {selectedOrder?.products.name} buyurtmasi haqida shikoyatingizni bildiring
-            </DialogDescription>
+            <DialogDescription>Muammoni hal qilish uchun quyidagi yo'riqnomani bajaring:</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
+            <div className="bg-blue-50 p-4 rounded-lg">
+              <h4 className="font-semibold mb-2">Murojaat qilish yo'riqnomasi:</h4>
+              <ol className="list-decimal list-inside space-y-2 text-sm">
+                <li>Telegram botga kirish tugmasiga bosing</li>
+                <li>Undagi "Murojaat qilish" tugmasiga bosib o'z murojaatingizni bildiring</li>
+                <li>Dalillar bilan asoslab sotuvchining telefon raqamini bizga ulashing</li>
+              </ol>
+            </div>
             <div>
-              <Label htmlFor="complaint">Shikoyat matni</Label>
+              <Label htmlFor="complaint">Qo'shimcha ma'lumot (ixtiyoriy)</Label>
               <Textarea
                 id="complaint"
-                placeholder="Shikoyatingizni batafsil yozing..."
+                placeholder="Muammo haqida batafsil yozing..."
                 value={complaintText}
                 onChange={(e) => setComplaintText(e.target.value)}
-                required
               />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowComplaintDialog(false)}>
-              Bekor qilish
+          <DialogFooter className="flex-col space-y-2">
+            <Button
+              onClick={() => window.open("https://t.me/globalmarketshopbot", "_blank")}
+              className="w-full bg-blue-600 hover:bg-blue-700"
+            >
+              Telegram botga kirish
             </Button>
-            <Button onClick={submitComplaint} disabled={!complaintText.trim()}>
-              Shikoyat yuborish
+            <Button variant="outline" onClick={() => setShowComplaintDialog(false)} className="w-full bg-transparent">
+              Yopish
             </Button>
           </DialogFooter>
         </DialogContent>

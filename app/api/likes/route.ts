@@ -10,6 +10,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Product ID va User ID talab qilinadi" }, { status: 400 })
     }
 
+    // Ensure user exists
+    const { data: existingUser, error: userCheckError } = await supabase
+      .from("users")
+      .select("id")
+      .eq("id", userId)
+      .single()
+
+    if (userCheckError || !existingUser) {
+      return NextResponse.json({ error: "Foydalanuvchi topilmadi" }, { status: 404 })
+    }
+
     // Check if like already exists
     const { data: existingLike } = await supabase
       .from("likes")
@@ -24,6 +35,9 @@ export async function POST(request: NextRequest) {
 
       if (error) throw error
 
+      // Update product like count
+      await supabase.rpc("decrement_like_count", { product_id: productId })
+
       return NextResponse.json({ success: true, liked: false })
     } else {
       // Add like
@@ -33,6 +47,9 @@ export async function POST(request: NextRequest) {
       })
 
       if (error) throw error
+
+      // Update product like count
+      await supabase.rpc("increment_like_count", { product_id: productId })
 
       return NextResponse.json({ success: true, liked: true })
     }

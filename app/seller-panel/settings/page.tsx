@@ -1,41 +1,86 @@
 "use client"
 
-import type React from "react"
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import Image from "next/image"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { Settings, User, Phone, Mail, MapPin, Building, Camera, Save, RefreshCw, Shield, Award } from "lucide-react"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  Settings,
+  User,
+  Store,
+  Bell,
+  Shield,
+  Phone,
+  Mail,
+  MapPin,
+  Save,
+  RefreshCw,
+  AlertTriangle,
+  CheckCircle,
+} from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 
+interface SellerProfile {
+  id: string
+  full_name: string
+  email: string
+  phone: string
+  company_name: string
+  company_description: string
+  address: string
+  is_verified_seller: boolean
+  seller_rating: number
+  total_sales: number
+  notification_preferences: {
+    email_notifications: boolean
+    sms_notifications: boolean
+    push_notifications: boolean
+    order_notifications: boolean
+    review_notifications: boolean
+  }
+}
+
 export default function SellerSettingsPage() {
   const router = useRouter()
-  const [user, setUser] = useState<any>(null)
+  const [user, setUser] = useState<SellerProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [uploading, setUploading] = useState(false)
-
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [formData, setFormData] = useState({
     full_name: "",
-    company_name: "",
     phone: "",
-    email: "",
+    company_name: "",
+    company_description: "",
     address: "",
-    profile_image_url: "",
+    notification_preferences: {
+      email_notifications: true,
+      sms_notifications: true,
+      push_notifications: true,
+      order_notifications: true,
+      review_notifications: true,
+    },
   })
 
   useEffect(() => {
-    checkAuth()
+    checkUser()
   }, [])
 
-  const checkAuth = async () => {
+  const checkUser = async () => {
     try {
       const {
         data: { user: currentUser },
@@ -49,96 +94,93 @@ export default function SellerSettingsPage() {
       const { data: userData } = await supabase.from("users").select("*").eq("id", currentUser.id).single()
 
       if (!userData?.is_verified_seller) {
-        toast.error("Sotuvchi hisobiga kirish uchun tasdiqlangan sotuvchi bo'lishingiz kerak")
-        router.push("/become-seller")
+        toast.error("Sizda sotuvchi huquqi yo'q")
+        router.push("/")
         return
       }
 
       setUser(userData)
       setFormData({
         full_name: userData.full_name || "",
-        company_name: userData.company_name || "",
         phone: userData.phone || "",
-        email: userData.email || "",
+        company_name: userData.company_name || "",
+        company_description: userData.company_description || "",
         address: userData.address || "",
-        profile_image_url: userData.profile_image_url || "",
+        notification_preferences: userData.notification_preferences || {
+          email_notifications: true,
+          sms_notifications: true,
+          push_notifications: true,
+          order_notifications: true,
+          review_notifications: true,
+        },
       })
     } catch (error) {
-      console.error("Auth check error:", error)
+      console.error("Error checking user:", error)
       router.push("/login")
     } finally {
       setLoading(false)
     }
   }
 
-  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("Rasm hajmi 5MB dan kichik bo'lishi kerak")
-      return
-    }
-
-    setUploading(true)
-
-    try {
-      const fileExt = file.name.split(".").pop()
-      const fileName = `${user.id}-${Date.now()}.${fileExt}`
-      const filePath = `profile-images/${fileName}`
-
-      const { error: uploadError } = await supabase.storage.from("images").upload(filePath, file)
-
-      if (uploadError) throw uploadError
-
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from("images").getPublicUrl(filePath)
-
-      setFormData({ ...formData, profile_image_url: publicUrl })
-      toast.success("Rasm muvaffaqiyatli yuklandi")
-    } catch (error: any) {
-      console.error("Image upload error:", error)
-      toast.error("Rasm yuklashda xatolik: " + error.message)
-    } finally {
-      setUploading(false)
-    }
+  const handleInputChange = (field: string, value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      [field]: value,
+    }))
   }
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleNotificationChange = (field: string, value: boolean) => {
+    setFormData((prev) => ({
+      ...prev,
+      notification_preferences: {
+        ...prev.notification_preferences,
+        [field]: value,
+      },
+    }))
+  }
 
-    if (!formData.full_name || !formData.phone) {
-      toast.error("Ism va telefon raqam majburiy")
-      return
-    }
+  const saveSettings = async () => {
+    if (!user) return
 
     setSaving(true)
-
     try {
       const { error } = await supabase
         .from("users")
         .update({
           full_name: formData.full_name,
-          company_name: formData.company_name,
           phone: formData.phone,
+          company_name: formData.company_name,
+          company_description: formData.company_description,
           address: formData.address,
-          profile_image_url: formData.profile_image_url,
-          updated_at: new Date().toISOString(),
+          notification_preferences: formData.notification_preferences,
         })
         .eq("id", user.id)
 
       if (error) throw error
 
-      toast.success("Ma'lumotlar muvaffaqiyatli saqlandi")
-
-      // Update user state
-      setUser({ ...user, ...formData })
+      toast.success("Sozlamalar saqlandi")
+      await checkUser() // Refresh user data
     } catch (error: any) {
-      console.error("Save error:", error)
-      toast.error("Saqlashda xatolik: " + error.message)
+      toast.error("Sozlamalarni saqlashda xatolik: " + error.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const deleteAccount = async () => {
+    if (!user) return
+
+    try {
+      // First, deactivate all products
+      await supabase.from("products").update({ is_active: false }).eq("seller_id", user.id)
+
+      // Then mark user as inactive
+      await supabase.from("users").update({ is_verified_seller: false }).eq("id", user.id)
+
+      toast.success("Hisob o'chirildi")
+      router.push("/")
+    } catch (error: any) {
+      toast.error("Hisobni o'chirishda xatolik: " + error.message)
     }
   }
 
@@ -147,214 +189,310 @@ export default function SellerSettingsPage() {
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center">
           <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
-          <p className="text-gray-600">Yuklanmoqda...</p>
+          <p className="text-gray-600">Sozlamalar yuklanmoqda...</p>
         </div>
       </div>
     )
   }
 
+  if (!user) {
+    return (
+      <div className="text-center py-12">
+        <AlertTriangle className="h-16 w-16 text-red-400 mx-auto mb-4" />
+        <h3 className="text-xl font-semibold mb-2">Xatolik</h3>
+        <p className="text-gray-600">Foydalanuvchi ma'lumotlari topilmadi</p>
+      </div>
+    )
+  }
+
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
+    <div className="space-y-6">
       {/* Header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-            <Settings className="h-6 w-6 text-white" />
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold gradient-text flex items-center gap-3">
+            <Settings className="h-8 w-8" />
+            Sozlamalar
+          </h1>
+          <p className="text-gray-600">Hisobingiz va sotuvchi profilingizni boshqaring</p>
+        </div>
+        <Button onClick={saveSettings} disabled={saving} className="btn-primary">
+          {saving ? (
+            <>
+              <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+              Saqlanmoqda...
+            </>
+          ) : (
+            <>
+              <Save className="h-4 w-4 mr-2" />
+              Saqlash
+            </>
+          )}
+        </Button>
+      </div>
+
+      {/* Account Status */}
+      <Card className="card-beautiful">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Shield className="h-5 w-5" />
+            Hisob holati
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <CheckCircle className="h-5 w-5 text-green-600" />
+              <div>
+                <p className="font-medium">Tasdiqlangan sotuvchi</p>
+                <p className="text-sm text-gray-600">Sizning sotuvchi hisobingiz tasdiqlangan</p>
+              </div>
+            </div>
+            <Badge className="bg-green-100 text-green-800">Faol</Badge>
           </div>
+
+          <Separator />
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="text-center p-4 bg-blue-50 rounded-lg">
+              <p className="text-2xl font-bold text-blue-600">{user.seller_rating?.toFixed(1) || "0.0"}</p>
+              <p className="text-sm text-gray-600">Sotuvchi reytingi</p>
+            </div>
+            <div className="text-center p-4 bg-green-50 rounded-lg">
+              <p className="text-2xl font-bold text-green-600">{user.total_sales || 0}</p>
+              <p className="text-sm text-gray-600">Jami sotuvlar</p>
+            </div>
+            <div className="text-center p-4 bg-purple-50 rounded-lg">
+              <p className="text-2xl font-bold text-purple-600">{new Date(user.id).toLocaleDateString("uz-UZ")}</p>
+              <p className="text-sm text-gray-600">Ro'yxatdan o'tgan</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Personal Information */}
+      <Card className="card-beautiful">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <User className="h-5 w-5" />
+            Shaxsiy ma'lumotlar
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="full_name">To'liq ism</Label>
+              <Input
+                id="full_name"
+                value={formData.full_name}
+                onChange={(e) => handleInputChange("full_name", e.target.value)}
+                placeholder="Ismingizni kiriting"
+              />
+            </div>
+            <div>
+              <Label htmlFor="phone">Telefon raqam</Label>
+              <div className="relative">
+                <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                <Input
+                  id="phone"
+                  value={formData.phone}
+                  onChange={(e) => handleInputChange("phone", e.target.value)}
+                  placeholder="+998 90 123 45 67"
+                  className="pl-10"
+                />
+              </div>
+            </div>
+          </div>
+
           <div>
-            <h1 className="text-4xl font-bold gradient-text">Sozlamalar</h1>
-            <p className="text-gray-600 text-lg">Profil ma'lumotlarini boshqaring</p>
+            <Label htmlFor="email">Email</Label>
+            <div className="relative">
+              <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+              <Input
+                id="email"
+                value={user.email}
+                disabled
+                className="pl-10 bg-gray-50"
+                placeholder="Email o'zgartirib bo'lmaydi"
+              />
+            </div>
           </div>
-        </div>
-      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Profile Image */}
-        <div className="lg:col-span-1">
-          <Card className="card-beautiful">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Camera className="h-5 w-5" />
-                Profil rasmi
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="text-center space-y-4">
-              <div className="relative w-32 h-32 mx-auto">
-                <div className="w-32 h-32 rounded-full overflow-hidden bg-gray-100 border-4 border-gray-200">
-                  {formData.profile_image_url ? (
-                    <Image
-                      src={formData.profile_image_url || "/placeholder.svg"}
-                      alt="Profile"
-                      width={128}
-                      height={128}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-500 to-purple-600">
-                      <User className="h-12 w-12 text-white" />
-                    </div>
-                  )}
-                </div>
-                <div className="absolute bottom-0 right-0">
-                  <label htmlFor="profile-image" className="cursor-pointer">
-                    <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center border-2 border-white shadow-lg hover:bg-blue-700 transition-colors">
-                      <Camera className="h-4 w-4 text-white" />
-                    </div>
-                  </label>
-                  <input
-                    id="profile-image"
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageUpload}
-                    className="hidden"
-                    disabled={uploading}
-                  />
-                </div>
+          <div>
+            <Label htmlFor="address">Manzil</Label>
+            <div className="relative">
+              <MapPin className="absolute left-3 top-3 text-gray-400 h-4 w-4" />
+              <Textarea
+                id="address"
+                value={formData.address}
+                onChange={(e) => handleInputChange("address", e.target.value)}
+                placeholder="To'liq manzilingizni kiriting"
+                className="pl-10"
+                rows={3}
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Company Information */}
+      <Card className="card-beautiful">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Store className="h-5 w-5" />
+            Kompaniya ma'lumotlari
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <Label htmlFor="company_name">Kompaniya nomi</Label>
+            <Input
+              id="company_name"
+              value={formData.company_name}
+              onChange={(e) => handleInputChange("company_name", e.target.value)}
+              placeholder="Kompaniya nomini kiriting"
+            />
+          </div>
+
+          <div>
+            <Label htmlFor="company_description">Kompaniya haqida</Label>
+            <Textarea
+              id="company_description"
+              value={formData.company_description}
+              onChange={(e) => handleInputChange("company_description", e.target.value)}
+              placeholder="Kompaniyangiz haqida qisqacha ma'lumot"
+              rows={4}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Notification Settings */}
+      <Card className="card-beautiful">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Bell className="h-5 w-5" />
+            Bildirishnoma sozlamalari
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium">Email bildirishnomalar</p>
+                <p className="text-sm text-gray-600">Email orqali bildirishnoma olish</p>
               </div>
+              <Switch
+                checked={formData.notification_preferences.email_notifications}
+                onCheckedChange={(checked) => handleNotificationChange("email_notifications", checked)}
+              />
+            </div>
 
-              {uploading && (
-                <div className="flex items-center justify-center gap-2 text-blue-600">
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                  <span className="text-sm">Yuklanmoqda...</span>
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-center gap-2">
-                  <Badge variant="secondary" className="text-xs">
-                    Sotuvchi
-                  </Badge>
-                  {user?.is_verified_seller && (
-                    <Badge variant="default" className="text-xs bg-green-500">
-                      <Award className="h-3 w-3 mr-1" />
-                      Tasdiqlangan
-                    </Badge>
-                  )}
-                </div>
-                <p className="text-sm text-gray-500">
-                  Maksimal hajm: 5MB
-                  <br />
-                  Format: JPG, PNG, GIF
-                </p>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium">SMS bildirishnomalar</p>
+                <p className="text-sm text-gray-600">SMS orqali bildirishnoma olish</p>
               </div>
-            </CardContent>
-          </Card>
-        </div>
+              <Switch
+                checked={formData.notification_preferences.sms_notifications}
+                onCheckedChange={(checked) => handleNotificationChange("sms_notifications", checked)}
+              />
+            </div>
 
-        {/* Profile Form */}
-        <div className="lg:col-span-2">
-          <Card className="card-beautiful">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <User className="h-5 w-5" />
-                Shaxsiy ma'lumotlar
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleSave} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <Label htmlFor="full_name">To'liq ism *</Label>
-                    <div className="relative">
-                      <User className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                      <Input
-                        id="full_name"
-                        placeholder="Ism Familiya"
-                        className="input-beautiful pl-10"
-                        value={formData.full_name}
-                        onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-                        required
-                      />
-                    </div>
-                  </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium">Push bildirishnomalar</p>
+                <p className="text-sm text-gray-600">Brauzer orqali bildirishnoma olish</p>
+              </div>
+              <Switch
+                checked={formData.notification_preferences.push_notifications}
+                onCheckedChange={(checked) => handleNotificationChange("push_notifications", checked)}
+              />
+            </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="company_name">Kompaniya nomi</Label>
-                    <div className="relative">
-                      <Building className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                      <Input
-                        id="company_name"
-                        placeholder="Kompaniya nomi"
-                        className="input-beautiful pl-10"
-                        value={formData.company_name}
-                        onChange={(e) => setFormData({ ...formData, company_name: e.target.value })}
-                      />
-                    </div>
-                  </div>
+            <Separator />
 
-                  <div className="space-y-2">
-                    <Label htmlFor="phone">Telefon raqam *</Label>
-                    <div className="relative">
-                      <Phone className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                      <Input
-                        id="phone"
-                        placeholder="+998 90 123 45 67"
-                        className="input-beautiful pl-10"
-                        value={formData.phone}
-                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                        required
-                      />
-                    </div>
-                  </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium">Buyurtma bildirishnomalari</p>
+                <p className="text-sm text-gray-600">Yangi buyurtmalar haqida xabar olish</p>
+              </div>
+              <Switch
+                checked={formData.notification_preferences.order_notifications}
+                onCheckedChange={(checked) => handleNotificationChange("order_notifications", checked)}
+              />
+            </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="email">Email</Label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                      <Input
-                        id="email"
-                        type="email"
-                        placeholder="email@example.com"
-                        className="input-beautiful pl-10"
-                        value={formData.email}
-                        disabled
-                      />
-                    </div>
-                    <p className="text-xs text-gray-500">Email manzilini o'zgartirib bo'lmaydi</p>
-                  </div>
-                </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium">Sharh bildirishnomalari</p>
+                <p className="text-sm text-gray-600">Yangi sharhlar haqida xabar olish</p>
+              </div>
+              <Switch
+                checked={formData.notification_preferences.review_notifications}
+                onCheckedChange={(checked) => handleNotificationChange("review_notifications", checked)}
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
-                <div className="space-y-2">
-                  <Label htmlFor="address">Manzil</Label>
-                  <div className="relative">
-                    <MapPin className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                    <Textarea
-                      id="address"
-                      placeholder="To'liq manzil: shahar, tuman, ko'cha, uy raqami"
-                      className="input-beautiful pl-10 min-h-[100px]"
-                      value={formData.address}
-                      onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                    />
-                  </div>
-                </div>
+      {/* Danger Zone */}
+      <Card className="border-red-200">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-red-600">
+            <AlertTriangle className="h-5 w-5" />
+            Xavfli zona
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+            <h4 className="font-semibold text-red-800 mb-2">Hisobni o'chirish</h4>
+            <p className="text-sm text-red-700 mb-4">
+              Hisobingizni o'chirsangiz, barcha mahsulotlaringiz nofaol bo'ladi va sotuvchi huquqingiz bekor qilinadi.
+              Bu amalni bekor qilib bo'lmaydi.
+            </p>
+            <Button
+              variant="destructive"
+              onClick={() => setShowDeleteDialog(true)}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              <AlertTriangle className="h-4 w-4 mr-2" />
+              Hisobni o'chirish
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
-                <Separator />
-
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-sm text-gray-600">
-                    <Shield className="h-4 w-4" />
-                    <span>Ma'lumotlaringiz xavfsiz saqlanadi</span>
-                  </div>
-
-                  <Button type="submit" className="btn-primary px-8" disabled={saving}>
-                    {saving ? (
-                      <>
-                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                        Saqlanmoqda...
-                      </>
-                    ) : (
-                      <>
-                        <Save className="mr-2 h-4 w-4" />
-                        Saqlash
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+      {/* Delete Account Dialog */}
+      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-red-600">Hisobni o'chirish</DialogTitle>
+            <DialogDescription>
+              Haqiqatan ham hisobingizni o'chirmoqchimisiz? Bu amal qaytarib bo'lmaydi va barcha ma'lumotlaringiz
+              yo'qoladi.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="bg-red-50 p-4 rounded-lg">
+            <h4 className="font-semibold text-red-800 mb-2">Quyidagilar sodir bo'ladi:</h4>
+            <ul className="text-sm text-red-700 space-y-1">
+              <li>• Barcha mahsulotlaringiz nofaol bo'ladi</li>
+              <li>• Sotuvchi huquqingiz bekor qilinadi</li>
+              <li>• Profil ma'lumotlaringiz o'chiriladi</li>
+              <li>• Bu amalni bekor qilib bo'lmaydi</li>
+            </ul>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
+              Bekor qilish
+            </Button>
+            <Button variant="destructive" onClick={deleteAccount}>
+              Ha, hisobni o'chirish
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
