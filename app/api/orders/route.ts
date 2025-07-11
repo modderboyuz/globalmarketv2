@@ -6,15 +6,14 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { productId, fullName, phone, address, quantity = 1, userId, orderType = "immediate" } = body
 
-    // Validate required fields
     if (!productId || !fullName || !phone || !address) {
-      return NextResponse.json({ error: "Barcha majburiy maydonlarni to'ldiring" }, { status: 400 })
+      return NextResponse.json({ error: "Barcha maydonlar talab qilinadi" }, { status: 400 })
     }
 
     // Get product details
     const { data: product, error: productError } = await supabase
       .from("products")
-      .select("*, users!products_seller_id_fkey(username)")
+      .select("*, users!products_seller_id_fkey(full_name, phone)")
       .eq("id", productId)
       .single()
 
@@ -22,102 +21,104 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Mahsulot topilmadi" }, { status: 404 })
     }
 
-    // Check stock
     if (product.stock_quantity < quantity) {
       return NextResponse.json({ error: "Yetarli miqdorda mahsulot yo'q" }, { status: 400 })
     }
 
     // Calculate total amount
-    const productTotal = product.price * quantity
-    const deliveryTotal = product.has_delivery ? product.delivery_price : 0
-    const totalAmount = productTotal + deliveryTotal
-
-    // Generate anonymous temp ID for non-logged in users
-    const anonTempId = !userId ? `anon_${Date.now()}_${Math.random().toString(36).substr(2, 9)}` : null
+    const totalAmount = product.price * quantity
 
     // Create order
     const orderData = {
+      user_id: userId,
       product_id: productId,
-      user_id: userId || null,
       full_name: fullName,
       phone: phone,
       address: address,
       quantity: quantity,
       total_amount: totalAmount,
       status: "pending",
-      order_type: orderType,
-      anon_temp_id: anonTempId,
       is_agree: null,
       is_client_went: null,
       is_client_claimed: null,
+      pickup_address: null,
+      seller_notes: null,
+      client_notes: null,
+      created_at: new Date().toISOString(),
     }
 
     const { data: order, error: orderError } = await supabase.from("orders").insert(orderData).select().single()
 
     if (orderError) {
       console.error("Order creation error:", orderError)
-      return NextResponse.json({ error: "Buyurtma yaratishda xatolik yuz berdi" }, { status: 500 })
+      return NextResponse.json({ error: "Buyurtma yaratishda xatolik" }, { status: 500 })
     }
 
-    // Update product order count and decrease stock
+    // Update product stock and order count
     await supabase
       .from("products")
       .update({
-        order_count: product.order_count + quantity,
         stock_quantity: product.stock_quantity - quantity,
+        order_count: (product.order_count || 0) + 1,
       })
       .eq("id", productId)
-
-    // Create notification for seller
-    if (product.seller_id && userId) {
-      await supabase.rpc("create_notification", {
-        p_user_id: product.seller_id,
-        p_title: "Yangi buyurtma",
-        p_message: `${fullName} tomonidan ${product.name} mahsulotiga buyurtma berildi`,
-        p_type: "new_order",
-        p_data: { order_id: order.id, product_id: productId },
-      })
-    }
-
-    // Generate tracking URL for globalmarket seller
-    let tracking_url = null
-    if (product.users?.username === "globalmarket") {
-      tracking_url = `https://t.me/${process.env.NEXT_PUBLIC_BOT_USERNAME || "globalmarketshopbot"}?start=order_${anonTempId || order.id}_${order.id}`
-    }
 
     return NextResponse.json({
       success: true,
       order: order,
       message: "Buyurtma muvaffaqiyatli yaratildi",
-      tracking_url,
     })
   } catch (error) {
-    console.error("API Error:", error)
-    return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
+    console.error("Order API error:", error)
+    return NextResponse.json({ error: "Ichki server xatosi" }, { status: 500 })
   }
 }
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const userId = searchParams.get("userId")
     const sellerId = searchParams.get("sellerId")
+    const userId = searchParams.get("userId")
 
     if (sellerId) {
       // Get orders for seller
-      const { data: products } = await supabase.from("products").select("id").eq("seller_id", sellerId)
-
-      const productIds = products?.map((p) => p.id) || []
-
-      if (productIds.length === 0) {
-        return NextResponse.json({ orders: [] })
-      }
-
       const { data: orders, error } = await supabase
         .from("orders")
         .select(`
           *,
-          products (
+          products!orders_product_id_fkey (
+            id,
+            name,
+            image_url,
+            price,
+            product_type,
+            brand,
+            author
+          ),
+          users!orders_user_id_fkey (
+            full_name,
+            email,
+            phone
+          )
+        `)
+        .eq("products.seller_id", sellerId)
+        .order("created_at", { ascending: false })
+
+      if (error) {
+        console.error("Error fetching seller orders:", error)
+        return NextResponse.json({ error: "Buyurtmalarni olishda xatolik" }, { status: 500 })
+      }
+
+      return NextResponse.json({ success: true, orders: orders || [] })
+    }
+
+    if (userId) {
+      // Get orders for user
+      const { data: orders, error } = await supabase
+        .from("orders")
+        .select(`
+          *,
+          products!orders_product_id_fkey (
             id,
             name,
             image_url,
@@ -127,185 +128,106 @@ export async function GET(request: NextRequest) {
             author,
             has_delivery,
             delivery_price,
-            seller_id
-          ),
-          users (
-            full_name,
-            email,
-            phone
+            seller_id,
+            users:seller_id (
+              full_name,
+              company_name,
+              phone
+            )
           )
         `)
-        .in("product_id", productIds)
+        .eq("user_id", userId)
         .order("created_at", { ascending: false })
 
       if (error) {
-        console.error("Orders fetch error:", error)
+        console.error("Error fetching user orders:", error)
         return NextResponse.json({ error: "Buyurtmalarni olishda xatolik" }, { status: 500 })
       }
 
-      return NextResponse.json({ orders: orders || [] })
+      return NextResponse.json({ success: true, orders: orders || [] })
     }
 
-    if (!userId) {
-      return NextResponse.json({ error: "User ID talab qilinadi" }, { status: 400 })
-    }
-
+    // Get all orders (admin)
     const { data: orders, error } = await supabase
       .from("orders")
       .select(`
         *,
-        products (
-          id,
-          name,
-          image_url,
-          price,
-          product_type,
-          brand,
-          author,
-          has_delivery,
-          delivery_price,
-          seller_id,
-          users:seller_id (
-            full_name,
-            company_name,
-            phone
-          )
-        )
+        products!orders_product_id_fkey (name, price),
+        users!orders_user_id_fkey (full_name, email)
       `)
-      .eq("user_id", userId)
       .order("created_at", { ascending: false })
+      .limit(100)
 
     if (error) {
-      console.error("Orders fetch error:", error)
+      console.error("Error fetching all orders:", error)
       return NextResponse.json({ error: "Buyurtmalarni olishda xatolik" }, { status: 500 })
     }
 
-    return NextResponse.json({ orders: orders || [] })
+    return NextResponse.json({ success: true, orders: orders || [] })
   } catch (error) {
-    console.error("API Error:", error)
-    return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
+    console.error("Orders GET error:", error)
+    return NextResponse.json({ error: "Ichki server xatosi" }, { status: 500 })
   }
 }
 
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json()
-    const { orderId, action, userId, notes, pickupAddress } = body
+    const { orderId, action, notes, pickupAddress, userId } = body
 
     if (!orderId || !action) {
       return NextResponse.json({ error: "Order ID va action talab qilinadi" }, { status: 400 })
     }
 
     // Get current order
-    const { data: order, error: orderError } = await supabase
+    const { data: currentOrder, error: fetchError } = await supabase
       .from("orders")
-      .select("*, products(seller_id, name)")
+      .select("*")
       .eq("id", orderId)
       .single()
 
-    if (orderError || !order) {
+    if (fetchError || !currentOrder) {
       return NextResponse.json({ error: "Buyurtma topilmadi" }, { status: 404 })
     }
 
-    let updateData: any = {}
-    let notificationTitle = ""
-    let notificationMessage = ""
-    let notificationType = ""
-    let notificationUserId = null
+    const updateData: any = {
+      updated_at: new Date().toISOString(),
+    }
 
+    // Handle different actions
     switch (action) {
       case "agree":
-        // Seller/admin agrees to the order
-        updateData = {
-          is_agree: true,
-          status: "processing",
-          pickup_address: pickupAddress || order.address,
-          seller_notes: notes,
-        }
-        notificationTitle = "Buyurtma qabul qilindi"
-        notificationMessage = `${order.products.name} buyurtmangiz qabul qilindi. Mahsulotni olish manzili: ${pickupAddress || order.address}`
-        notificationType = "order_agreed"
-        notificationUserId = order.user_id
+        updateData.is_agree = true
+        updateData.status = "pending"
+        updateData.pickup_address = pickupAddress || currentOrder.address
+        if (notes) updateData.seller_notes = notes
         break
 
       case "reject":
-        // Seller/admin rejects the order
-        updateData = {
-          is_agree: false,
-          status: "cancelled",
-          seller_notes: notes,
-        }
-        notificationTitle = "Buyurtma rad etildi"
-        notificationMessage = `${order.products.name} buyurtmangiz rad etildi. Sabab: ${notes || "Belgilanmagan"}`
-        notificationType = "order_rejected"
-        notificationUserId = order.user_id
+        updateData.is_agree = false
+        updateData.status = "cancelled"
+        if (notes) updateData.seller_notes = notes
         break
 
       case "client_went":
-        // Client confirms they went to pick up
-        updateData = {
-          is_client_went: true,
-          client_notes: notes,
-        }
-        notificationTitle = "Mijoz mahsulot olishga keldi"
-        notificationMessage = `${order.full_name} mahsulot olishga kelganini tasdiqladi`
-        notificationType = "client_arrived"
-        notificationUserId = order.products.seller_id
+        updateData.is_client_went = true
+        if (notes) updateData.client_notes = notes
         break
 
       case "client_not_went":
-        // Client confirms they didn't go
-        updateData = {
-          is_client_went: false,
-          client_notes: notes,
-          status: "cancelled",
-        }
-        notificationTitle = "Mijoz mahsulot olishga kelmadi"
-        notificationMessage = `${order.full_name} mahsulot olishga kelmaganini bildirdi`
-        notificationType = "client_not_arrived"
-        notificationUserId = order.products.seller_id
+        updateData.is_client_went = false
+        if (notes) updateData.client_notes = notes
         break
 
       case "product_given":
-        // Seller confirms product was given
-        updateData = {
-          is_client_claimed: true,
-          status: "completed",
-          seller_notes: notes,
-        }
-        notificationTitle = "Mahsulot berildi"
-        notificationMessage = `${order.products.name} mahsuloti muvaffaqiyatli berildi. Fikr qoldiring!`
-        notificationType = "product_delivered"
-        notificationUserId = order.user_id
+        updateData.is_client_claimed = true
+        updateData.status = "completed"
+        if (notes) updateData.seller_notes = notes
         break
 
       case "product_not_given":
-        // Seller confirms product was not given
-        updateData = {
-          is_client_claimed: false,
-          status: "cancelled",
-          seller_notes: notes,
-        }
-        notificationTitle = "Mahsulot berilmadi"
-        notificationMessage = `${order.products.name} mahsuloti berilmadi. Qayta buyurtma qilishingiz mumkin.`
-        notificationType = "product_not_delivered"
-        notificationUserId = order.user_id
-
-        // Return stock to product
-        const { data: product } = await supabase
-          .from("products")
-          .select("stock_quantity")
-          .eq("id", order.product_id)
-          .single()
-
-        if (product) {
-          await supabase
-            .from("products")
-            .update({
-              stock_quantity: product.stock_quantity + order.quantity,
-            })
-            .eq("id", order.product_id)
-        }
+        updateData.is_client_claimed = false
+        if (notes) updateData.seller_notes = notes
         break
 
       default:
@@ -320,20 +242,9 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: "Buyurtmani yangilashda xatolik" }, { status: 500 })
     }
 
-    // Create notification
-    if (notificationUserId) {
-      await supabase.rpc("create_notification", {
-        p_user_id: notificationUserId,
-        p_title: notificationTitle,
-        p_message: notificationMessage,
-        p_type: notificationType,
-        p_data: { order_id: orderId },
-      })
-    }
-
     return NextResponse.json({ success: true, message: "Buyurtma muvaffaqiyatli yangilandi" })
   } catch (error) {
-    console.error("API Error:", error)
-    return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
+    console.error("Order PUT error:", error)
+    return NextResponse.json({ error: "Ichki server xatosi" }, { status: 500 })
   }
 }

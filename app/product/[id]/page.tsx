@@ -272,22 +272,27 @@ export default function ProductDetailPage() {
     setCartLoading(true)
 
     try {
-      const { data, error } = await supabase.from("cart_items").upsert(
-        {
-          user_id: user.id,
-          product_id: product.id,
+      const response = await fetch("/api/cart", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          productId: product.id,
+          userId: user.id,
           quantity: quantity,
-        },
-        {
-          onConflict: "user_id,product_id",
-        },
-      )
+        }),
+      })
 
-      if (error) throw error
+      const result = await response.json()
 
-      toast.success("Mahsulot savatga qo'shildi!")
+      if (result.success) {
+        toast.success("Mahsulot savatga qo'shildi!")
+      } else {
+        throw new Error(result.error || "Savatga qo'shishda xatolik")
+      }
     } catch (error: any) {
-      toast.error("Savatga qo'shishda xatolik yuz berdi")
+      toast.error(error.message || "Savatga qo'shishda xatolik yuz berdi")
     } finally {
       setCartLoading(false)
     }
@@ -394,7 +399,7 @@ export default function ProductDetailPage() {
   }
 
   const handleTelegramOrder = () => {
-    if (product?.users?.username === "globalmarket") {
+    if (product?.users?.username === "admin") {
       const botUrl = `https://t.me/${process.env.NEXT_PUBLIC_BOT_USERNAME || "globalmarketshopbot"}?start=product_${productId}`
       window.open(botUrl, "_blank")
     }
@@ -448,6 +453,9 @@ export default function ProductDetailPage() {
       </div>
     )
   }
+
+  // Check if this product is from admin (username === 'admin')
+  const isAdminProduct = product.users?.username === "admin"
 
   return (
     <div className="page-container">
@@ -717,7 +725,8 @@ export default function ProductDetailPage() {
                   )}
                 </Button>
 
-                {product.users?.username === "globalmarket" && (
+                {/* Only show Telegram option for admin products */}
+                {isAdminProduct && (
                   <Button
                     onClick={handleTelegramOrder}
                     variant="outline"
@@ -785,7 +794,8 @@ export default function ProductDetailPage() {
           <DialogHeader>
             <DialogTitle>Buyurtma berish</DialogTitle>
             <DialogDescription>
-              Buyurtma berish uchun tizimga kirishingiz yoki Telegram bot orqali buyurtma berishingiz mumkin
+              Buyurtma berish uchun tizimga kirishingiz kerak
+              {isAdminProduct && " yoki Telegram bot orqali buyurtma berishingiz mumkin"}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -793,7 +803,7 @@ export default function ProductDetailPage() {
               <LogIn className="mr-2 h-4 w-4" />
               Google orqali kirish
             </Button>
-            {product?.users?.username === "globalmarket" && (
+            {isAdminProduct && (
               <Button onClick={handleTelegramOrder} variant="outline" className="w-full bg-transparent">
                 <MessageSquare className="mr-2 h-4 w-4" />
                 Telegram bot orqali buyurtma
