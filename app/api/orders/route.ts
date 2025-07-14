@@ -66,17 +66,13 @@ export async function POST(request: NextRequest) {
         full_name,
         phone,
         address,
-        delivery_address: with_delivery ? `${neighborhood}, ${street}, ${house_number}` : null,
+        delivery_address: with_delivery ? `${neighborhood || ""}, ${street || ""}, ${house_number || ""}`.trim() : null,
         delivery_phone: phone,
         quantity,
         total_amount,
         status: "pending",
-        is_agree: null,
-        is_client_went: null,
-        is_client_claimed: null,
-        pickup_address: null,
-        seller_notes: null,
-        client_notes: null,
+        order_type: user_id ? "website" : "anonymous",
+        anon_temp_id: !user_id ? `web_${Date.now()}_${Math.random().toString(36).substr(2, 9)}` : null,
       })
       .select()
       .single()
@@ -84,6 +80,19 @@ export async function POST(request: NextRequest) {
     if (orderError) {
       console.error("Order creation error:", orderError)
       return NextResponse.json({ error: "Buyurtma yaratishda xatolik" }, { status: 500 })
+    }
+
+    // Update product stock
+    const { error: stockError } = await supabase
+      .from("products")
+      .update({
+        stock_quantity: Math.max(0, product.stock_quantity - quantity),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", product_id)
+
+    if (stockError) {
+      console.error("Stock update error:", stockError)
     }
 
     return NextResponse.json({

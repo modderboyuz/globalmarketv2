@@ -32,7 +32,7 @@ interface Product {
 
 interface Category {
   id: string
-  name_uz: string
+  name: string
   slug: string
   icon: string
   description: string
@@ -188,7 +188,7 @@ export default function CategoryPage({ params }: { params: { slug: string } }) {
             </Button>
           </Link>
           <span className="text-gray-400">/</span>
-          <span className="text-gray-600">{category.name_uz}</span>
+          <span className="text-gray-600">{category.name}</span>
         </div>
 
         {/* Category Header */}
@@ -196,7 +196,7 @@ export default function CategoryPage({ params }: { params: { slug: string } }) {
           <div className="flex items-center gap-4 mb-4">
             <div className="text-4xl">{category.icon}</div>
             <div>
-              <h1 className="text-3xl font-bold">{category.name_uz}</h1>
+              <h1 className="text-3xl font-bold">{category.name}</h1>
               {category.description && <p className="text-gray-600 mt-2">{category.description}</p>}
             </div>
           </div>

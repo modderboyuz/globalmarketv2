@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { supabase } from "@/lib/supabase"
+import * as XLSX from "xlsx"
 
 // Helper function to get the Supabase access token from the Authorization header
 async function getAccessToken(request: NextRequest): Promise<string | null> {
@@ -57,6 +58,9 @@ async function verifyAdmin(token: string | null): Promise<{ user: any; userData:
 
 export async function GET(request: NextRequest) {
   try {
+    const { searchParams } = new URL(request.url)
+    const exportFormat = searchParams.get("export")
+
     const token = await getAccessToken(request)
     const adminCheck = await verifyAdmin(token)
 
@@ -64,12 +68,12 @@ export async function GET(request: NextRequest) {
       // Return a 401 Unauthorized response if token is missing, invalid, or user is not admin
       return NextResponse.json(
         { error: "Authorization token is missing, invalid, or user is not an admin." },
-        { status: 401 }
+        { status: 401 },
       )
     }
 
     // Fetch applications from all relevant tables
-    const [sellerAppsResult, productAppsResult, complaintsResult] = await Promise.all([
+    const [sellerAppsResult, productAppsResult, complaintsResult, contactMessagesResult] = await Promise.all([
       // Seller applications: select all fields and join with users table
       supabase
         .from("seller_applications")
@@ -117,6 +121,14 @@ export async function GET(request: NextRequest) {
           )
         `)
         .order("created_at", { ascending: false }),
+
+      // Contact messages: select all fields
+      supabase
+        .from("contact_messages")
+        .select(`
+          *
+        `)
+        .order("created_at", { ascending: false }),
     ])
 
     // Combine all fetched applications and add a 'type' identifier
@@ -141,10 +153,69 @@ export async function GET(request: NextRequest) {
         users: app.users || null,
         orders: app.orders || null,
       })),
+      ...(contactMessagesResult.data || []).map((app: any) => ({
+        ...app,
+        type: "contact",
+        status: app.status || "pending",
+        users: null, // Contact messages don't have user relations
+      })),
     ]
 
     // Sort the combined applications by 'created_at' in descending order
     applications.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
+    // If export is requested, generate Excel file
+    if (exportFormat === "xlsx") {
+      const exportData = applications.map((app) => ({
+        ID: app.id.slice(-8),
+        Tur:
+          app.type === "seller"
+            ? "Sotuvchi"
+            : app.type === "product"
+              ? "Mahsulot"
+              : app.type === "complaint"
+                ? "Shikoyat"
+                : "Murojaat",
+        Holat:
+          app.status === "pending"
+            ? "Kutilmoqda"
+            : app.status === "approved"
+              ? "Tasdiqlangan"
+              : app.status === "rejected"
+                ? "Rad etilgan"
+                : app.status === "resolved"
+                  ? "Hal qilingan"
+                  : app.status,
+        "Ariza beruvchi": app.users?.full_name || app.name || "Noma'lum",
+        Email: app.users?.email || app.email || "Noma'lum",
+        Telefon: app.users?.phone || app.phone || "Noma'lum",
+        Sana: new Date(app.created_at).toLocaleDateString("uz-UZ"),
+        "Kompaniya/Mavzu":
+          app.type === "seller" ? app.company_name || "" : app.type === "contact" ? app.subject || "" : "",
+        "Xabar/Tavsif":
+          app.type === "contact"
+            ? app.message || ""
+            : app.type === "seller"
+              ? app.description || ""
+              : app.type === "complaint"
+                ? app.complaint_text || ""
+                : "",
+        "Admin javobi": app.admin_notes || app.admin_response || "",
+      }))
+
+      const ws = XLSX.utils.json_to_sheet(exportData)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, "Arizalar")
+
+      const excelBuffer = XLSX.write(wb, { bookType: "xlsx", type: "buffer" })
+
+      return new NextResponse(excelBuffer, {
+        headers: {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": `attachment; filename=arizalar-${new Date().toISOString().split("T")[0]}.xlsx`,
+        },
+      })
+    }
 
     return NextResponse.json({
       success: true,
@@ -153,7 +224,10 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("GET /api/applications Error:", error)
     // Return a 500 Internal Server Error for any unexpected exceptions
-    return NextResponse.json({ error: "An internal server error occurred while fetching applications." }, { status: 500 })
+    return NextResponse.json(
+      { error: "An internal server error occurred while fetching applications." },
+      { status: 500 },
+    )
   }
 }
 
@@ -166,7 +240,7 @@ export async function PUT(request: NextRequest) {
       // Return a 401 Unauthorized response if token is missing, invalid, or user is not admin
       return NextResponse.json(
         { error: "Authorization token is missing, invalid, or user is not an admin." },
-        { status: 401 }
+        { status: 401 },
       )
     }
 
@@ -202,6 +276,11 @@ export async function PUT(request: NextRequest) {
         updateData.status = action === "resolve" ? "resolved" : action === "reject" ? "rejected" : action // Set status
         updateData.admin_response = notes // Use 'notes' for admin response
         break
+      case "contact":
+        tableName = "contact_messages"
+        updateData.status = action === "respond" ? "responded" : action === "reject" ? "rejected" : action
+        updateData.admin_response = notes
+        break
       default:
         // If the type is not recognized, return a 400 Bad Request error
         return NextResponse.json({ error: "Invalid application type provided." }, { status: 400 })
@@ -213,6 +292,41 @@ export async function PUT(request: NextRequest) {
     if (error) {
       console.error(`Error updating ${type} application with ID ${id}:`, error)
       throw error // Throw the error to be caught by the outer catch block
+    }
+
+    // Special handling for approving product applications
+    if (type === "product" && action === "approve") {
+      // Get the product application data
+      const { data: productApp, error: productAppError } = await supabase
+        .from("product_applications")
+        .select("*")
+        .eq("id", id)
+        .single()
+
+      if (!productAppError && productApp && productApp.product_data) {
+        // Insert into products table
+        const productToInsert = {
+          name: productApp.product_data.name,
+          brand: productApp.product_data.brand || null,
+          price: productApp.product_data.price,
+          description: productApp.product_data.description || null,
+          image_url: productApp.product_data.image_url || null,
+          seller_id: productApp.user_id,
+          category_id: productApp.product_data.category_id || null,
+          has_delivery: productApp.product_data.has_delivery || false,
+          product_type: productApp.product_data.product_type || "physical",
+          delivery_price: productApp.product_data.delivery_price || 0,
+          stock_quantity: productApp.product_data.stock_quantity || 0,
+          is_approved: true, // Set as approved
+          is_active: true,
+        }
+
+        const { error: productInsertError } = await supabase.from("products").insert([productToInsert])
+
+        if (productInsertError) {
+          console.error("Error inserting product:", productInsertError)
+        }
+      }
     }
 
     // Special handling for approving seller applications
@@ -242,6 +356,9 @@ export async function PUT(request: NextRequest) {
   } catch (error) {
     console.error("PUT /api/applications Error:", error)
     // Return a 500 Internal Server Error for any unexpected exceptions during the update process
-    return NextResponse.json({ error: "An internal server error occurred while updating the application." }, { status: 500 })
+    return NextResponse.json(
+      { error: "An internal server error occurred while updating the application." },
+      { status: 500 },
+    )
   }
 }

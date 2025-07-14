@@ -28,6 +28,7 @@ import {
   Minus,
   Clock,
   CheckCircle,
+  Send,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
@@ -66,6 +67,7 @@ interface Product {
     phone: string
     company_name?: string
     is_verified_seller: boolean
+    username?: string
   }
 }
 
@@ -102,6 +104,7 @@ export default function ProductDetailPage() {
   const [user, setUser] = useState<any>(null)
   const [quantity, setQuantity] = useState(1)
   const [showQuickOrder, setShowQuickOrder] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
 
   const [quickOrderForm, setQuickOrderForm] = useState({
     full_name: "",
@@ -129,7 +132,11 @@ export default function ProductDetailPage() {
     if (user) {
       setUser(user)
       // Get user profile data
-      const { data: profile } = await supabase.from("users").select("full_name, phone").eq("id", user.id).single()
+      const { data: profile } = await supabase
+        .from("users")
+        .select("full_name, phone, username")
+        .eq("id", user.id)
+        .single()
 
       if (profile) {
         setQuickOrderForm((prev) => ({
@@ -137,6 +144,9 @@ export default function ProductDetailPage() {
           full_name: profile.full_name || "",
           phone: profile.phone || "",
         }))
+
+        // Check if user is admin
+        setIsAdmin(profile.username === "admin")
       }
     }
   }
@@ -148,7 +158,7 @@ export default function ProductDetailPage() {
         .select(`
           *,
           categories (name, icon),
-          users (full_name, phone, company_name, is_verified_seller)
+          users (full_name, phone, company_name, is_verified_seller, username)
         `)
         .eq("id", params.id)
         .eq("is_active", true)
@@ -352,6 +362,13 @@ export default function ProductDetailPage() {
     }
   }
 
+  const handleTelegramOrder = () => {
+    if (!product) return
+
+    const telegramUrl = `https://t.me/GlobalMarketUzBot?start=product_${product.categories?.name || "mahsulot"}&product_id=${product.id}`
+    window.open(telegramUrl, "_blank")
+  }
+
   const calculateTotal = () => {
     if (!product) return 0
     let total = product.price * quantity
@@ -441,12 +458,12 @@ export default function ProductDetailPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 mb-12">
           {/* Product Image */}
           <div className="relative">
-            <div className="aspect-square relative overflow-hidden rounded-3xl bg-gradient-to-br from-gray-100 to-gray-200 shadow-2xl">
+            <div className="aspect-[4/3] relative overflow-hidden rounded-3xl bg-gradient-to-br from-gray-100 to-gray-200 shadow-2xl">
               <Image
                 src={product.image_url || "/placeholder.svg?height=600&width=600"}
                 alt={product.name}
                 fill
-                className="object-cover"
+                className="object-contain p-4"
                 priority
               />
               <div className="absolute top-4 left-4 flex flex-col gap-2">
@@ -540,78 +557,7 @@ export default function ProductDetailPage() {
               {product.price.toLocaleString()} so'm
             </div>
 
-            {/* Features */}
-            <div className="flex flex-wrap gap-3">
-              {product.has_delivery && (
-                <Badge
-                  variant="outline"
-                  className="flex items-center gap-2 p-3 bg-gradient-to-r from-blue-50 to-blue-100 border-blue-200"
-                >
-                  <Truck className="w-4 h-4 text-blue-600" />
-                  <span className="text-blue-700">Yetkazib berish: {product.delivery_price.toLocaleString()} so'm</span>
-                </Badge>
-              )}
-              {product.has_warranty && (
-                <Badge
-                  variant="outline"
-                  className="flex items-center gap-2 p-3 bg-gradient-to-r from-green-50 to-green-100 border-green-200"
-                >
-                  <Shield className="w-4 h-4 text-green-600" />
-                  <span className="text-green-700">Kafolat: {product.warranty_period}</span>
-                </Badge>
-              )}
-              {product.has_return && (
-                <Badge
-                  variant="outline"
-                  className="flex items-center gap-2 p-3 bg-gradient-to-r from-purple-50 to-purple-100 border-purple-200"
-                >
-                  <RotateCcw className="w-4 h-4 text-purple-600" />
-                  <span className="text-purple-700">Qaytarish: {product.return_period}</span>
-                </Badge>
-              )}
-            </div>
-
-            {product.description && (
-              <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl p-6">
-                <h3 className="font-semibold mb-3 text-gray-800">Tavsif</h3>
-                <p className="text-gray-700 leading-relaxed">{product.description}</p>
-              </div>
-            )}
-
-            {/* Seller Info */}
-            <Card className="bg-gradient-to-br from-indigo-50 to-indigo-100 border-indigo-200">
-              <CardContent className="p-6">
-                <h3 className="font-semibold mb-4 text-indigo-800 flex items-center gap-2">
-                  <User className="w-5 h-5" />
-                  Sotuvchi ma'lumotlari
-                </h3>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium text-indigo-900">
-                        {product.users.company_name || product.users.full_name}
-                      </p>
-                      {product.users.is_verified_seller && (
-                        <Badge className="bg-green-500 text-white text-xs mt-1">
-                          <CheckCircle className="w-3 h-3 mr-1" />
-                          Tasdiqlangan
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-                  <Button
-                    variant="outline"
-                    className="w-full bg-white/50 border-indigo-300 text-indigo-700 hover:bg-white"
-                    onClick={() => window.open(`tel:${product.users.phone}`)}
-                  >
-                    <Phone className="w-4 h-4 mr-2" />
-                    {product.users.phone}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Quantity and Actions */}
+            {/* Quantity and Actions - Moved up */}
             <div className="space-y-6">
               <div className="bg-white rounded-2xl p-6 shadow-lg border">
                 <Label htmlFor="quantity" className="text-lg font-semibold mb-4 block">
@@ -782,16 +728,101 @@ export default function ProductDetailPage() {
                           </div>
                         </div>
 
-                        <Button onClick={handleQuickOrder} className="w-full btn-primary" size="lg">
-                          <Package className="w-5 h-5 mr-2" />
-                          Buyurtma berish
-                        </Button>
+                        <div className="grid grid-cols-1 gap-3">
+                          <Button onClick={handleQuickOrder} className="w-full btn-primary" size="lg">
+                            <Package className="w-5 h-5 mr-2" />
+                            Buyurtma berish
+                          </Button>
+
+                          {/* Telegram Order Button - Only show if seller is admin */}
+                          {product.users.username === "admin" && (
+                            <Button
+                              onClick={handleTelegramOrder}
+                              className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white"
+                              size="lg"
+                            >
+                              <Send className="w-5 h-5 mr-2" />
+                              Telegram orqali buyurtma
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </DialogContent>
                   </Dialog>
                 </div>
               </div>
             </div>
+
+            {/* Features */}
+            <div className="flex flex-wrap gap-3">
+              {product.has_delivery && (
+                <Badge
+                  variant="outline"
+                  className="flex items-center gap-2 p-3 bg-gradient-to-r from-blue-50 to-blue-100 border-blue-200"
+                >
+                  <Truck className="w-4 h-4 text-blue-600" />
+                  <span className="text-blue-700">Yetkazib berish: {product.delivery_price.toLocaleString()} so'm</span>
+                </Badge>
+              )}
+              {product.has_warranty && (
+                <Badge
+                  variant="outline"
+                  className="flex items-center gap-2 p-3 bg-gradient-to-r from-green-50 to-green-100 border-green-200"
+                >
+                  <Shield className="w-4 h-4 text-green-600" />
+                  <span className="text-green-700">Kafolat: {product.warranty_period}</span>
+                </Badge>
+              )}
+              {product.has_return && (
+                <Badge
+                  variant="outline"
+                  className="flex items-center gap-2 p-3 bg-gradient-to-r from-purple-50 to-purple-100 border-purple-200"
+                >
+                  <RotateCcw className="w-4 h-4 text-purple-600" />
+                  <span className="text-purple-700">Qaytarish: {product.return_period}</span>
+                </Badge>
+              )}
+            </div>
+
+            {product.description && (
+              <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl p-6">
+                <h3 className="font-semibold mb-3 text-gray-800">Tavsif</h3>
+                <p className="text-gray-700 leading-relaxed">{product.description}</p>
+              </div>
+            )}
+
+            {/* Seller Info */}
+            <Card className="bg-gradient-to-br from-indigo-50 to-indigo-100 border-indigo-200">
+              <CardContent className="p-6">
+                <h3 className="font-semibold mb-4 text-indigo-800 flex items-center gap-2">
+                  <User className="w-5 h-5" />
+                  Sotuvchi ma'lumotlari
+                </h3>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium text-indigo-900">
+                        {product.users.company_name || product.users.full_name}
+                      </p>
+                      {product.users.is_verified_seller && (
+                        <Badge className="bg-green-500 text-white text-xs mt-1">
+                          <CheckCircle className="w-3 h-3 mr-1" />
+                          Tasdiqlangan
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    className="w-full bg-white/50 border-indigo-300 text-indigo-700 hover:bg-white"
+                    onClick={() => window.open(`tel:${product.users.phone}`)}
+                  >
+                    <Phone className="w-4 h-4 mr-2" />
+                    {product.users.phone}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           </div>
         </div>
 
