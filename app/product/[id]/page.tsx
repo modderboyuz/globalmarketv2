@@ -1,89 +1,45 @@
 "use client"
 
-import type React from "react"
 import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import Image from "next/image"
-import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { Switch } from "@/components/ui/switch"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import {
-  Star,
-  User,
-  Phone,
-  ArrowLeft,
-  Heart,
-  Share2,
-  Shield,
-  RefreshCw,
-  Plus,
-  Minus,
-  Award,
-  Zap,
-  Eye,
-  ShoppingCart,
-  LogIn,
-  MessageSquare,
-  Truck,
-  RotateCcw,
-} from "lucide-react"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Heart, ShoppingCart, Eye, Truck, Shield, RotateCcw, Phone, Plus, Minus } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 
 interface Product {
   id: string
-  name: string
+  title: string
   description: string
   price: number
   image_url: string
-  category_id: string
-  order_count: number
   stock_quantity: number
-  product_type: string
-  brand: string
-  author: string
   view_count: number
   like_count: number
-  average_rating: number
+  order_count: number
   has_delivery: boolean
   delivery_price: number
   has_warranty: boolean
   warranty_months: number
   has_return: boolean
   return_days: number
-  categories: {
-    name_uz: string
-  }
   users: {
-    full_name: string
-    is_verified_seller: boolean
-    company_name: string
     id: string
-    username: string
-  }
-}
-
-interface Review {
-  id: string
-  rating: number
-  comment: string
-  created_at: string
-  users: {
     full_name: string
+    username: string
+    phone: string
+    avatar_url: string
+  }
+  categories: {
+    name: string
   }
 }
 
@@ -95,381 +51,221 @@ interface Neighborhood {
 export default function ProductDetailPage() {
   const params = useParams()
   const router = useRouter()
-  const productId = params.id as string
-
   const [product, setProduct] = useState<Product | null>(null)
-  const [reviews, setReviews] = useState<Review[]>([])
-  const [similarProducts, setSimilarProducts] = useState<Product[]>([])
   const [neighborhoods, setNeighborhoods] = useState<Neighborhood[]>([])
   const [loading, setLoading] = useState(true)
-  const [orderLoading, setOrderLoading] = useState(false)
-  const [cartLoading, setCartLoading] = useState(false)
-  const [likeLoading, setLikeLoading] = useState(false)
-  const [quantity, setQuantity] = useState(1)
   const [user, setUser] = useState<any>(null)
   const [isLiked, setIsLiked] = useState(false)
-  const [showOrderDialog, setShowOrderDialog] = useState(false)
-  const [showLoginDialog, setShowLoginDialog] = useState(false)
+  const [likeCount, setLikeCount] = useState(0)
+  const [quantity, setQuantity] = useState(1)
   const [withDelivery, setWithDelivery] = useState(false)
 
-  const [formData, setFormData] = useState({
-    fullName: "",
-    phone: "",
-    neighborhood: "",
-    street: "",
-    houseNumber: "",
-  })
+  // Quick order form
+  const [showQuickOrder, setShowQuickOrder] = useState(false)
+  const [fullName, setFullName] = useState("")
+  const [phone, setPhone] = useState("")
+  const [neighborhood, setNeighborhood] = useState("")
+  const [street, setStreet] = useState("")
+  const [houseNumber, setHouseNumber] = useState("")
+  const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
-    if (productId) {
-      fetchProductDetails()
+    if (params.id) {
+      fetchProduct()
       checkUser()
-      incrementViewCount()
       fetchNeighborhoods()
     }
-  }, [productId])
+  }, [params.id])
 
   const checkUser = async () => {
     const {
-      data: { user: currentUser },
+      data: { user },
     } = await supabase.auth.getUser()
-    setUser(currentUser)
+    if (user) {
+      setUser(user)
+      // Get user profile
+      const { data: profile } = await supabase.from("users").select("full_name, phone").eq("id", user.id).single()
 
-    if (currentUser?.user_metadata) {
-      setFormData({
-        fullName: currentUser.user_metadata.full_name || "",
-        phone: currentUser.user_metadata.phone || "",
-        neighborhood: "",
-        street: "",
-        houseNumber: "",
-      })
+      if (profile) {
+        setFullName(profile.full_name || "")
+        setPhone(profile.phone || "")
+      }
     }
+  }
 
-    if (currentUser) {
-      checkLikeStatus(currentUser.id)
+  const fetchProduct = async () => {
+    try {
+      // Increment view count
+      await supabase.rpc("increment_view_count", {
+        product_id_param: params.id,
+      })
+
+      const { data, error } = await supabase
+        .from("products")
+        .select(`
+          *,
+          users!products_seller_id_fkey (
+            id,
+            full_name,
+            username,
+            phone,
+            avatar_url
+          ),
+          categories (
+            name
+          )
+        `)
+        .eq("id", params.id)
+        .single()
+
+      if (error) throw error
+
+      setProduct(data)
+      setLikeCount(data.like_count || 0)
+
+      // Check if user liked this product
+      if (user) {
+        const response = await fetch(`/api/likes?product_id=${params.id}&user_id=${user.id}`)
+        const likeData = await response.json()
+        setIsLiked(likeData.is_liked)
+      }
+    } catch (error) {
+      console.error("Error fetching product:", error)
+      toast.error("Mahsulotni yuklashda xatolik")
+    } finally {
+      setLoading(false)
     }
   }
 
   const fetchNeighborhoods = async () => {
     try {
       const response = await fetch("/api/neighborhoods")
-      const result = await response.json()
-      if (result.success) {
-        setNeighborhoods(result.neighborhoods)
-      }
+      const data = await response.json()
+      setNeighborhoods(data.neighborhoods || [])
     } catch (error) {
       console.error("Error fetching neighborhoods:", error)
-    }
-  }
-
-  const fetchProductDetails = async () => {
-    try {
-      const { data: productData, error: productError } = await supabase
-        .from("products")
-        .select(`
-          *,
-          categories!products_category_id_fkey (
-            name_uz
-          ),
-          users!products_seller_id_fkey (
-            full_name,
-            is_verified_seller,
-            company_name,
-            id,
-            username
-          )
-        `)
-        .eq("id", productId)
-        .single()
-
-      if (productError) throw productError
-      setProduct(productData)
-
-      // Fetch reviews
-      const { data: reviewsData } = await supabase
-        .from("product_reviews")
-        .select(`
-          *,
-          users (full_name)
-        `)
-        .eq("product_id", productId)
-        .order("created_at", { ascending: false })
-
-      setReviews(reviewsData || [])
-
-      // Fetch similar products from same category
-      if (productData.category_id) {
-        const { data: similarData } = await supabase
-          .from("products")
-          .select(`
-            *,
-            categories!products_category_id_fkey (
-              name_uz
-            ),
-            users!products_seller_id_fkey (
-              full_name,
-              is_verified_seller,
-              company_name,
-              id,
-              username
-            )
-          `)
-          .eq("category_id", productData.category_id)
-          .neq("id", productId)
-          .eq("is_active", true)
-          .limit(30)
-          .order("order_count", { ascending: false })
-
-        setSimilarProducts(similarData || [])
-      }
-    } catch (error) {
-      console.error("Error fetching product details:", error)
-      toast.error("Mahsulot ma'lumotlarini olishda xatolik")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const incrementViewCount = async () => {
-    try {
-      await supabase.rpc("increment_view_count", { product_id_param: productId })
-    } catch (error) {
-      console.error("Error incrementing view count:", error)
-    }
-  }
-
-  const checkLikeStatus = async (userId: string) => {
-    try {
-      const { data: userLike } = await supabase
-        .from("likes")
-        .select("id")
-        .eq("product_id", productId)
-        .eq("user_id", userId)
-        .single()
-
-      setIsLiked(!!userLike)
-    } catch (error) {
-      console.error("Error checking like status:", error)
     }
   }
 
   const handleLike = async () => {
     if (!user) {
       toast.error("Like qilish uchun tizimga kiring")
-      setShowLoginDialog(true)
+      router.push("/login")
       return
     }
-
-    setLikeLoading(true)
 
     try {
       const response = await fetch("/api/likes", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          productId: productId,
-          userId: user.id,
+          product_id: params.id,
+          user_id: user.id,
         }),
       })
 
       const result = await response.json()
-
       if (result.success) {
         setIsLiked(result.liked)
-        if (product) {
-          setProduct({
-            ...product,
-            like_count: result.like_count,
-          })
-        }
-        toast.success(result.liked ? "Like qilindi" : "Like olib tashlandi")
-      } else {
-        throw new Error(result.error)
+        setLikeCount(result.like_count)
       }
-    } catch (error: any) {
-      console.error("Error handling like:", error)
+    } catch (error) {
+      console.error("Like error:", error)
       toast.error("Like qilishda xatolik")
-    } finally {
-      setLikeLoading(false)
     }
   }
 
-  const handleAddToCart = async () => {
+  const addToCart = async () => {
     if (!user) {
-      setShowLoginDialog(true)
+      toast.error("Savatga qo'shish uchun tizimga kiring")
+      router.push("/login")
       return
     }
 
-    if (!product) return
-
-    setCartLoading(true)
-
     try {
-      const { error } = await supabase.from("cart_items").insert({
-        product_id: product.id,
+      const { data, error } = await supabase.from("cart_items").insert({
         user_id: user.id,
+        product_id: params.id,
         quantity: quantity,
       })
 
       if (error) throw error
 
-      toast.success("Mahsulot savatga qo'shildi!")
-    } catch (error: any) {
-      toast.error("Savatga qo'shishda xatolik yuz berdi")
-    } finally {
-      setCartLoading(false)
+      toast.success("Mahsulot savatga qo'shildi")
+    } catch (error) {
+      console.error("Add to cart error:", error)
+      toast.error("Savatga qo'shishda xatolik")
     }
   }
 
-  const handleOrderClick = () => {
-    if (!user) {
-      setShowLoginDialog(true)
-      return
-    }
-    setShowOrderDialog(true)
-  }
-
-  const handleImmediateOrder = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!product) return
-
-    if (!formData.fullName || !formData.phone || !formData.neighborhood || !formData.street || !formData.houseNumber) {
-      toast.error("Barcha maydonlarni to'ldiring")
+  const handleQuickOrder = async () => {
+    if (!fullName || !phone) {
+      toast.error("Ism va telefon raqamini kiriting")
       return
     }
 
-    if (product.stock_quantity < quantity) {
-      toast.error("Yetarli miqdorda mahsulot yo'q")
+    if (withDelivery && (!neighborhood || !street || !houseNumber)) {
+      toast.error("Yetkazib berish uchun to'liq manzil kiriting")
       return
     }
 
-    setOrderLoading(true)
+    setSubmitting(true)
 
     try {
-      const address = `${formData.neighborhood}, ${formData.street}, ${formData.houseNumber}`
+      const address = withDelivery ? `${neighborhood}, ${street} ko'chasi, ${houseNumber}-uy` : "Do'konga olib ketish"
 
       const response = await fetch("/api/orders", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          productId: product.id,
-          fullName: formData.fullName,
-          phone: formData.phone,
+          product_id: params.id,
+          full_name: fullName,
+          phone: phone,
           address: address,
           quantity: quantity,
-          userId: user?.id || null,
-          withDelivery: withDelivery,
-          neighborhood: formData.neighborhood,
-          street: formData.street,
-          houseNumber: formData.houseNumber,
+          user_id: user?.id || null,
+          with_delivery: withDelivery,
+          neighborhood: withDelivery ? neighborhood : null,
+          street: withDelivery ? street : null,
+          house_number: withDelivery ? houseNumber : null,
         }),
       })
 
       const result = await response.json()
-
       if (result.success) {
-        toast.success("Buyurtma muvaffaqiyatli berildi! Sizga tez orada aloqaga chiqamiz.")
-
-        // Reset form
-        setFormData({ fullName: "", phone: "", neighborhood: "", street: "", houseNumber: "" })
-        setQuantity(1)
-        setWithDelivery(false)
-        setShowOrderDialog(false)
-
-        // Redirect to orders page if user is logged in
+        toast.success("Buyurtma muvaffaqiyatli yaratildi!")
+        setShowQuickOrder(false)
         if (user) {
-          setTimeout(() => {
-            router.push("/orders")
-          }, 2000)
+          router.push("/orders")
         }
       } else {
         throw new Error(result.error)
       }
     } catch (error: any) {
-      toast.error(error.message || "Xatolik yuz berdi")
+      console.error("Quick order error:", error)
+      toast.error(error.message || "Buyurtma berishda xatolik")
     } finally {
-      setOrderLoading(false)
+      setSubmitting(false)
     }
   }
 
-  const handleShare = async () => {
-    const url = window.location.href
-
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: product?.name,
-          text: product?.description,
-          url: url,
-        })
-      } catch (error) {
-        // Fallback to clipboard
-        copyToClipboard(url)
-      }
-    } else {
-      copyToClipboard(url)
-    }
-  }
-
-  const copyToClipboard = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text)
-      toast.success("Havola nusxalandi!")
-    } catch (error) {
-      toast.error("Havolani nusxalashda xatolik")
-    }
-  }
-
-  const handleTelegramOrder = () => {
-    if (product?.users?.username === "admin") {
-      const botUrl = `https://t.me/${process.env.NEXT_PUBLIC_BOT_USERNAME || "globalmarketshopbot"}?start=order_${productId}`
-      window.open(botUrl, "_blank")
-    }
-  }
-
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat("uz-UZ").format(price) + " so'm"
-  }
-
-  const getProductTypeIcon = (type: string) => {
-    switch (type) {
-      case "book":
-        return "📚"
-      case "pen":
-        return "🖊️"
-      case "notebook":
-        return "📓"
-      case "pencil":
-        return "✏️"
-      default:
-        return "📦"
-    }
-  }
-
-  const renderStars = (rating: number) => {
-    return Array.from({ length: 5 }, (_, i) => (
-      <Star key={i} className={`h-4 w-4 ${i < rating ? "fill-yellow-400 text-yellow-400" : "text-gray-300"}`} />
-    ))
-  }
-
-  const calculateTotalPrice = () => {
-    let total = (product?.price || 0) * quantity
-    if (withDelivery && product?.has_delivery) {
-      total += product.delivery_price || 0
-    }
-    return total
+  const calculateTotal = () => {
+    if (!product) return 0
+    const productTotal = product.price * quantity
+    const deliveryPrice = withDelivery && product.has_delivery ? product.delivery_price : 0
+    return productTotal + deliveryPrice
   }
 
   if (loading) {
     return (
-      <div className="page-container flex items-center justify-center">
-        <div className="text-center">
-          <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4" />
-          <p>Yuklanmoqda...</p>
+      <div className="container mx-auto px-4 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div className="aspect-square bg-gray-200 rounded-lg animate-pulse"></div>
+          <div className="space-y-4">
+            <div className="h-8 bg-gray-200 rounded animate-pulse"></div>
+            <div className="h-4 bg-gray-200 rounded animate-pulse"></div>
+            <div className="h-6 bg-gray-200 rounded animate-pulse w-1/3"></div>
+          </div>
         </div>
       </div>
     )
@@ -477,522 +273,286 @@ export default function ProductDetailPage() {
 
   if (!product) {
     return (
-      <div className="page-container flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold mb-4">Mahsulot topilmadi</h1>
-          <Button onClick={() => router.push("/")} className="btn-primary">
-            Bosh sahifaga qaytish
-          </Button>
-        </div>
+      <div className="container mx-auto px-4 py-8">
+        <Card>
+          <CardContent className="p-12 text-center">
+            <h2 className="text-2xl font-bold mb-2">Mahsulot topilmadi</h2>
+            <p className="text-gray-600 mb-6">Kechirasiz, bu mahsulot mavjud emas</p>
+            <Button onClick={() => router.push("/products")}>Mahsulotlarga qaytish</Button>
+          </CardContent>
+        </Card>
       </div>
     )
   }
 
-  // Check if this product is from admin (username === 'admin')
-  const isAdminProduct = product.users?.username === "admin"
-
   return (
-    <div className="page-container">
-      <div className="container mx-auto px-4 py-8">
-        {/* Back Button */}
-        <Button
-          variant="ghost"
-          onClick={() => router.back()}
-          className="mb-6 hover:bg-blue-50 rounded-2xl border-2 border-transparent hover:border-blue-200"
-        >
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Orqaga
-        </Button>
+    <div className="container mx-auto px-4 py-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+        {/* Product Image */}
+        <div className="relative aspect-square">
+          <Image
+            src={product.image_url || "/placeholder.svg"}
+            alt={product.title}
+            fill
+            className="object-cover rounded-lg"
+          />
+        </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Product Details */}
-          <div className="lg:col-span-2">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              {/* Product Image */}
-              <div className="space-y-4">
-                <div className="relative aspect-square rounded-3xl overflow-hidden bg-gray-100 border-2 border-gray-200">
-                  <Image
-                    src={product.image_url || "/placeholder.svg?height=600&width=600"}
-                    alt={product.name}
-                    fill
-                    className="object-cover"
-                  />
-                  <div className="absolute top-4 right-4 flex flex-col gap-2">
-                    <Button
-                      size="icon"
-                      variant="secondary"
-                      className="rounded-full bg-white/90 backdrop-blur-sm"
-                      onClick={handleLike}
-                      disabled={likeLoading}
-                    >
-                      <Heart className={`h-4 w-4 ${isLiked ? "fill-red-500 text-red-500" : ""}`} />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="secondary"
-                      className="rounded-full bg-white/90 backdrop-blur-sm"
-                      onClick={handleShare}
-                    >
-                      <Share2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <div className="absolute bottom-4 left-4 flex gap-2">
-                    <Badge className="bg-white/90 text-gray-800 flex items-center gap-1">
-                      <Eye className="h-3 w-3" />
-                      {product.view_count || 0}
-                    </Badge>
-                    <Badge className="bg-white/90 text-gray-800 flex items-center gap-1">
-                      <Heart className="h-3 w-3" />
-                      {product.like_count || 0}
-                    </Badge>
-                  </div>
-                </div>
+        {/* Product Info */}
+        <div className="space-y-6">
+          <div>
+            <Badge variant="secondary" className="mb-2">
+              {product.categories?.name}
+            </Badge>
+            <h1 className="text-3xl font-bold mb-2">{product.title}</h1>
+            <p className="text-gray-600 mb-4">{product.description}</p>
+
+            {/* Product features */}
+            <div className="flex flex-wrap gap-2 mb-4">
+              {product.has_delivery && (
+                <Badge variant="outline" className="text-green-600">
+                  <Truck className="h-3 w-3 mr-1" />
+                  Yetkazib berish (+{product.delivery_price.toLocaleString()} so'm)
+                </Badge>
+              )}
+              {product.has_warranty && (
+                <Badge variant="outline" className="text-blue-600">
+                  <Shield className="h-3 w-3 mr-1" />
+                  {product.warranty_months} oy kafolat
+                </Badge>
+              )}
+              {product.has_return && (
+                <Badge variant="outline" className="text-purple-600">
+                  <RotateCcw className="h-3 w-3 mr-1" />
+                  {product.return_days} kun qaytarish
+                </Badge>
+              )}
+            </div>
+
+            <div className="text-3xl font-bold text-green-600 mb-4">{product.price.toLocaleString()} so'm</div>
+
+            {/* Stats */}
+            <div className="flex items-center space-x-6 text-sm text-gray-600 mb-6">
+              <div className="flex items-center">
+                <Eye className="h-4 w-4 mr-1" />
+                {product.view_count} ko'rildi
               </div>
-
-              {/* Product Info */}
-              <div className="space-y-6">
-                <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <Badge className="badge-beautiful border-blue-200 text-blue-700">
-                      {getProductTypeIcon(product.product_type)} {product.categories?.name_uz || "Kategoriya"}
-                    </Badge>
-                    {product.users?.is_verified_seller && (
-                      <Badge className="badge-beautiful border-green-200 text-green-700">
-                        <Award className="h-3 w-3 mr-1" />
-                        Tasdiqlangan sotuvchi
-                      </Badge>
-                    )}
-                  </div>
-
-                  <h1 className="text-3xl font-bold mb-2">{product.name}</h1>
-
-                  {product.author && <p className="text-xl text-gray-600 mb-2">Muallif: {product.author}</p>}
-                  {product.brand && <p className="text-xl text-gray-600 mb-4">Brend: {product.brand}</p>}
-
-                  <div className="flex items-center space-x-4 mb-4">
-                    <div className="flex items-center space-x-1">
-                      <div className="flex">{renderStars(Math.round(product.average_rating || 0))}</div>
-                      <span className="font-semibold">{(product.average_rating || 0).toFixed(1)}</span>
-                      <span className="text-gray-500">({reviews.length} sharh)</span>
-                    </div>
-                    <Separator orientation="vertical" className="h-4" />
-                    <span className="text-gray-500">{product.order_count || 0} marta sotilgan</span>
-                  </div>
-
-                  <div className="text-4xl font-bold text-blue-600 mb-6">{formatPrice(product.price)}</div>
-                </div>
-
-                {/* Seller Info */}
-                <div className="card-beautiful p-4">
-                  <h3 className="font-semibold mb-2">Sotuvchi ma'lumotlari</h3>
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-                      <span className="text-white font-bold">{product.users?.full_name?.charAt(0) || "?"}</span>
-                    </div>
-                    <div>
-                      <p className="font-medium">
-                        <Link
-                          href={`/seller/${product.users.id}`}
-                          className="hover:text-blue-600 transition-colors cursor-pointer"
-                        >
-                          {product.users?.company_name || product.users?.full_name || "Noma'lum sotuvchi"}
-                        </Link>
-                      </p>
-                      {product.users?.is_verified_seller && (
-                        <p className="text-sm text-green-600 flex items-center gap-1">
-                          <Award className="h-3 w-3" />
-                          Tasdiqlangan sotuvchi
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Features */}
-                <div className="space-y-3">
-                  {product.has_delivery && (
-                    <div className="flex items-center space-x-3">
-                      <Truck className="h-5 w-5 text-blue-600" />
-                      <span>Yetkazib berish ({formatPrice(product.delivery_price)})</span>
-                    </div>
-                  )}
-                  {product.has_warranty && (
-                    <div className="flex items-center space-x-3">
-                      <Shield className="h-5 w-5 text-blue-600" />
-                      <span>{product.warranty_months} oy kafolat</span>
-                    </div>
-                  )}
-                  {product.has_return && (
-                    <div className="flex items-center space-x-3">
-                      <RotateCcw className="h-5 w-5 text-blue-600" />
-                      <span>{product.return_days} kun qaytarish</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Description */}
-                {product.description && (
-                  <div>
-                    <h3 className="font-semibold mb-2">Tavsif</h3>
-                    <p className="text-gray-600 leading-relaxed">{product.description}</p>
-                  </div>
-                )}
+              <div className="flex items-center">
+                <Heart className="h-4 w-4 mr-1" />
+                {likeCount} yoqdi
+              </div>
+              <div className="flex items-center">
+                <ShoppingCart className="h-4 w-4 mr-1" />
+                {product.order_count} buyurtma
               </div>
             </div>
 
-            {/* Reviews Section */}
-            {reviews.length > 0 && (
-              <div className="mt-12">
-                <h3 className="text-2xl font-bold mb-6">Sharhlar ({reviews.length})</h3>
-                <div className="space-y-4">
-                  {reviews.map((review) => (
-                    <Card key={review.id} className="card-beautiful">
-                      <CardContent className="p-4">
-                        <div className="flex items-start justify-between mb-3">
-                          <div>
-                            <p className="font-semibold">{review.users.full_name}</p>
-                            <div className="flex items-center gap-2 mt-1">
-                              <div className="flex">{renderStars(review.rating)}</div>
-                              <span className="text-sm text-gray-500">
-                                {new Date(review.created_at).toLocaleDateString("uz-UZ")}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                        {review.comment && <p className="text-gray-700">{review.comment}</p>}
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
+            {/* Quantity selector */}
+            <div className="flex items-center space-x-4 mb-6">
+              <Label>Miqdor:</Label>
+              <div className="flex items-center space-x-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                  disabled={quantity <= 1}
+                >
+                  <Minus className="h-4 w-4" />
+                </Button>
+                <span className="w-12 text-center">{quantity}</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setQuantity(Math.min(product.stock_quantity, quantity + 1))}
+                  disabled={quantity >= product.stock_quantity}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
               </div>
-            )}
-          </div>
+              <span className="text-sm text-gray-600">({product.stock_quantity} dona mavjud)</span>
+            </div>
 
-          {/* Order Options */}
-          <div className="lg:col-span-1 space-y-6">
-            {/* Quantity Selector */}
-            <Card className="card-beautiful">
-              <CardHeader>
-                <CardTitle>Miqdor</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-center gap-4">
+            {/* Action buttons */}
+            <div className="flex space-x-4 mb-6">
+              <Button onClick={handleLike} variant={isLiked ? "default" : "outline"} size="lg" className="flex-1">
+                <Heart className={`h-5 w-5 mr-2 ${isLiked ? "fill-current" : ""}`} />
+                {isLiked ? "Yoqdi" : "Yoqtirish"}
+              </Button>
+
+              <Button onClick={addToCart} variant="outline" size="lg" className="flex-1 bg-transparent">
+                <ShoppingCart className="h-5 w-5 mr-2" />
+                Savatga qo'shish
+              </Button>
+            </div>
+
+            <Button onClick={() => setShowQuickOrder(true)} size="lg" className="w-full">
+              Tezkor buyurtma berish
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Seller Info */}
+      <Card className="mb-8">
+        <CardHeader>
+          <CardTitle>Sotuvchi haqida</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center space-x-4">
+            <div className="relative w-16 h-16">
+              <Image
+                src={product.users.avatar_url || "/placeholder-user.jpg"}
+                alt={product.users.full_name}
+                fill
+                className="object-cover rounded-full"
+              />
+            </div>
+            <div>
+              <h3 className="font-semibold text-lg">{product.users.full_name}</h3>
+              <p className="text-gray-600">@{product.users.username}</p>
+              {product.users.phone && (
+                <p className="text-sm text-gray-600 flex items-center mt-1">
+                  <Phone className="h-4 w-4 mr-1" />
+                  {product.users.phone}
+                </p>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Quick Order Modal */}
+      {showQuickOrder && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <Card className="w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <CardHeader>
+              <CardTitle>Tezkor buyurtma</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label htmlFor="fullName">To'liq ism *</Label>
+                <Input
+                  id="fullName"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Ismingizni kiriting"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="phone">Telefon raqam *</Label>
+                <Input
+                  id="phone"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="+998 90 123 45 67"
+                />
+              </div>
+
+              <div>
+                <Label>Miqdor: {quantity}</Label>
+                <div className="flex items-center space-x-2 mt-1">
                   <Button
                     variant="outline"
-                    size="icon"
+                    size="sm"
                     onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                    className="rounded-full border-2"
+                    disabled={quantity <= 1}
                   >
                     <Minus className="h-4 w-4" />
                   </Button>
-                  <span className="text-2xl font-bold w-12 text-center">{quantity}</span>
+                  <span className="w-12 text-center">{quantity}</span>
                   <Button
                     variant="outline"
-                    size="icon"
+                    size="sm"
                     onClick={() => setQuantity(Math.min(product.stock_quantity, quantity + 1))}
-                    className="rounded-full border-2"
                     disabled={quantity >= product.stock_quantity}
                   >
                     <Plus className="h-4 w-4" />
                   </Button>
                 </div>
-                <p className="text-center text-sm text-gray-500 mt-2">Mavjud: {product.stock_quantity} dona</p>
-                {product.stock_quantity === 0 && (
-                  <p className="text-center text-sm text-red-500 mt-2 font-medium">Mahsulot tugagan</p>
-                )}
-              </CardContent>
-            </Card>
+              </div>
 
-            {/* Add to Cart */}
-            <Card className="card-beautiful">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ShoppingCart className="h-5 w-5" />
-                  Savatga qo'shish
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="text-center">
-                    <div className="text-2xl font-bold text-blue-600 mb-2">{formatPrice(product.price * quantity)}</div>
-                    <p className="text-sm text-gray-500">Jami summa</p>
+              {/* Delivery option */}
+              {product.has_delivery && (
+                <div className="p-3 bg-blue-50 rounded-lg">
+                  <div className="flex items-center space-x-2">
+                    <Checkbox id="delivery" checked={withDelivery} onCheckedChange={setWithDelivery} />
+                    <Label htmlFor="delivery" className="flex items-center">
+                      <Truck className="h-4 w-4 mr-1" />
+                      Yetkazib berish (+{product.delivery_price.toLocaleString()} so'm)
+                    </Label>
                   </div>
-
-                  <Button
-                    onClick={handleAddToCart}
-                    className="w-full btn-primary text-lg py-6"
-                    disabled={cartLoading || product.stock_quantity === 0 || quantity > product.stock_quantity}
-                  >
-                    {cartLoading ? (
-                      <>
-                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                        Qo'shilmoqda...
-                      </>
-                    ) : product.stock_quantity === 0 ? (
-                      "Mahsulot tugagan"
-                    ) : (
-                      <>
-                        <ShoppingCart className="mr-2 h-5 w-5" />
-                        Savatga qo'shish
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Order Options */}
-            <Card className="card-beautiful">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Zap className="h-5 w-5" />
-                  Buyurtma berish
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Button
-                  onClick={handleOrderClick}
-                  className="w-full btn-primary text-lg py-6"
-                  disabled={product.stock_quantity === 0 || quantity > product.stock_quantity}
-                >
-                  {product.stock_quantity === 0 ? (
-                    "Mahsulot tugagan"
-                  ) : (
-                    <>
-                      <Zap className="mr-2 h-5 w-5" />
-                      Buyurtma berish
-                    </>
-                  )}
-                </Button>
-
-                {/* Only show Telegram option for admin products */}
-                {isAdminProduct && (
-                  <Button
-                    onClick={handleTelegramOrder}
-                    variant="outline"
-                    className="w-full bg-transparent border-blue-200 text-blue-600 hover:bg-blue-50"
-                    disabled={product.stock_quantity === 0}
-                  >
-                    <MessageSquare className="mr-2 h-4 w-4" />
-                    Telegram orqali buyurtma
-                  </Button>
-                )}
-
-                <p className="text-xs text-gray-500 text-center">
-                  Buyurtma bergandan so'ng sizga tez orada aloqaga chiqamiz
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-
-        {/* Similar Products */}
-        {similarProducts.length > 0 && (
-          <div className="mt-16">
-            <h2 className="text-3xl font-bold mb-8">Shunga o'xshash mahsulotlar</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-              {similarProducts.slice(0, 10).map((similarProduct) => (
-                <Link key={similarProduct.id} href={`/product/${similarProduct.id}`}>
-                  <Card className="card-beautiful hover:shadow-lg transition-all duration-300 cursor-pointer">
-                    <div className="relative aspect-square rounded-t-2xl overflow-hidden bg-gray-100">
-                      <Image
-                        src={similarProduct.image_url || "/placeholder.svg?height=200&width=200"}
-                        alt={similarProduct.name}
-                        fill
-                        className="object-cover"
-                      />
-                      <div className="absolute top-2 right-2">
-                        <Badge className="bg-white/90 text-gray-800 text-xs">
-                          {getProductTypeIcon(similarProduct.product_type)}
-                        </Badge>
-                      </div>
-                    </div>
-                    <CardContent className="p-4">
-                      <h3 className="font-semibold text-sm mb-2 line-clamp-2">{similarProduct.name}</h3>
-                      <div className="flex items-center gap-1 mb-2">
-                        <div className="flex">
-                          {renderStars(Math.round(similarProduct.average_rating || 0)).slice(0, 5)}
-                        </div>
-                        <span className="text-xs text-gray-500">({similarProduct.order_count || 0})</span>
-                      </div>
-                      <div className="text-lg font-bold text-blue-600">{formatPrice(similarProduct.price)}</div>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {similarProduct.users?.company_name || similarProduct.users?.full_name}
-                      </p>
-                    </CardContent>
-                  </Card>
-                </Link>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Login Dialog */}
-      <Dialog open={showLoginDialog} onOpenChange={setShowLoginDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Buyurtma berish</DialogTitle>
-            <DialogDescription>
-              Buyurtma berish uchun tizimga kirishingiz kerak
-              {isAdminProduct && " yoki Telegram bot orqali buyurtma berishingiz mumkin"}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <Button onClick={() => router.push("/login")} className="w-full">
-              <LogIn className="mr-2 h-4 w-4" />
-              Google orqali kirish
-            </Button>
-            {isAdminProduct && (
-              <Button onClick={handleTelegramOrder} variant="outline" className="w-full bg-transparent">
-                <MessageSquare className="mr-2 h-4 w-4" />
-                Telegram bot orqali buyurtma
-              </Button>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setShowLoginDialog(false)}>
-              Bekor qilish
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Order Dialog */}
-      <Dialog open={showOrderDialog} onOpenChange={setShowOrderDialog}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Buyurtma berish</DialogTitle>
-            <DialogDescription>{product?.name} mahsuloti uchun buyurtma ma'lumotlarini kiriting</DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleImmediateOrder} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="fullName">To'liq ism *</Label>
-              <div className="relative">
-                <User className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                <Input
-                  id="fullName"
-                  placeholder="Ism Familiya"
-                  className="input-beautiful pl-10"
-                  value={formData.fullName}
-                  onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="phone">Telefon raqam *</Label>
-              <div className="relative">
-                <Phone className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                <Input
-                  id="phone"
-                  placeholder="+998 90 123 45 67"
-                  className="input-beautiful pl-10"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="neighborhood">Mahalla *</Label>
-              <Select
-                value={formData.neighborhood}
-                onValueChange={(value) => setFormData({ ...formData, neighborhood: value })}
-              >
-                <SelectTrigger className="input-beautiful">
-                  <SelectValue placeholder="Mahallani tanlang" />
-                </SelectTrigger>
-                <SelectContent>
-                  {neighborhoods.map((neighborhood) => (
-                    <SelectItem key={neighborhood.id} value={neighborhood.name}>
-                      {neighborhood.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="street">Ko'cha nomi *</Label>
-              <Input
-                id="street"
-                placeholder="Ko'cha nomi"
-                className="input-beautiful"
-                value={formData.street}
-                onChange={(e) => setFormData({ ...formData, street: e.target.value })}
-                required
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="houseNumber">Uy raqami *</Label>
-              <Input
-                id="houseNumber"
-                placeholder="Uy raqami"
-                className="input-beautiful"
-                value={formData.houseNumber}
-                onChange={(e) => setFormData({ ...formData, houseNumber: e.target.value })}
-                required
-              />
-            </div>
-
-            {/* Delivery Option */}
-            {product?.has_delivery && (
-              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Truck className="h-4 w-4 text-blue-600" />
-                    <span className="text-sm font-medium text-blue-800">
-                      Yetkazib berish ({formatPrice(product.delivery_price)})
-                    </span>
-                  </div>
-                  <Switch checked={withDelivery} onCheckedChange={setWithDelivery} />
-                </div>
-              </div>
-            )}
-
-            <Separator />
-
-            <div className="space-y-2">
-              <div className="flex justify-between text-lg font-semibold">
-                <span>Jami:</span>
-                <span className="text-blue-600">{formatPrice(calculateTotalPrice())}</span>
-              </div>
-              {withDelivery && product?.has_delivery && (
-                <div className="text-sm text-gray-600">
-                  Mahsulot: {formatPrice(product.price * quantity)} + Yetkazib berish:{" "}
-                  {formatPrice(product.delivery_price)}
                 </div>
               )}
-            </div>
 
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setShowOrderDialog(false)}>
-                Bekor qilish
-              </Button>
-              <Button
-                type="submit"
-                disabled={orderLoading || product?.stock_quantity === 0 || quantity > (product?.stock_quantity || 0)}
-              >
-                {orderLoading ? (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                    Buyurtma berilmoqda...
-                  </>
-                ) : (
-                  <>
-                    <Zap className="mr-2 h-4 w-4" />
-                    Buyurtma berish
-                  </>
-                )}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+              {/* Address fields */}
+              {withDelivery && (
+                <>
+                  <Separator />
+                  <h4 className="font-semibold">Yetkazib berish manzili</h4>
+
+                  <div>
+                    <Label htmlFor="neighborhood">Mahalla *</Label>
+                    <Select value={neighborhood} onValueChange={setNeighborhood}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Mahallani tanlang" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {neighborhoods.map((n) => (
+                          <SelectItem key={n.id} value={n.name}>
+                            {n.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="street">Ko'cha nomi *</Label>
+                    <Input
+                      id="street"
+                      value={street}
+                      onChange={(e) => setStreet(e.target.value)}
+                      placeholder="Ko'cha nomini kiriting"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="houseNumber">Uy raqami *</Label>
+                    <Input
+                      id="houseNumber"
+                      value={houseNumber}
+                      onChange={(e) => setHouseNumber(e.target.value)}
+                      placeholder="Uy raqamini kiriting"
+                    />
+                  </div>
+                </>
+              )}
+
+              <Separator />
+
+              <div className="text-right">
+                <p className="text-sm text-gray-600">
+                  {product.price.toLocaleString()} so'm × {quantity}
+                  {withDelivery && product.has_delivery && (
+                    <span> + {product.delivery_price.toLocaleString()} so'm yetkazib berish</span>
+                  )}
+                </p>
+                <p className="text-lg font-bold">Jami: {calculateTotal().toLocaleString()} so'm</p>
+              </div>
+
+              <div className="flex space-x-2">
+                <Button variant="outline" onClick={() => setShowQuickOrder(false)} className="flex-1">
+                  Bekor qilish
+                </Button>
+                <Button onClick={handleQuickOrder} disabled={submitting} className="flex-1">
+                  {submitting ? "Buyurtma berilmoqda..." : "Buyurtma berish"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   )
 }

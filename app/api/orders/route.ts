@@ -5,35 +5,40 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const {
-      productId,
-      fullName,
+      product_id,
+      full_name,
       phone,
       address,
-      quantity = 1,
-      userId,
-      orderType = "immediate",
-      withDelivery = false,
+      quantity,
+      user_id,
+      with_delivery = false,
       neighborhood,
       street,
-      houseNumber,
+      house_number,
     } = body
 
-    if (!productId || !fullName || !phone || !address) {
-      return NextResponse.json({ error: "Barcha majburiy maydonlar talab qilinadi" }, { status: 400 })
+    // Validate required fields
+    if (!product_id || !full_name || !phone || !address || !quantity) {
+      return NextResponse.json({ error: "Barcha majburiy maydonlarni to'ldiring" }, { status: 400 })
     }
 
-    // Use the create_order function
+    // If delivery is requested, validate delivery fields
+    if (with_delivery && (!neighborhood || !street || !house_number)) {
+      return NextResponse.json({ error: "Yetkazib berish uchun to'liq manzil kerak" }, { status: 400 })
+    }
+
+    // Call the create_order function
     const { data, error } = await supabase.rpc("create_order", {
-      product_id_param: productId,
-      full_name_param: fullName,
+      product_id_param: product_id,
+      full_name_param: full_name,
       phone_param: phone,
       address_param: address,
       quantity_param: quantity,
-      user_id_param: userId,
-      with_delivery_param: withDelivery,
-      neighborhood_param: neighborhood,
-      street_param: street,
-      house_number_param: houseNumber,
+      user_id_param: user_id || null,
+      with_delivery_param: with_delivery,
+      neighborhood_param: neighborhood || null,
+      street_param: street || null,
+      house_number_param: house_number || null,
     })
 
     if (error) {
@@ -47,195 +52,102 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      order: data,
-      message: "Buyurtma muvaffaqiyatli yaratildi",
+      order_id: data.order_id,
+      total_amount: data.total_amount,
+      delivery_price: data.delivery_price,
+      message: data.message,
     })
   } catch (error) {
-    console.error("Order API error:", error)
-    return NextResponse.json({ error: "Ichki server xatosi" }, { status: 500 })
+    console.error("API Error:", error)
+    return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
   }
 }
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const sellerId = searchParams.get("sellerId")
-    const userId = searchParams.get("userId")
+    const user_id = searchParams.get("user_id")
+    const seller_id = searchParams.get("seller_id")
+    const status = searchParams.get("status")
+    const stage = searchParams.get("stage")
 
-    if (sellerId) {
-      // Get orders for seller using product relationship
-      const { data: orders, error } = await supabase
-        .from("orders")
-        .select(`
-          *,
-          products!orders_product_id_fkey (
-            id,
-            name,
-            image_url,
-            price,
-            product_type,
-            brand,
-            author,
-            seller_id,
-            has_delivery,
-            delivery_price
-          ),
-          users!orders_user_id_fkey (
-            full_name,
-            email,
-            phone
-          )
-        `)
-        .eq("products.seller_id", sellerId)
-        .order("created_at", { ascending: false })
-
-      if (error) {
-        console.error("Error fetching seller orders:", error)
-        return NextResponse.json({ error: "Buyurtmalarni olishda xatolik" }, { status: 500 })
-      }
-
-      return NextResponse.json({ success: true, orders: orders || [] })
-    }
-
-    if (userId) {
-      // Get orders for user
-      const { data: orders, error } = await supabase
-        .from("orders")
-        .select(`
-          *,
-          products!orders_product_id_fkey (
-            id,
-            name,
-            image_url,
-            price,
-            product_type,
-            brand,
-            author,
-            has_delivery,
-            delivery_price,
-            seller_id,
-            users:seller_id (
-              full_name,
-              company_name,
-              phone
-            )
-          )
-        `)
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false })
-
-      if (error) {
-        console.error("Error fetching user orders:", error)
-        return NextResponse.json({ error: "Buyurtmalarni olishda xatolik" }, { status: 500 })
-      }
-
-      return NextResponse.json({ success: true, orders: orders || [] })
-    }
-
-    // Get all orders (admin)
-    const { data: orders, error } = await supabase
+    let query = supabase
       .from("orders")
       .select(`
         *,
-        products!orders_product_id_fkey (name, price, has_delivery, delivery_price),
-        users!orders_user_id_fkey (full_name, email)
+        products (
+          id,
+          title,
+          price,
+          image_url,
+          seller_id,
+          users!products_seller_id_fkey (
+            full_name,
+            username
+          )
+        )
       `)
       .order("created_at", { ascending: false })
-      .limit(100)
+
+    if (user_id) {
+      query = query.eq("user_id", user_id)
+    }
+
+    if (seller_id) {
+      query = query.eq("products.seller_id", seller_id)
+    }
+
+    if (status) {
+      query = query.eq("status", status)
+    }
+
+    if (stage) {
+      query = query.eq("stage", Number.parseInt(stage))
+    }
+
+    const { data, error } = await query
 
     if (error) {
-      console.error("Error fetching all orders:", error)
+      console.error("Orders fetch error:", error)
       return NextResponse.json({ error: "Buyurtmalarni olishda xatolik" }, { status: 500 })
     }
 
-    return NextResponse.json({ success: true, orders: orders || [] })
+    return NextResponse.json({ orders: data || [] })
   } catch (error) {
-    console.error("Orders GET error:", error)
-    return NextResponse.json({ error: "Ichki server xatosi" }, { status: 500 })
+    console.error("API Error:", error)
+    return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
   }
 }
 
-export async function PUT(request: NextRequest) {
+export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json()
-    const { orderId, action, notes, pickupAddress, userId } = body
+    const { order_id, status, stage, notes } = body
 
-    if (!orderId || !action) {
-      return NextResponse.json({ error: "Order ID va action talab qilinadi" }, { status: 400 })
+    if (!order_id) {
+      return NextResponse.json({ error: "Buyurtma ID kerak" }, { status: 400 })
     }
 
-    // Get current order
-    const { data: currentOrder, error: fetchError } = await supabase
-      .from("orders")
-      .select("*")
-      .eq("id", orderId)
-      .single()
+    const updateData: any = { updated_at: new Date().toISOString() }
 
-    if (fetchError || !currentOrder) {
-      return NextResponse.json({ error: "Buyurtma topilmadi" }, { status: 404 })
-    }
+    if (status) updateData.status = status
+    if (stage) updateData.stage = stage
+    if (notes) updateData.notes = notes
 
-    const updateData: any = {
-      updated_at: new Date().toISOString(),
-    }
+    const { data, error } = await supabase.from("orders").update(updateData).eq("id", order_id).select().single()
 
-    // Handle different actions
-    switch (action) {
-      case "agree":
-        updateData.is_agree = true
-        updateData.status = "pending"
-        updateData.stage = 2
-        updateData.pickup_address = pickupAddress || currentOrder.address
-        if (notes) updateData.seller_notes = notes
-        break
-
-      case "reject":
-        updateData.is_agree = false
-        updateData.status = "cancelled"
-        updateData.stage = 0
-        if (notes) updateData.seller_notes = notes
-        break
-
-      case "client_went":
-        updateData.is_client_went = true
-        updateData.stage = 3
-        if (notes) updateData.client_notes = notes
-        break
-
-      case "client_not_went":
-        updateData.is_client_went = false
-        updateData.stage = 2
-        if (notes) updateData.client_notes = notes
-        break
-
-      case "product_given":
-        updateData.is_client_claimed = true
-        updateData.status = "completed"
-        updateData.stage = 4
-        if (notes) updateData.seller_notes = notes
-        break
-
-      case "product_not_given":
-        updateData.is_client_claimed = false
-        updateData.stage = 3
-        if (notes) updateData.seller_notes = notes
-        break
-
-      default:
-        return NextResponse.json({ error: "Noto'g'ri action" }, { status: 400 })
-    }
-
-    // Update order
-    const { error: updateError } = await supabase.from("orders").update(updateData).eq("id", orderId)
-
-    if (updateError) {
-      console.error("Order update error:", updateError)
+    if (error) {
+      console.error("Order update error:", error)
       return NextResponse.json({ error: "Buyurtmani yangilashda xatolik" }, { status: 500 })
     }
 
-    return NextResponse.json({ success: true, message: "Buyurtma muvaffaqiyatli yangilandi" })
+    return NextResponse.json({
+      success: true,
+      order: data,
+      message: "Buyurtma muvaffaqiyatli yangilandi",
+    })
   } catch (error) {
-    console.error("Order PUT error:", error)
-    return NextResponse.json({ error: "Ichki server xatosi" }, { status: 500 })
+    console.error("API Error:", error)
+    return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
   }
 }

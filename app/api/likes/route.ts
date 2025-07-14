@@ -4,65 +4,76 @@ import { supabase } from "@/lib/supabase"
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { productId, userId } = body
+    const { product_id, user_id } = body
 
-    if (!productId || !userId) {
-      return NextResponse.json({ error: "Product ID va User ID talab qilinadi" }, { status: 400 })
+    if (!product_id || !user_id) {
+      return NextResponse.json({ error: "Product ID va User ID kerak" }, { status: 400 })
     }
 
-    // Use the handle_like_toggle function
+    // Call the like toggle function
     const { data, error } = await supabase.rpc("handle_like_toggle", {
-      product_id_param: productId,
-      user_id_param: userId,
+      product_id_param: product_id,
+      user_id_param: user_id,
     })
 
     if (error) {
       console.error("Like toggle error:", error)
-      return NextResponse.json({ error: "Like qilishda xatolik yuz berdi" }, { status: 500 })
+      return NextResponse.json({ error: "Like toggle xatosi" }, { status: 500 })
     }
 
     return NextResponse.json(data)
   } catch (error) {
-    console.error("Like API Error:", error)
-    return NextResponse.json({ error: "Like qilishda xatolik yuz berdi" }, { status: 500 })
+    console.error("API Error:", error)
+    return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
   }
 }
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const productId = searchParams.get("productId")
-    const userId = searchParams.get("userId")
+    const product_id = searchParams.get("product_id")
+    const user_id = searchParams.get("user_id")
 
-    if (!productId) {
-      return NextResponse.json({ error: "Product ID talab qilinadi" }, { status: 400 })
+    if (!product_id) {
+      return NextResponse.json({ error: "Product ID kerak" }, { status: 400 })
     }
 
-    // Get like count
-    const { count } = await supabase
+    // Get likes count
+    const { data: likesData, error: likesError } = await supabase
       .from("likes")
-      .select("*", { count: "exact", head: true })
-      .eq("product_id", productId)
+      .select("id")
+      .eq("product_id", product_id)
 
-    let isLiked = false
-    if (userId) {
-      const { data: userLike } = await supabase
+    if (likesError) {
+      console.error("Likes count error:", likesError)
+      return NextResponse.json({ error: "Likes sonini olishda xatolik" }, { status: 500 })
+    }
+
+    const like_count = likesData?.length || 0
+    let is_liked = false
+
+    // Check if user liked this product
+    if (user_id) {
+      const { data: userLike, error: userLikeError } = await supabase
         .from("likes")
         .select("id")
-        .eq("product_id", productId)
-        .eq("user_id", userId)
-        .single()
+        .eq("product_id", product_id)
+        .eq("user_id", user_id)
+        .maybeSingle()
 
-      isLiked = !!userLike
+      if (userLikeError) {
+        console.error("User like check error:", userLikeError)
+      } else {
+        is_liked = !!userLike
+      }
     }
 
     return NextResponse.json({
-      success: true,
-      likeCount: count || 0,
-      isLiked,
+      like_count,
+      is_liked,
     })
   } catch (error) {
-    console.error("Like GET Error:", error)
-    return NextResponse.json({ error: "Like ma'lumotlarini olishda xatolik" }, { status: 500 })
+    console.error("API Error:", error)
+    return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
   }
 }
