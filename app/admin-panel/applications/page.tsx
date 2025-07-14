@@ -80,7 +80,6 @@ interface Application {
 export default function AdminApplicationsPage() {
   const router = useRouter()
   const [currentUser, setCurrentUser] = useState<any>(null) // Stores current logged-in user info
-  const [usersMap, setUsersMap] = useState<Map<string, User>>(new Map()) // To store user details fetched from Supabase
   const [applications, setApplications] = useState<Application[]>([])
   const [filteredApplications, setFilteredApplications] = useState<Application[]>([])
   const [loading, setLoading] = useState(true)
@@ -135,18 +134,18 @@ export default function AdminApplicationsPage() {
     }
 
     checkAdminAccess()
-  }, [router]) // Depend on router to push to login page
+  }, [router])
 
   // Fetch all applications directly from Supabase
   const fetchApplications = async () => {
     setLoading(true)
     try {
-      // Fetch seller applications
+      // Fetch seller applications, explicitly specifying the relationship for users
       const { data: sellerApps, error: sellerError } = await supabase
         .from("seller_applications")
         .select(`
           *,
-          users (
+          users:users!seller_applications_user_id_fkey (
             id, full_name, email, phone, username, company_name, is_verified_seller, is_admin, created_at, last_sign_in_at
           )
         `)
@@ -154,12 +153,12 @@ export default function AdminApplicationsPage() {
 
       if (sellerError) throw sellerError
 
-      // Fetch product applications
+      // Fetch product applications, explicitly specifying the relationship for users
       const { data: productApps, error: productError } = await supabase
         .from("product_applications")
         .select(`
           *,
-          users (
+          users:users!product_applications_user_id_fkey (
             id, full_name, email, phone, username, company_name, is_verified_seller, is_admin, created_at, last_sign_in_at
           )
         `)
@@ -167,12 +166,12 @@ export default function AdminApplicationsPage() {
 
       if (productError) throw productError
 
-      // Fetch complaints
+      // Fetch complaints, explicitly specifying the relationship for users
       const { data: complaints, error: complaintsError } = await supabase
         .from("complaints")
         .select(`
           *,
-          users (
+          users:users!complaints_user_id_fkey (
             id, full_name, email, phone, username, company_name, is_verified_seller, is_admin, created_at, last_sign_in_at
           ),
           orders (
@@ -239,7 +238,7 @@ export default function AdminApplicationsPage() {
           app.name?.toLowerCase().includes(lowerCaseSearch) ||
           app.subject?.toLowerCase().includes(lowerCaseSearch) ||
           app.message?.toLowerCase().includes(lowerCaseSearch) ||
-          app.users?.phone?.toLowerCase().includes(searchQuery) // Direct phone search
+          app.users?.phone?.includes(searchQuery) // Direct phone search
       )
     }
 
@@ -284,8 +283,9 @@ export default function AdminApplicationsPage() {
       }
 
       // Update the application in Supabase
+      const tableName = selectedApplication.type === "complaint" ? "complaints" : `${selectedApplication.type}_applications`
       const { data: updatedApp, error: appUpdateError } = await supabase
-        .from(selectedApplication.type === "complaint" ? "complaints" : `${selectedApplication.type}_applications`)
+        .from(tableName)
         .update(updateData)
         .eq("id", selectedApplication.id)
         .select()
@@ -344,7 +344,7 @@ export default function AdminApplicationsPage() {
           [
             app.id.slice(-8), // Short ID for readability
             app.type === "seller" ? "Sotuvchi" : app.type === "product" ? "Mahsulot" : "Murojaat",
-            app.status === "pending" ? "Kutilmoqda" : app.status === "approved" || app.status === "approved_verified" ? "Tasdiqlangan" : "Rad etilgan",
+            app.status === "pending" ? "Kutilmoqda" : app.status === "approved" || app.status === "approved_verified" ? "Tasdiqlangan" : app.status === "resolved" ? "Hal qilingan" : "Rad etilgan",
             app.users?.full_name || app.name || "Noma'lum",
             app.users?.email || app.email || "Noma'lum",
             app.users?.phone || app.phone || "Noma'lum",
@@ -395,7 +395,7 @@ export default function AdminApplicationsPage() {
             Rad etilgan
           </Badge>
         )
-      case "resolved": // Added for complaints
+      case "resolved":
         return (
           <Badge className="bg-blue-100 text-blue-800">
             <CheckCircle className="h-3 w-3 mr-1" />
@@ -450,11 +450,10 @@ export default function AdminApplicationsPage() {
   // Responsive phone number formatting
   const formatPhoneNumber = (phone?: string) => {
     if (!phone) return null
-    // Basic formatting: +XXX XXX XX XX XXXXX
     if (phone.startsWith('+')) {
       return `+${phone.substring(1, 4)} ${phone.substring(4, 7)} ${phone.substring(7, 9)} ${phone.substring(9, 11)} ${phone.substring(11)}`
     }
-    return phone // Return as is if not starting with '+'
+    return phone
   }
 
   // Initial loading state
@@ -462,18 +461,15 @@ export default function AdminApplicationsPage() {
     return (
       <div className="space-y-6 p-4 lg:p-8">
         <div className="animate-pulse space-y-6">
-          {/* Header skeleton */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="h-8 bg-gray-200 rounded w-1/4"></div>
             <div className="h-10 w-full sm:w-auto bg-gray-200 rounded-md"></div>
           </div>
-          {/* Stats skeleton */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6">
             {[...Array(4)].map((_, i) => (
               <div key={i} className="h-24 bg-gray-200 rounded-2xl"></div>
             ))}
           </div>
-          {/* Applications list skeleton */}
           <div className="space-y-4">
             {[...Array(5)].map((_, i) => (
               <div key={i} className="h-32 bg-gray-200 rounded-2xl"></div>
@@ -579,29 +575,26 @@ export default function AdminApplicationsPage() {
 
           {/* Applications List */}
           <div className="space-y-4">
-            {loading ? ( // Show skeleton if loading
+            {loading ? (
               <div className="text-center py-8">
                 <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
                 <p className="text-gray-600">Yuklanmoqda...</p>
               </div>
-            ) : filteredApplications.length === 0 ? ( // Show message if no applications found
+            ) : filteredApplications.length === 0 ? (
               <div className="text-center py-12">
                 <FileText className="h-16 w-16 text-gray-300 mx-auto mb-4" />
                 <h3 className="text-xl font-semibold mb-2">Arizalar yo'q</h3>
                 <p className="text-gray-600">Tanlangan mezonlarga mos keladigan arizalar topilmadi.</p>
               </div>
             ) : (
-              // Render applications list
               filteredApplications.map((application) => (
                 <Card key={application.id} className="border hover:shadow-md transition-shadow duration-200">
                   <CardContent className="p-4 lg:p-6">
                     <div className="flex items-start justify-between gap-4 flex-wrap lg:flex-nowrap">
                       <div className="flex items-start gap-4 flex-1 min-w-0">
-                        {/* Application Type Icon */}
                         <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center shrink-0">
                           {getTypeIcon(application.type)}
                         </div>
-                        {/* Application Details */}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1 flex-wrap">
                             <h3 className="font-semibold text-lg truncate">Ariza #{application.id.slice(-8)}</h3>
@@ -622,7 +615,6 @@ export default function AdminApplicationsPage() {
                           </p>
                         </div>
                       </div>
-                      {/* Action Buttons (View, Call) */}
                       <div className="flex items-center gap-2 shrink-0">
                         <Button
                           size="sm"
@@ -648,7 +640,6 @@ export default function AdminApplicationsPage() {
                       </div>
                     </div>
 
-                    {/* Quick Info (Company/Subject) */}
                     {(application.type === "seller" || application.type === "contact") && (
                       <div className="mt-4 p-3 bg-gray-50 rounded-lg">
                         {application.type === "seller" && application.company_name && (
@@ -667,10 +658,9 @@ export default function AdminApplicationsPage() {
                       </div>
                     )}
 
-                    {/* Action Buttons for Pending/Resolve */}
                     {(application.status === "pending" || (application.type === "complaint" && application.status === "pending")) && (
                       <div className="flex gap-2 flex-wrap mt-3">
-                        {application.type !== "complaint" && ( // Show approve for seller/product
+                        {application.type !== "complaint" && (
                           <Button
                             size="sm"
                             className="bg-green-600 hover:bg-green-700"
@@ -680,7 +670,7 @@ export default function AdminApplicationsPage() {
                             Tasdiqlash
                           </Button>
                         )}
-                        {application.type === "seller" && ( // Special button for seller verification
+                        {application.type === "seller" && (
                           <Button
                             size="sm"
                             className="bg-blue-600 hover:bg-blue-700"
@@ -690,7 +680,7 @@ export default function AdminApplicationsPage() {
                             Verified qilish
                           </Button>
                         )}
-                        {application.type === "complaint" && ( // Show resolve for complaints
+                        {application.type === "complaint" && (
                           <Button
                             size="sm"
                             className="bg-green-600 hover:bg-green-700"
@@ -712,7 +702,6 @@ export default function AdminApplicationsPage() {
                       </div>
                     )}
 
-                    {/* Admin Notes Display */}
                     {application.admin_notes && (
                       <div className="mt-4 p-3 bg-gray-50 rounded-lg">
                         <p className="text-sm font-medium text-gray-700 mb-1">Admin eslatmasi:</p>
@@ -731,34 +720,30 @@ export default function AdminApplicationsPage() {
             )}
           </div>
 
-          {/* Pagination Section */}
-          {filteredApplications.length > 0 && Math.ceil(applications.length / 10) > 1 && ( // Simple pagination logic, might need improvement for large datasets
+          {/* Pagination Section (basic implementation) */}
+          {filteredApplications.length > 0 && Math.ceil(applications.length / 10) > 1 && (
             <div className="flex flex-col sm:flex-row items-center justify-between mt-6 gap-4">
               <p className="text-sm text-gray-600">
-                {applications.length} tadan {filteredApplications.length} ko'rsatilmoqda
+                {applications.length} ta umumiydan {filteredApplications.length} ta ko'rsatilmoqda
               </p>
               <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                    setFilteredApplications(applications.slice((Math.max(0, Math.ceil(applications.length / 10) - 1 - 1)) * 10, Math.ceil(applications.length / 10) * 10))
-                  }}
-                  disabled={true /* Pagination logic needs proper implementation based on filteredApplications */}
+                  onClick={() => {}} // Placeholder for pagination logic
+                  disabled={true}
                 >
                   <ChevronLeft className="h-4 w-4" />
                   Oldingi
                 </Button>
                 <span className="text-sm min-w-[60px] text-center">
-                  1 / 1
+                  1 / 1 {/* Placeholder, proper page number needed */}
                 </span>
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                    setFilteredApplications(applications.slice(10, 20))
-                  }}
-                  disabled={true /* Pagination logic needs proper implementation */}
+                  onClick={() => {}} // Placeholder for pagination logic
+                  disabled={true}
                 >
                   Keyingi
                   <ChevronRight className="h-4 w-4" />
@@ -785,7 +770,6 @@ export default function AdminApplicationsPage() {
 
           {selectedApplication ? (
             <div className="space-y-6">
-              {/* User/Applicant Info Card */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Ariza beruvchi haqida</CardTitle>
@@ -814,7 +798,6 @@ export default function AdminApplicationsPage() {
                 </CardContent>
               </Card>
 
-              {/* Application Details Card */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Ariza haqida</CardTitle>
@@ -843,7 +826,6 @@ export default function AdminApplicationsPage() {
                 </CardContent>
               </Card>
 
-              {/* Type-specific Content Cards */}
               {(selectedApplication.type === "seller" || selectedApplication.type === "product") && (
                 <Card>
                   <CardHeader>
@@ -909,7 +891,6 @@ export default function AdminApplicationsPage() {
                 </Card>
               )}
 
-              {/* Contact Message Card */}
               {selectedApplication.type === "contact" && (
                 <Card>
                   <CardHeader>
@@ -937,7 +918,6 @@ export default function AdminApplicationsPage() {
                 </Card>
               )}
 
-              {/* Admin Notes Card */}
               {selectedApplication.admin_notes && (
                 <Card>
                   <CardHeader>
