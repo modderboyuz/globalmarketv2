@@ -1,7 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
-
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+import { supabase } from "@/lib/supabase"
 
 export async function GET(request: NextRequest) {
   try {
@@ -120,6 +118,65 @@ export async function GET(request: NextRequest) {
     })
   } catch (error) {
     console.error("Admin users API error:", error)
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const { userId, is_verified_seller, is_active } = body
+
+    if (!userId) {
+      return NextResponse.json({ error: "User ID talab qilinadi" }, { status: 400 })
+    }
+
+    // Get authorization header
+    const authHeader = request.headers.get("authorization")
+    if (!authHeader) {
+      return NextResponse.json({ error: "No authorization header" }, { status: 401 })
+    }
+
+    const token = authHeader.replace("Bearer ", "")
+
+    // Verify user with token
+    const {
+      data: { user: currentUser },
+      error: authError,
+    } = await supabase.auth.getUser(token)
+
+    if (authError || !currentUser) {
+      return NextResponse.json({ error: "Invalid token" }, { status: 401 })
+    }
+
+    const { data: adminData } = await supabase.from("users").select("is_admin").eq("id", currentUser.id).single()
+
+    if (!adminData?.is_admin) {
+      return NextResponse.json({ error: "Admin access required" }, { status: 403 })
+    }
+
+    const updateData: any = { updated_at: new Date().toISOString() }
+
+    if (typeof is_verified_seller === "boolean") {
+      updateData.is_verified_seller = is_verified_seller
+      // If a user is verified, they must also be a seller
+      if (is_verified_seller) {
+        updateData.is_seller = true
+      }
+    }
+    if (typeof is_active === "boolean") {
+      updateData.is_active = is_active
+    }
+
+    const { data, error } = await supabase.from("users").update(updateData).eq("id", userId).select().single()
+
+    if (error) {
+      throw error
+    }
+
+    return NextResponse.json({ success: true, user: data, message: "Foydalanuvchi yangilandi" })
+  } catch (error) {
+    console.error("Admin user update API error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
