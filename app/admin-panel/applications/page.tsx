@@ -29,6 +29,7 @@ import {
   Package,
   MessageSquare,
   Phone,
+  RefreshCw, // Added for loading state
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
@@ -54,7 +55,12 @@ interface Application {
   experience?: string
   description?: string
   // Product application fields
-  product_data?: any
+  product_data?: {
+    name: string
+    price: number
+    description?: string
+    images?: string[]
+  }
   // Contact message fields
   name?: string
   email?: string
@@ -124,10 +130,14 @@ export default function AdminApplicationsPage() {
 
   const fetchApplications = async () => {
     try {
+      setLoading(true)
       const {
         data: { session },
       } = await supabase.auth.getSession()
-      if (!session) return
+      if (!session) {
+        router.push("/login")
+        return
+      }
 
       const response = await fetch("/api/applications", {
         headers: {
@@ -135,17 +145,28 @@ export default function AdminApplicationsPage() {
         },
       })
 
+      if (!response.ok) {
+        if (response.status === 401) {
+          toast.error("Sizda ruxsat yo'q. Qayta kirish amalga oshirilmoqda.")
+          router.push("/login")
+          return
+        }
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
       const result = await response.json()
 
       if (result.success) {
         setApplications(result.applications)
         calculateStats(result.applications)
       } else {
-        throw new Error(result.error)
+        throw new Error(result.error || "Unknown error")
       }
     } catch (error) {
       console.error("Error fetching applications:", error)
       toast.error("Arizalarni olishda xatolik")
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -153,7 +174,7 @@ export default function AdminApplicationsPage() {
     const stats = {
       total: applicationsData.length,
       pending: applicationsData.filter((a) => a.status === "pending").length,
-      approved: applicationsData.filter((a) => a.status === "approved").length,
+      approved: applicationsData.filter((a) => a.status === "approved" || a.status === "approved_verified").length, // Include approved_verified
       rejected: applicationsData.filter((a) => a.status === "rejected").length,
     }
     setStats(stats)
@@ -170,7 +191,8 @@ export default function AdminApplicationsPage() {
           app.company_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
           app.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
           app.subject?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          app.id.toLowerCase().includes(searchQuery.toLowerCase()),
+          app.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          app.message?.toLowerCase().includes(searchQuery.toLowerCase()), // Search in message for contacts
       )
     }
 
@@ -192,7 +214,10 @@ export default function AdminApplicationsPage() {
       const {
         data: { session },
       } = await supabase.auth.getSession()
-      if (!session) return
+      if (!session) {
+        router.push("/login")
+        return
+      }
 
       const response = await fetch("/api/applications", {
         method: "PUT",
@@ -208,16 +233,21 @@ export default function AdminApplicationsPage() {
         }),
       })
 
+      if (!response.ok) {
+        const errorResult = await response.json()
+        throw new Error(errorResult.error || `HTTP error! status: ${response.status}`)
+      }
+
       const result = await response.json()
 
       if (result.success) {
         toast.success(result.message)
-        await fetchApplications()
+        await fetchApplications() // Refresh the list
         setShowActionDialog(false)
         setSelectedApplication(null)
         setActionNotes("")
       } else {
-        throw new Error(result.error)
+        throw new Error(result.error || "Unknown error")
       }
     } catch (error: any) {
       toast.error(error.message || "Xatolik yuz berdi")
@@ -227,27 +257,30 @@ export default function AdminApplicationsPage() {
   const openActionDialog = (application: Application, action: string) => {
     setSelectedApplication(application)
     setActionType(action)
+    setActionNotes("") // Clear notes when opening
     setShowActionDialog(true)
   }
 
   const exportApplications = async () => {
     try {
       const csvContent = [
-        ["ID", "Tur", "Holat", "Ariza beruvchi", "Email", "Telefon", "Sana"].join(","),
+        ["ID", "Tur", "Holat", "Ariza beruvchi", "Email", "Telefon", "Sana", "Kompaniya/Mavzu", "Admin Eslatmasi"].join(","),
         ...filteredApplications.map((app) =>
           [
             app.id.slice(-8),
             app.type === "seller" ? "Sotuvchi" : app.type === "product" ? "Mahsulot" : "Murojaat",
-            app.status === "pending" ? "Kutilmoqda" : app.status === "approved" ? "Tasdiqlangan" : "Rad etilgan",
+            app.status === "pending" ? "Kutilmoqda" : app.status === "approved" || app.status === "approved_verified" ? "Tasdiqlangan" : "Rad etilgan",
             app.users?.full_name || app.name || "",
             app.users?.email || app.email || "",
             app.users?.phone || app.phone || "",
             new Date(app.created_at).toLocaleDateString(),
+            app.type === "seller" ? app.company_name || "" : app.type === "contact" ? app.subject || "" : "",
+            app.admin_notes || "",
           ].join(","),
         ),
       ].join("\n")
 
-      const blob = new Blob([csvContent], { type: "text/csv" })
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement("a")
       a.href = url
@@ -272,10 +305,11 @@ export default function AdminApplicationsPage() {
           </Badge>
         )
       case "approved":
+      case "approved_verified": // Handle approved_verified as approved for display
         return (
           <Badge className="bg-green-100 text-green-800">
             <CheckCircle className="h-3 w-3 mr-1" />
-            Tasdiqlangan
+            {status === "approved_verified" ? "Tasdiqlangan (Verified)" : "Tasdiqlangan"}
           </Badge>
         )
       case "rejected":
@@ -317,6 +351,7 @@ export default function AdminApplicationsPage() {
   }
 
   const formatDate = (dateString: string) => {
+    if (!dateString) return "Noma'lum sana"
     return new Date(dateString).toLocaleDateString("uz-UZ", {
       year: "numeric",
       month: "long",
@@ -328,10 +363,13 @@ export default function AdminApplicationsPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 p-4 lg:p-8">
         <div className="animate-pulse space-y-6">
-          <div className="h-8 bg-gray-200 rounded w-1/4"></div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="h-8 bg-gray-200 rounded w-1/4"></div>
+            <div className="h-10 w-full sm:w-auto bg-gray-200 rounded-md"></div>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6">
             {[...Array(4)].map((_, i) => (
               <div key={i} className="h-24 bg-gray-200 rounded-2xl"></div>
             ))}
@@ -347,7 +385,7 @@ export default function AdminApplicationsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-4 lg:p-8">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -402,11 +440,11 @@ export default function AdminApplicationsPage() {
         </CardHeader>
         <CardContent>
           <div className="flex flex-col sm:flex-row gap-4 mb-6">
-            <div className="flex-1">
+            <div className="flex-1 min-w-[200px]">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
                 <Input
-                  placeholder="Ariza qidirish..."
+                  placeholder="Ariza ID, ism, email, kompaniya, mavzu bo'yicha qidirish..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="pl-10"
@@ -443,30 +481,30 @@ export default function AdminApplicationsPage() {
               <div className="text-center py-12">
                 <FileText className="h-16 w-16 text-gray-300 mx-auto mb-4" />
                 <h3 className="text-xl font-semibold mb-2">Arizalar yo'q</h3>
-                <p className="text-gray-600">Hozircha hech qanday ariza topilmadi</p>
+                <p className="text-gray-600">Tanlangan mezonlarga mos keladigan arizalar topilmadi.</p>
               </div>
             ) : (
               filteredApplications.map((application) => (
-                <Card key={application.id} className="border hover:shadow-md transition-shadow">
+                <Card key={application.id} className="border hover:shadow-md transition-shadow duration-200">
                   <CardContent className="p-4 lg:p-6">
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-start gap-4">
-                        <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
+                    <div className="flex items-start justify-between mb-4 flex-wrap lg:flex-nowrap gap-4">
+                      <div className="flex items-start gap-4 flex-1 min-w-0">
+                        <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center shrink-0">
                           {getTypeIcon(application.type)}
                         </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <h3 className="font-semibold">Ariza #{application.id.slice(-8)}</h3>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-2 flex-wrap">
+                            <h3 className="font-semibold truncate">Ariza #{application.id.slice(-8)}</h3>
                             {getStatusBadge(application.status)}
                           </div>
-                          <p className="text-sm text-gray-600 mb-1">
+                          <p className="text-sm text-gray-600 truncate">
                             <strong>Tur:</strong> {getTypeName(application.type)}
                           </p>
-                          <p className="text-sm text-gray-600 mb-1">
+                          <p className="text-sm text-gray-600 truncate">
                             <strong>Ariza beruvchi:</strong>{" "}
                             {application.users?.full_name || application.name || "Noma'lum"}
                           </p>
-                          <p className="text-sm text-gray-600 mb-1">
+                          <p className="text-sm text-gray-600 truncate">
                             <strong>Email:</strong> {application.users?.email || application.email || "Noma'lum"}
                           </p>
                           <p className="text-sm text-gray-600">
@@ -475,7 +513,7 @@ export default function AdminApplicationsPage() {
                         </div>
                       </div>
 
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 shrink-0">
                         <Button
                           size="sm"
                           variant="outline"
@@ -492,6 +530,7 @@ export default function AdminApplicationsPage() {
                             size="sm"
                             variant="outline"
                             onClick={() => window.open(`tel:${application.users.phone}`)}
+                            aria-label={`Qo'ng'iroq qilish ${application.users.phone}`}
                           >
                             <Phone className="h-4 w-4" />
                           </Button>
@@ -499,26 +538,28 @@ export default function AdminApplicationsPage() {
                       </div>
                     </div>
 
-                    {/* Quick Info */}
-                    {application.type === "seller" && application.company_name && (
-                      <div className="mb-4 p-3 bg-blue-50 rounded-lg">
-                        <p className="text-sm font-medium text-blue-700">Kompaniya: {application.company_name}</p>
-                        {application.business_type && (
-                          <p className="text-sm text-blue-600">Biznes turi: {application.business_type}</p>
+                    {/* Quick Info for Seller/Contact */}
+                    {(application.type === "seller" || application.type === "contact") && (
+                      <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+                        {application.type === "seller" && application.company_name && (
+                          <p className="text-sm font-medium text-gray-800 mb-1">
+                            Kompaniya: {application.company_name}
+                          </p>
+                        )}
+                        {application.type === "contact" && application.subject && (
+                          <p className="text-sm font-medium text-gray-800 mb-1">
+                            Mavzu: {application.subject}
+                          </p>
+                        )}
+                        {application.type === "contact" && application.message && (
+                          <p className="text-sm text-gray-600 line-clamp-2">{application.message}</p>
                         )}
                       </div>
                     )}
 
-                    {application.type === "contact" && application.subject && (
-                      <div className="mb-4 p-3 bg-green-50 rounded-lg">
-                        <p className="text-sm font-medium text-green-700">Mavzu: {application.subject}</p>
-                        <p className="text-sm text-green-600 line-clamp-2">{application.message}</p>
-                      </div>
-                    )}
-
-                    {/* Action Buttons */}
+                    {/* Action Buttons for Pending applications */}
                     {application.status === "pending" && (
-                      <div className="flex gap-2 flex-wrap">
+                      <div className="flex gap-2 flex-wrap mt-3">
                         <Button
                           size="sm"
                           className="bg-green-600 hover:bg-green-700"
@@ -534,13 +575,13 @@ export default function AdminApplicationsPage() {
                             onClick={() => openActionDialog(application, "approve_verified")}
                           >
                             <CheckCircle className="h-4 w-4 mr-2" />
-                            Tasdiqlash va Verified qilish
+                            Verified qilish
                           </Button>
                         )}
                         <Button
                           size="sm"
                           variant="outline"
-                          className="border-red-200 text-red-600 hover:bg-red-50 bg-transparent"
+                          className="border-red-200 text-red-600 hover:bg-red-50"
                           onClick={() => openActionDialog(application, "reject")}
                         >
                           <XCircle className="h-4 w-4 mr-2" />
@@ -549,6 +590,7 @@ export default function AdminApplicationsPage() {
                       </div>
                     )}
 
+                    {/* Admin Notes */}
                     {application.admin_notes && (
                       <div className="mt-4 p-3 bg-gray-50 rounded-lg">
                         <p className="text-sm font-medium text-gray-700 mb-1">Admin eslatmasi:</p>
@@ -564,8 +606,11 @@ export default function AdminApplicationsPage() {
       </Card>
 
       {/* Details Dialog */}
-      <Dialog open={showDetailsDialog} onOpenChange={setShowDetailsDialog}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <Dialog open={showDetailsDialog} onOpenChange={(isOpen) => {
+        setShowDetailsDialog(isOpen)
+        if (!isOpen) setSelectedApplication(null) // Clear selection when closing
+      }}>
+        <DialogContent className="max-w-2xl w-full max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Ariza tafsilotlari</DialogTitle>
             <DialogDescription>
@@ -574,132 +619,194 @@ export default function AdminApplicationsPage() {
             </DialogDescription>
           </DialogHeader>
 
-          {selectedApplication && (
-            <div className="space-y-4">
-              {/* Basic Info */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <h4 className="font-semibold mb-2">Ariza beruvchi</h4>
-                  <p className="text-sm">
-                    <strong>Ism:</strong>{" "}
-                    {selectedApplication.users?.full_name || selectedApplication.name || "Noma'lum"}
-                  </p>
-                  <p className="text-sm">
-                    <strong>Email:</strong>{" "}
-                    {selectedApplication.users?.email || selectedApplication.email || "Noma'lum"}
-                  </p>
-                  <p className="text-sm">
-                    <strong>Telefon:</strong>{" "}
-                    {selectedApplication.users?.phone || selectedApplication.phone || "Noma'lum"}
-                  </p>
-                  {selectedApplication.users?.username && (
-                    <p className="text-sm">
-                      <strong>Username:</strong> @{selectedApplication.users.username}
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <h4 className="font-semibold mb-2">Ariza ma'lumotlari</h4>
-                  <p className="text-sm">
-                    <strong>Tur:</strong> {getTypeName(selectedApplication.type)}
-                  </p>
-                  <p className="text-sm">
-                    <strong>Holat:</strong> {getStatusBadge(selectedApplication.status)}
-                  </p>
-                  <p className="text-sm">
-                    <strong>Sana:</strong> {formatDate(selectedApplication.created_at)}
-                  </p>
-                  {selectedApplication.reviewed_at && (
-                    <p className="text-sm">
-                      <strong>Ko'rib chiqilgan:</strong> {formatDate(selectedApplication.reviewed_at)}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* Type-specific content */}
-              {selectedApplication.type === "seller" && (
-                <div>
-                  <h4 className="font-semibold mb-2">Sotuvchi ma'lumotlari</h4>
-                  <div className="space-y-2 text-sm">
-                    {selectedApplication.company_name && (
-                      <p>
-                        <strong>Kompaniya nomi:</strong> {selectedApplication.company_name}
-                      </p>
-                    )}
-                    {selectedApplication.business_type && (
-                      <p>
-                        <strong>Biznes turi:</strong> {selectedApplication.business_type}
-                      </p>
-                    )}
-                    {selectedApplication.experience && (
-                      <p>
-                        <strong>Tajriba:</strong> {selectedApplication.experience}
-                      </p>
-                    )}
-                    {selectedApplication.description && (
+          {selectedApplication ? (
+            <div className="space-y-6">
+              {/* User/Applicant Info */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Ariza beruvchi haqida</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="font-semibold mb-1">Ism:</p>
+                      <p className="text-gray-700">{selectedApplication.users?.full_name || selectedApplication.name || "Noma'lum"}</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold mb-1">Email:</p>
+                      <p className="text-gray-700">{selectedApplication.users?.email || selectedApplication.email || "Noma'lum"}</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold mb-1">Telefon:</p>
+                      <p className="text-gray-700">{selectedApplication.users?.phone || selectedApplication.phone || "Noma'lum"}</p>
+                    </div>
+                    {selectedApplication.users?.username && (
                       <div>
-                        <p className="font-medium">Tavsif:</p>
-                        <p className="text-gray-600">{selectedApplication.description}</p>
+                        <p className="font-semibold mb-1">Username:</p>
+                        <p className="text-gray-700">@{selectedApplication.users.username}</p>
                       </div>
                     )}
                   </div>
-                </div>
-              )}
+                </CardContent>
+              </Card>
 
-              {selectedApplication.type === "product" && selectedApplication.product_data && (
-                <div>
-                  <h4 className="font-semibold mb-2">Mahsulot ma'lumotlari</h4>
-                  <div className="space-y-2 text-sm">
-                    <p>
-                      <strong>Nomi:</strong> {selectedApplication.product_data.name}
-                    </p>
-                    <p>
-                      <strong>Narx:</strong> {selectedApplication.product_data.price} so'm
-                    </p>
-                    {selectedApplication.product_data.description && (
+              {/* Application Details */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Ariza haqida</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="font-semibold mb-1">Tur:</p>
+                      <p className="text-gray-700">{getTypeName(selectedApplication.type)}</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold mb-1">Holat:</p>
+                      <p>{getStatusBadge(selectedApplication.status)}</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold mb-1">Ariza berilgan sana:</p>
+                      <p className="text-gray-700">{formatDate(selectedApplication.created_at)}</p>
+                    </div>
+                    {selectedApplication.reviewed_at && (
                       <div>
-                        <p className="font-medium">Tavsif:</p>
-                        <p className="text-gray-600">{selectedApplication.product_data.description}</p>
+                        <p className="font-semibold mb-1">Ko'rib chiqilgan sana:</p>
+                        <p className="text-gray-700">{formatDate(selectedApplication.reviewed_at)}</p>
                       </div>
                     )}
                   </div>
-                </div>
+                </CardContent>
+              </Card>
+
+              {/* Type-specific Content */}
+              {(selectedApplication.type === "seller" || selectedApplication.type === "product") && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">
+                      {selectedApplication.type === "seller" ? "Sotuvchi ma'lumotlari" : "Mahsulot ma'lumotlari"}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3 text-sm">
+                      {selectedApplication.type === "seller" && (
+                        <>
+                          {selectedApplication.company_name && (
+                            <p>
+                              <span className="font-semibold">Kompaniya nomi: </span>
+                              <span className="text-gray-700">{selectedApplication.company_name}</span>
+                            </p>
+                          )}
+                          {selectedApplication.business_type && (
+                            <p>
+                              <span className="font-semibold">Biznes turi: </span>
+                              <span className="text-gray-700">{selectedApplication.business_type}</span>
+                            </p>
+                          )}
+                          {selectedApplication.experience && (
+                            <p>
+                              <span className="font-semibold">Tajriba: </span>
+                              <span className="text-gray-700">{selectedApplication.experience}</span>
+                            </p>
+                          )}
+                          {selectedApplication.description && (
+                            <div>
+                              <p className="font-semibold mb-1">Tavsif:</p>
+                              <p className="text-gray-700 whitespace-pre-wrap">{selectedApplication.description}</p>
+                            </div>
+                          )}
+                        </>
+                      )}
+                      {selectedApplication.type === "product" && selectedApplication.product_data && (
+                        <>
+                          {selectedApplication.product_data.name && (
+                            <p>
+                              <span className="font-semibold">Mahsulot nomi: </span>
+                              <span className="text-gray-700">{selectedApplication.product_data.name}</span>
+                            </p>
+                          )}
+                          {selectedApplication.product_data.price !== undefined && (
+                            <p>
+                              <span className="font-semibold">Narxi: </span>
+                              <span className="text-gray-700">{selectedApplication.product_data.price.toLocaleString('uz-UZ')} so'm</span>
+                            </p>
+                          )}
+                          {selectedApplication.product_data.description && (
+                            <div>
+                              <p className="font-semibold mb-1">Mahsulot tavsifi:</p>
+                              <p className="text-gray-700 whitespace-pre-wrap">{selectedApplication.product_data.description}</p>
+                            </div>
+                          )}
+                          {selectedApplication.product_data.images && selectedApplication.product_data.images.length > 0 && (
+                            <div>
+                              <p className="font-semibold mb-1">Mahsulot rasmlari:</p>
+                              <div className="flex gap-2 overflow-x-auto pb-2">
+                                {selectedApplication.product_data.images.map((imgUrl, index) => (
+                                  <img
+                                    key={index}
+                                    src={imgUrl}
+                                    alt={`Mahsulot rasmi ${index + 1}`}
+                                    className="w-20 h-20 object-cover rounded-md cursor-pointer"
+                                    onClick={() => window.open(imgUrl)} // Open image in new tab
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
               )}
 
+              {/* Contact Message */}
               {selectedApplication.type === "contact" && (
-                <div>
-                  <h4 className="font-semibold mb-2">Murojaat ma'lumotlari</h4>
-                  <div className="space-y-2 text-sm">
-                    {selectedApplication.subject && (
-                      <p>
-                        <strong>Mavzu:</strong> {selectedApplication.subject}
-                      </p>
-                    )}
-                    {selectedApplication.message && (
-                      <div>
-                        <p className="font-medium">Xabar:</p>
-                        <p className="text-gray-600">{selectedApplication.message}</p>
-                      </div>
-                    )}
-                    {selectedApplication.admin_response && (
-                      <div>
-                        <p className="font-medium">Admin javobi:</p>
-                        <p className="text-blue-600">{selectedApplication.admin_response}</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Murojaat tafsilotlari</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3 text-sm">
+                      {selectedApplication.subject && (
+                        <p>
+                          <span className="font-semibold">Mavzu: </span>
+                          <span className="text-gray-700">{selectedApplication.subject}</span>
+                        </p>
+                      )}
+                      {selectedApplication.message && (
+                        <div>
+                          <p className="font-semibold mb-1">Xabar:</p>
+                          <p className="text-gray-700 whitespace-pre-wrap">{selectedApplication.message}</p>
+                        </div>
+                      )}
+                      {selectedApplication.admin_response && (
+                        <div>
+                          <p className="font-semibold mb-1 text-blue-700">Admin javobi:</p>
+                          <p className="text-blue-700 whitespace-pre-wrap">{selectedApplication.admin_response}</p>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
               )}
 
+              {/* Admin Notes */}
               {selectedApplication.admin_notes && (
-                <div>
-                  <h4 className="font-semibold mb-2">Admin eslatmasi</h4>
-                  <div className="p-3 bg-gray-50 rounded-lg">
-                    <p className="text-sm">{selectedApplication.admin_notes}</p>
-                  </div>
-                </div>
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Admin eslatmasi</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-gray-700 whitespace-pre-wrap">{selectedApplication.admin_notes}</p>
+                  </CardContent>
+                </Card>
               )}
+            </div>
+          ) : (
+            <div className="text-center py-10">
+              <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
+              <p className="text-gray-600">Yuklanmoqda...</p>
             </div>
           )}
 
@@ -708,7 +815,7 @@ export default function AdminApplicationsPage() {
               Yopish
             </Button>
             {selectedApplication?.users?.phone && (
-              <Button onClick={() => window.open(`tel:${selectedApplication.users.phone}`)}>
+              <Button onClick={() => window.open(`tel:${selectedApplication.users.phone}`)} aria-label={`Qo'ng'iroq qilish ${selectedApplication.users.phone}`}>
                 <Phone className="h-4 w-4 mr-2" />
                 Qo'ng'iroq qilish
               </Button>
@@ -718,29 +825,41 @@ export default function AdminApplicationsPage() {
       </Dialog>
 
       {/* Action Dialog */}
-      <Dialog open={showActionDialog} onOpenChange={setShowActionDialog}>
-        <DialogContent>
+      <Dialog open={showActionDialog} onOpenChange={(isOpen) => {
+        setShowActionDialog(isOpen)
+        if (!isOpen) {
+          setSelectedApplication(null) // Clear selection when closing
+          setActionNotes("")
+        }
+      }}>
+        <DialogContent className="max-w-md w-full">
           <DialogHeader>
             <DialogTitle>
               {actionType === "approve" && "Arizani tasdiqlash"}
               {actionType === "approve_verified" && "Arizani tasdiqlash va Verified qilish"}
               {actionType === "reject" && "Arizani rad etish"}
+              {actionType === "resolve" && "Murojaatni hal qilish"}
             </DialogTitle>
             <DialogDescription>
-              {selectedApplication && `Ariza #${selectedApplication.id.slice(-8)} uchun`}
+              {selectedApplication && `Ariza #${selectedApplication.id.slice(-8)} uchun amalni bajaring.`}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
             <div>
-              <Label htmlFor="notes">
-                {actionType === "reject" ? "Rad etish sababi" : "Qo'shimcha eslatma"} (ixtiyoriy)
+              <Label htmlFor="actionNotes">
+                {actionType === "reject" ? "Rad etish sababi" : actionType === "resolve" ? "Admin javobi" : "Qo'shimcha eslatma"} (ixtiyoriy)
               </Label>
               <Textarea
-                id="notes"
-                placeholder={actionType === "reject" ? "Arizani nima uchun rad etyapsiz..." : "Qo'shimcha ma'lumot..."}
+                id="actionNotes"
+                placeholder={
+                  actionType === "reject" ? "Arizani nima uchun rad etyapsiz..." :
+                  actionType === "resolve" ? "Admin javobingizni kiriting..." :
+                  "Qo'shimcha ma'lumot yoki eslatmalar..."
+                }
                 value={actionNotes}
                 onChange={(e) => setActionNotes(e.target.value)}
+                className="min-h-[100px]"
               />
             </div>
           </div>
@@ -753,6 +872,7 @@ export default function AdminApplicationsPage() {
               {actionType === "approve" && "Tasdiqlash"}
               {actionType === "approve_verified" && "Tasdiqlash va Verified qilish"}
               {actionType === "reject" && "Rad etish"}
+              {actionType === "resolve" && "Hal qilish"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -192,6 +192,40 @@ export default function AdminUsersPage() {
     }
   }
 
+  // New function to fetch a single user for the detail page
+  const fetchUserDetail = async (userId: string) => {
+    try {
+      const { data: session } = await supabase.auth.getSession()
+      const token = session?.session?.access_token
+
+      const response = await fetch(`/api/admin/users?userId=${userId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          toast.error("Sizda ruxsat yo'q. Qayta kirish amalga oshirilmoqda.")
+          router.push("/login")
+          return null
+        }
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const result = await response.json()
+      if (result.success && result.user) {
+        return result.user
+      } else {
+        throw new Error(result.error || "Foydalanuvchi topilmadi")
+      }
+    } catch (error) {
+      console.error("Error fetching user detail:", error)
+      toast.error((error as Error).message)
+      return null
+    }
+  }
+
   const formatDate = (dateString: string) => {
     if (!dateString) return "Noma'lum sana"
     return new Date(dateString).toLocaleDateString("uz-UZ", {

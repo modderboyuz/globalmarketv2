@@ -1,31 +1,45 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { supabase } from "@/lib/supabase"
 
+// Helper function to get the Supabase access token
+async function getAccessToken(request: NextRequest): Promise<string | null> {
+  const authHeader = request.headers.get("authorization")
+  if (!authHeader) {
+    return null
+  }
+  const token = authHeader.replace("Bearer ", "")
+  return token
+}
+
+// Helper function to verify the user and admin status
+async function verifyAdmin(token: string): Promise<{ user: any; userData: any } | null> {
+  if (!token) {
+    return null
+  }
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser(token)
+
+  if (authError || !user) {
+    return null
+  }
+
+  const { data: userData } = await supabase.from("users").select("is_admin").eq("id", user.id).single()
+
+  if (!userData?.is_admin) {
+    return null
+  }
+  return { user, userData }
+}
+
 export async function GET(request: NextRequest) {
   try {
-    // Get authorization header
-    const authHeader = request.headers.get("authorization")
-    if (!authHeader) {
-      return NextResponse.json({ error: "No authorization header" }, { status: 401 })
-    }
+    const token = await getAccessToken(request)
+    const adminCheck = await verifyAdmin(token!)
 
-    const token = authHeader.replace("Bearer ", "")
-
-    // Verify user with token
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser(token)
-
-    if (authError || !user) {
-      return NextResponse.json({ error: "Invalid token" }, { status: 401 })
-    }
-
-    // Check if user is admin
-    const { data: userData } = await supabase.from("users").select("is_admin").eq("id", user.id).single()
-
-    if (!userData?.is_admin) {
-      return NextResponse.json({ error: "Admin access required" }, { status: 403 })
+    if (!adminCheck) {
+      return NextResponse.json({ error: "No authorization header or invalid token or admin access required" }, { status: 401 })
     }
 
     // Fetch all applications from different tables
@@ -92,7 +106,9 @@ export async function GET(request: NextRequest) {
       ...(complaintsResult.data || []).map((app) => ({
         ...app,
         type: "complaint",
+        // Ensure status and admin_response exist and default if not
         status: app.status || "pending",
+        admin_response: app.admin_response || null,
       })),
     ]
 
@@ -111,6 +127,13 @@ export async function GET(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
+    const token = await getAccessToken(request)
+    const adminCheck = await verifyAdmin(token!)
+
+    if (!adminCheck) {
+      return NextResponse.json({ error: "No authorization header or invalid token or admin access required" }, { status: 401 })
+    }
+
     const body = await request.json()
     const { id, type, action, notes } = body
 
@@ -118,35 +141,9 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: "ID, type va action majburiy" }, { status: 400 })
     }
 
-    // Get authorization header
-    const authHeader = request.headers.get("authorization")
-    if (!authHeader) {
-      return NextResponse.json({ error: "No authorization header" }, { status: 401 })
-    }
-
-    const token = authHeader.replace("Bearer ", "")
-
-    // Verify user with token
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser(token)
-
-    if (authError || !user) {
-      return NextResponse.json({ error: "Invalid token" }, { status: 401 })
-    }
-
-    // Check if user is admin
-    const { data: userData } = await supabase.from("users").select("is_admin").eq("id", user.id).single()
-
-    if (!userData?.is_admin) {
-      return NextResponse.json({ error: "Admin access required" }, { status: 403 })
-    }
-
     let tableName = ""
     const updateData: any = {
       updated_at: new Date().toISOString(),
-      admin_notes: notes,
       reviewed_at: new Date().toISOString(),
     }
 
@@ -155,15 +152,17 @@ export async function PUT(request: NextRequest) {
       case "seller":
         tableName = "seller_applications"
         updateData.status = action === "approve" ? "approved" : action === "reject" ? "rejected" : action
+        updateData.admin_notes = notes
         break
       case "product":
         tableName = "product_applications"
         updateData.status = action === "approve" ? "approved" : action === "reject" ? "rejected" : action
+        updateData.admin_notes = notes
         break
       case "complaint":
         tableName = "complaints"
         updateData.status = action === "resolve" ? "resolved" : action === "reject" ? "rejected" : action
-        updateData.admin_response = notes
+        updateData.admin_response = notes // Using notes for admin response
         break
       default:
         return NextResponse.json({ error: "Noto'g'ri application type" }, { status: 400 })
@@ -173,7 +172,8 @@ export async function PUT(request: NextRequest) {
     const { data, error } = await supabase.from(tableName).update(updateData).eq("id", id).select().single()
 
     if (error) {
-      throw error
+      console.error(`Error updating ${type} application with ID ${id}:`, error);
+      throw error;
     }
 
     // If approving seller application, update user status
@@ -182,21 +182,32 @@ export async function PUT(request: NextRequest) {
         .from("users")
         .update({
           is_seller: true,
-          is_verified_seller: true,
+          is_verified_seller: true, // Assuming 'approve' means verified
         })
         .eq("id", data.user_id)
+        .then(({ error: userUpdateError }) => {
+          if (userUpdateError) {
+            console.error(`Error updating user status for seller application ${id}:`, userUpdateError);
+            // Potentially throw an error or log it if user update fails
+          }
+        });
     }
-
-    // If approving seller application with verified status
+    // Handling a potential "approve_verified" action if needed differently
     if (type === "seller" && action === "approve_verified") {
       await supabase
         .from("users")
         .update({
           is_seller: true,
-          is_verified_seller: true,
+          is_verified_seller: true, // Explicitly setting verified
         })
         .eq("id", data.user_id)
+        .then(({ error: userUpdateError }) => {
+          if (userUpdateError) {
+            console.error(`Error updating user status for seller application ${id} (verified):`, userUpdateError);
+          }
+        });
     }
+
 
     return NextResponse.json({
       success: true,
