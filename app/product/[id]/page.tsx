@@ -29,11 +29,25 @@ import {
   Clock,
   CheckCircle,
   Send,
+  RefreshCw, // For loading states
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 import Image from "next/image"
 import Link from "next/link"
+
+interface User {
+  id: string
+  full_name: string
+  email: string
+  phone: string
+  company_name?: string
+  is_verified_seller: boolean
+  is_admin: boolean
+  username?: string // Added username for admin check
+  created_at: string
+  last_sign_in_at: string
+}
 
 interface Product {
   id: string
@@ -58,17 +72,11 @@ interface Product {
   created_at: string
   author?: string
   brand?: string
-  categories: {
+  categories?: { // Made optional in case of missing category data
     name: string
     icon: string
   }
-  users: {
-    full_name: string
-    phone: string
-    company_name?: string
-    is_verified_seller: boolean
-    username?: string
-  }
+  users?: User // Assuming users field is always present if product is fetched correctly
 }
 
 interface SimilarProduct {
@@ -80,7 +88,7 @@ interface SimilarProduct {
   like_count: number
   order_count: number
   stock_quantity: number
-  users: {
+  users: { // Assuming users field is always present for similar products
     full_name: string
     company_name?: string
     is_verified_seller: boolean
@@ -93,7 +101,7 @@ interface Neighborhood {
 }
 
 export default function ProductDetailPage() {
-  const params = useParams()
+  const params = useParams<{ id: string }>() // Explicitly type params
   const router = useRouter()
   const [product, setProduct] = useState<Product | null>(null)
   const [similarProducts, setSimilarProducts] = useState<SimilarProduct[]>([])
@@ -101,10 +109,10 @@ export default function ProductDetailPage() {
   const [loading, setLoading] = useState(true)
   const [isLiked, setIsLiked] = useState(false)
   const [likesCount, setLikesCount] = useState(0)
-  const [user, setUser] = useState<any>(null)
+  const [user, setUser] = useState<User | null>(null) // Use User interface for logged-in user
   const [quantity, setQuantity] = useState(1)
   const [showQuickOrder, setShowQuickOrder] = useState(false)
-  const [isAdmin, setIsAdmin] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false) // State to track if the current user is an admin
 
   const [quickOrderForm, setQuickOrderForm] = useState({
     full_name: "",
@@ -115,109 +123,126 @@ export default function ProductDetailPage() {
     with_delivery: false,
   })
 
+  // Fetch product data, like status, user info, and neighborhoods on component mount
   useEffect(() => {
     if (params.id) {
       fetchProduct()
       fetchLikeStatus()
-      checkUser()
+      checkUserAndAdminStatus()
       fetchNeighborhoods()
       incrementViewCount()
     }
   }, [params.id])
 
-  const checkUser = async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (user) {
-      setUser(user)
-      // Get user profile data
-      const { data: profile } = await supabase
-        .from("users")
-        .select("full_name, phone, username")
-        .eq("id", user.id)
-        .single()
+  // Fetch user data and check admin status
+  const checkUserAndAdminStatus = async () => {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
 
-      if (profile) {
-        setQuickOrderForm((prev) => ({
-          ...prev,
-          full_name: profile.full_name || "",
-          phone: profile.phone || "",
-        }))
+      if (user) {
+        setUser(user) // Store basic user info
+        const { data: profile, error: profileError } = await supabase
+          .from("users")
+          .select("id, full_name, phone, username") // Fetch necessary profile details
+          .eq("id", user.id)
+          .single()
 
-        // Check if user is admin
-        setIsAdmin(profile.username === "admin")
+        if (profileError) {
+          console.error("Error fetching user profile:", profileError.message)
+          // Continue without profile if error
+        } else if (profile) {
+          // Update quick order form with user's info if available
+          setQuickOrderForm((prev) => ({
+            ...prev,
+            full_name: profile.full_name || "",
+            phone: profile.phone || "",
+          }))
+
+          // Set admin status if username is 'admin' (or any other admin identifier)
+          setIsAdmin(profile.username === "admin") // Adjust 'admin' identifier as needed
+        }
       }
+    } catch (error) {
+      console.error("Error checking user status:", error)
     }
   }
 
+  // Fetch product details and similar products
   const fetchProduct = async () => {
+    setLoading(true)
     try {
       const { data, error } = await supabase
         .from("products")
         .select(`
           *,
           categories (name, icon),
-          users (full_name, phone, company_name, is_verified_seller, username)
+          users (id, full_name, phone, company_name, is_verified_seller, username)
         `)
-        .eq("id", params.id)
-        .eq("is_active", true)
+        .eq("id", params.id!) // Use ! to assert that params.id is not null
+        .eq("is_active", true) // Only fetch active products
         .single()
 
       if (error) throw error
-      setProduct(data)
-
-      // Fetch similar products
-      if (data.category_id) {
-        fetchSimilarProducts(data.category_id, data.id)
+      if (!data) {
+        // Handle case where product is not found or not active
+        setProduct(null)
+        toast.error("Mahsulot topilmadi yoki u faol emas.")
+      } else {
+        setProduct(data)
+        // Fetch similar products if category is available
+        if (data.category_id) {
+          fetchSimilarProducts(data.category_id, data.id)
+        }
       }
-    } catch (error) {
-      console.error("Error fetching product:", error)
+    } catch (error: any) {
+      console.error("Error fetching product:", error.message)
       toast.error("Mahsulotni yuklashda xatolik")
+      setProduct(null) // Ensure product is null if fetch fails
     } finally {
       setLoading(false)
     }
   }
 
+  // Fetch similar products based on category
   const fetchSimilarProducts = async (categoryId: string, currentProductId: string) => {
     try {
       const { data, error } = await supabase
         .from("products")
         .select(`
-          id,
-          name,
-          price,
-          image_url,
-          average_rating,
-          like_count,
-          order_count,
-          stock_quantity,
+          id, name, price, image_url, average_rating, like_count, order_count, stock_quantity,
           users (full_name, company_name, is_verified_seller)
         `)
         .eq("category_id", categoryId)
         .eq("is_active", true)
-        .eq("is_approved", true)
-        .neq("id", currentProductId)
-        .gt("stock_quantity", 0)
-        .order("order_count", { ascending: false })
-        .limit(8)
+        .eq("is_approved", true) // Ensure only approved products are shown as similar
+        .neq("id", currentProductId) // Exclude the current product
+        .gt("stock_quantity", 0) // Only show products in stock
+        .order("order_count", { ascending: false }) // Order by popularity
+        .limit(8) // Limit to 8 similar products
 
       if (error) throw error
       setSimilarProducts(data || [])
-    } catch (error) {
-      console.error("Error fetching similar products:", error)
+    } catch (error: any) {
+      console.error("Error fetching similar products:", error.message)
     }
   }
 
+  // Increment product view count using a Supabase RPC function
   const incrementViewCount = async () => {
+    if (!params.id) return
     try {
+      // Ensure the RPC function `increment_view_count` exists in your Supabase DB
       await supabase.rpc("increment_view_count", { product_id: params.id })
     } catch (error) {
       console.error("Error incrementing view count:", error)
     }
   }
 
+  // Fetch like status and count for the current product
   const fetchLikeStatus = async () => {
+    if (!params.id) return
     try {
       const response = await fetch(`/api/likes?product_id=${params.id}`)
       const data = await response.json()
@@ -225,38 +250,49 @@ export default function ProductDetailPage() {
       if (data.success) {
         setIsLiked(data.liked)
         setLikesCount(data.likes_count)
+      } else {
+        console.error("Error fetching like status:", data.error)
       }
     } catch (error) {
       console.error("Error fetching like status:", error)
     }
   }
 
+  // Fetch neighborhoods for delivery address selection
   const fetchNeighborhoods = async () => {
     try {
-      const response = await fetch("/api/neighborhoods")
+      const response = await fetch("/api/neighborhoods") // Assuming this API route exists
       const data = await response.json()
       if (data.success) {
         setNeighborhoods(data.neighborhoods)
+      } else {
+        console.error("Error fetching neighborhoods:", data.error)
       }
     } catch (error) {
       console.error("Error fetching neighborhoods:", error)
     }
   }
 
+  // Handle liking/unliking a product
   const handleLike = async () => {
     if (!user) {
       toast.error("Yoqtirish uchun tizimga kiring")
       return
     }
+    if (!params.id) return
 
     try {
-      const token = (await supabase.auth.getSession()).data.session?.access_token
+      const session = (await supabase.auth.getSession()).data.session
+      if (!session?.access_token) {
+        toast.error("Siz tizimga kirganmisiz tekshirilishi kerak.")
+        return
+      }
 
       const response = await fetch("/api/likes", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({ product_id: params.id }),
       })
@@ -267,6 +303,8 @@ export default function ProductDetailPage() {
         setIsLiked(data.liked)
         setLikesCount((prev) => (data.liked ? prev + 1 : prev - 1))
         toast.success(data.message)
+      } else {
+        toast.error(data.error || "Yoqtirish/yoqtirmaslikda xatolik")
       }
     } catch (error) {
       console.error("Error toggling like:", error)
@@ -274,22 +312,30 @@ export default function ProductDetailPage() {
     }
   }
 
+  // Add product to the shopping cart
   const handleAddToCart = async () => {
     if (!user) {
       toast.error("Savatga qo'shish uchun tizimga kiring")
       return
     }
-
     if (!product) return
+    if (quantity <= 0 || quantity > product.stock_quantity) {
+      toast.error("Miqdor noto'g'ri yoki ombor tugagan")
+      return
+    }
 
     try {
-      const token = (await supabase.auth.getSession()).data.session?.access_token
+      const session = (await supabase.auth.getSession()).data.session
+      if (!session?.access_token) {
+        toast.error("Siz tizimga kirganmisiz tekshirilishi kerak.")
+        return
+      }
 
       const response = await fetch("/api/cart", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
           product_id: product.id,
@@ -310,8 +356,13 @@ export default function ProductDetailPage() {
     }
   }
 
+  // Handle quick order submission
   const handleQuickOrder = async () => {
     if (!product) return
+    if (quantity <= 0 || quantity > product.stock_quantity) {
+      toast.error("Miqdor noto'g'ri yoki ombor tugagan")
+      return
+    }
 
     if (!quickOrderForm.full_name || !quickOrderForm.phone) {
       toast.error("Ism va telefon raqam majburiy")
@@ -326,7 +377,8 @@ export default function ProductDetailPage() {
     }
 
     try {
-      const token = user ? (await supabase.auth.getSession()).data.session?.access_token : null
+      const session = user ? (await supabase.auth.getSession()).data.session : null
+      const token = session?.access_token
 
       const orderData = {
         product_id: product.id,
@@ -338,16 +390,16 @@ export default function ProductDetailPage() {
             : "Do'kondan olib ketish",
         quantity: quantity,
         with_delivery: quickOrderForm.with_delivery && product.has_delivery,
-        neighborhood: quickOrderForm.with_delivery ? quickOrderForm.neighborhood : null,
-        street: quickOrderForm.with_delivery ? quickOrderForm.street : null,
-        house_number: quickOrderForm.with_delivery ? quickOrderForm.house_number : null,
+        neighborhood: quickOrderForm.with_delivery && product.has_delivery ? quickOrderForm.neighborhood : null,
+        street: quickOrderForm.with_delivery && product.has_delivery ? quickOrderForm.street : null,
+        house_number: quickOrderForm.with_delivery && product.has_delivery ? quickOrderForm.house_number : null,
       }
 
       const response = await fetch("/api/orders", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(token && { Authorization: `Bearer ${token}` }),
+          ...(token && { Authorization: `Bearer ${token}` }), // Include token if user is logged in
         },
         body: JSON.stringify(orderData),
       })
@@ -357,8 +409,11 @@ export default function ProductDetailPage() {
       if (data.success) {
         toast.success("Buyurtma muvaffaqiyatli yaratildi!")
         setShowQuickOrder(false)
+        // Redirect to orders page if user is logged in
         if (user) {
           router.push("/orders")
+        } else {
+          // Optionally redirect anonymous users or show a confirmation
         }
       } else {
         toast.error(data.error || "Buyurtma yaratishda xatolik")
@@ -369,64 +424,60 @@ export default function ProductDetailPage() {
     }
   }
 
+  // Open Telegram order bot
   const handleTelegramOrder = () => {
     if (!product) return
-
-    const telegramUrl = `https://t.me/GlobalMarketshopBot?start=order_${product.id}`
+    const telegramUrl = `https://t.me/GlobalMarketshopBot?start=order_${product.id}` // Replace with your actual bot URL
     window.open(telegramUrl, "_blank")
   }
 
+  // Calculate total price including delivery if applicable
   const calculateTotal = () => {
     if (!product) return 0
     let total = product.price * quantity
     if (quickOrderForm.with_delivery && product.has_delivery) {
-      total += product.delivery_price
+      total += product.delivery_price || 0
     }
     return total
   }
 
+  // Share product functionality
   const handleShare = async () => {
-    if (navigator.share) {
+    if (navigator.share && product) {
       try {
         await navigator.share({
-          title: product?.name,
-          text: product?.description,
+          title: product.name,
+          text: product.description,
           url: window.location.href,
         })
       } catch (error) {
         console.error("Error sharing:", error)
       }
     } else {
-      // Fallback: copy to clipboard
-      navigator.clipboard.writeText(window.location.href)
-      toast.success("Havola nusxalandi")
+      // Fallback for browsers that don't support Web Share API
+      try {
+        await navigator.clipboard.writeText(window.location.href)
+        toast.success("Havola nusxalandi")
+      } catch (error) {
+        console.error("Failed to copy share URL:", error)
+        toast.error("Havolani nusxalashda xatolik")
+      }
     }
   }
 
+  // Loading state UI
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-        <div className="container mx-auto px-4 py-8">
-          <div className="animate-pulse">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
-              <div className="aspect-square bg-gray-200 rounded-3xl"></div>
-              <div className="space-y-6">
-                <div className="h-8 bg-gray-200 rounded w-3/4"></div>
-                <div className="h-4 bg-gray-200 rounded w-1/2"></div>
-                <div className="h-6 bg-gray-200 rounded w-1/4"></div>
-                <div className="h-20 bg-gray-200 rounded"></div>
-                <div className="flex gap-4">
-                  <div className="h-12 bg-gray-200 rounded flex-1"></div>
-                  <div className="h-12 bg-gray-200 rounded flex-1"></div>
-                </div>
-              </div>
-            </div>
-          </div>
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
+        <div className="animate-pulse flex flex-col items-center">
+          <RefreshCw className="h-10 w-10 text-blue-600 mb-4 animate-spin" />
+          <p className="text-gray-600">Yuklanmoqda...</p>
         </div>
       </div>
     )
   }
 
+  // Product not found UI
   if (!product) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
@@ -435,7 +486,7 @@ export default function ProductDetailPage() {
             <Package className="h-12 w-12 text-red-500" />
           </div>
           <h2 className="text-3xl font-bold mb-4 text-gray-800">Mahsulot topilmadi</h2>
-          <p className="text-gray-600 mb-6">Kechirasiz, bu mahsulot mavjud emas yoki o'chirilgan</p>
+          <p className="text-gray-600 mb-6">Kechirasiz, bu mahsulot mavjud emas yoki o'chirilgan.</p>
           <Button onClick={() => router.push("/products")} className="btn-primary">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Mahsulotlarga qaytish
@@ -445,12 +496,13 @@ export default function ProductDetailPage() {
     )
   }
 
+  // Main product detail page UI
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
       <div className="container mx-auto px-4 py-4 lg:py-8">
-        {/* Breadcrumb */}
+        {/* Breadcrumb Navigation */}
         <div className="flex items-center gap-2 mb-6">
-          <Button variant="ghost" size="sm" onClick={() => router.back()}>
+          <Button variant="ghost" size="sm" onClick={() => router.back()} className="text-sm">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Orqaga
           </Button>
@@ -462,29 +514,39 @@ export default function ProductDetailPage() {
           <span className="text-gray-600 text-sm truncate">{product.name}</span>
         </div>
 
+        {/* Product Image and Info Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 mb-12">
-          {/* Product Image */}
+          {/* Product Image Section */}
           <div className="relative">
             <div className="aspect-[4/3] relative overflow-hidden rounded-3xl bg-gradient-to-br from-gray-100 to-gray-200 shadow-2xl">
               <Image
-                src={product.image_url || "/placeholder.svg?height=600&width=600"}
+                src={product.image_url || "/placeholder.svg?height=600&width=600"} // Fallback image
                 alt={product.name}
                 fill
                 className="object-contain p-4"
                 priority
               />
+              {/* Badges for Category and Stock */}
               <div className="absolute top-4 left-4 flex flex-col gap-2">
-                <Badge className="bg-white/90 text-gray-800 shadow-lg">
-                  {product.categories?.icon} {product.categories?.name}
-                </Badge>
-                {product.stock_quantity <= 5 && product.stock_quantity > 0 && (
+                {product.categories?.name && (
+                  <Badge className="bg-white/90 text-gray-800 shadow-lg">
+                    {product.categories.icon && (
+                      <span className="mr-1">{product.categories.icon}</span>
+                    )}
+                    {product.categories.name}
+                  </Badge>
+                )}
+                {product.stock_quantity > 0 && product.stock_quantity <= 5 && (
                   <Badge className="bg-orange-500 text-white shadow-lg">
                     <Clock className="h-3 w-3 mr-1" />
                     Kam qoldi: {product.stock_quantity}
                   </Badge>
                 )}
-                {product.stock_quantity === 0 && <Badge className="bg-red-500 text-white shadow-lg">Tugagan</Badge>}
+                {product.stock_quantity === 0 && (
+                  <Badge className="bg-red-500 text-white shadow-lg">Tugagan</Badge>
+                )}
               </div>
+              {/* Action Buttons (Like, Share) */}
               <div className="absolute top-4 right-4 flex flex-col gap-2">
                 <Button
                   size="sm"
@@ -505,7 +567,7 @@ export default function ProductDetailPage() {
               </div>
             </div>
 
-            {/* Stats */}
+            {/* Product Stats */}
             <div className="grid grid-cols-3 gap-4 mt-6">
               <Card className="text-center p-4 bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200">
                 <Eye className="h-5 w-5 text-blue-600 mx-auto mb-2" />
@@ -525,8 +587,9 @@ export default function ProductDetailPage() {
             </div>
           </div>
 
-          {/* Product Info */}
+          {/* Product Information Section */}
           <div className="space-y-6">
+            {/* Product Title and Rating */}
             <div>
               <h1 className="text-3xl lg:text-4xl font-bold mb-4 bg-gradient-to-r from-gray-800 to-gray-600 bg-clip-text text-transparent">
                 {product.name}
@@ -560,11 +623,12 @@ export default function ProductDetailPage() {
               )}
             </div>
 
+            {/* Price */}
             <div className="text-4xl lg:text-5xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-              {product.price.toLocaleString()} so'm
+              {product.price.toLocaleString('uz-UZ')} so'm
             </div>
 
-            {/* Quantity and Actions */}
+            {/* Quantity Selector and Actions */}
             <div className="space-y-6">
               <div className="bg-white rounded-2xl p-6 shadow-lg border">
                 <Label htmlFor="quantity" className="text-lg font-semibold mb-4 block">
@@ -576,7 +640,7 @@ export default function ProductDetailPage() {
                     size="lg"
                     onClick={() => setQuantity(Math.max(1, quantity - 1))}
                     disabled={quantity <= 1}
-                    className="w-12 h-12 rounded-full"
+                    className="w-12 h-12 rounded-full border-gray-300"
                   >
                     <Minus className="h-4 w-4" />
                   </Button>
@@ -586,14 +650,14 @@ export default function ProductDetailPage() {
                     size="lg"
                     onClick={() => setQuantity(Math.min(product.stock_quantity, quantity + 1))}
                     disabled={quantity >= product.stock_quantity}
-                    className="w-12 h-12 rounded-full"
+                    className="w-12 h-12 rounded-full border-gray-300"
                   >
                     <Plus className="h-4 w-4" />
                   </Button>
                   <div className="ml-4">
                     <p className="text-sm text-gray-600">Mavjud: {product.stock_quantity} dona</p>
                     <p className="text-lg font-bold text-green-600">
-                      Jami: {(product.price * quantity).toLocaleString()} so'm
+                      Jami: {(product.price * quantity).toLocaleString('uz-UZ')} so'm
                     </p>
                   </div>
                 </div>
@@ -602,9 +666,8 @@ export default function ProductDetailPage() {
                   <Button
                     onClick={handleAddToCart}
                     variant="outline"
-                    size="lg"
-                    className="bg-gradient-to-r from-gray-50 to-gray-100 border-gray-300 hover:from-gray-100 hover:to-gray-200"
-                    disabled={product.stock_quantity === 0}
+                    className="bg-gradient-to-r from-gray-50 to-gray-100 border-gray-300 hover:from-gray-100 hover:to-gray-200 text-gray-800 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={product.stock_quantity === 0 || !user}
                   >
                     <ShoppingCart className="w-5 h-5 mr-2" />
                     Savatga qo'shish
@@ -613,14 +676,13 @@ export default function ProductDetailPage() {
                   <Dialog open={showQuickOrder} onOpenChange={setShowQuickOrder}>
                     <DialogTrigger asChild>
                       <Button
-                        size="lg"
-                        className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg"
-                        disabled={product.stock_quantity === 0}
+                        className="w-full btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={product.stock_quantity === 0 || !user}
                       >
                         <Package className="w-5 h-5 mr-2" />
                         Tezkor buyurtma
                       </Button>
-                    </DialogTrigger>
+                    </DialogDialogTrigger>
                     <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
                       <DialogHeader>
                         <DialogTitle className="text-xl font-bold">Tezkor buyurtma</DialogTitle>
@@ -656,9 +718,9 @@ export default function ProductDetailPage() {
                                 setQuickOrderForm((prev) => ({ ...prev, with_delivery: checked as boolean }))
                               }
                             />
-                            <Label htmlFor="quick_with_delivery" className="flex items-center gap-2">
+                            <Label htmlFor="quick_with_delivery" className="flex items-center gap-2 cursor-pointer">
                               <Truck className="w-4 h-4" />
-                              Yetkazib berish kerak (+{product.delivery_price.toLocaleString()} so'm)
+                              Yetkazib berish kerak (+{product.delivery_price?.toLocaleString('uz-UZ') || 0} so'm)
                             </Label>
                           </div>
                         )}
@@ -674,7 +736,7 @@ export default function ProductDetailPage() {
                                 }
                               >
                                 <SelectTrigger>
-                                  <SelectValue placeholder="Mahallani tanlang" />
+                                  <SelectValue placeholder="Manozilni tanlang" />
                                 </SelectTrigger>
                                 <SelectContent>
                                   {neighborhoods.map((neighborhood) => (
@@ -716,13 +778,13 @@ export default function ProductDetailPage() {
                           <div className="space-y-2">
                             <div className="flex justify-between">
                               <span>Mahsulot ({quantity} dona):</span>
-                              <span className="font-semibold">{(product.price * quantity).toLocaleString()} so'm</span>
+                              <span className="font-semibold">{(product.price * quantity).toLocaleString('uz-UZ')} so'm</span>
                             </div>
 
                             {quickOrderForm.with_delivery && product.has_delivery && (
                               <div className="flex justify-between">
                                 <span>Yetkazib berish:</span>
-                                <span className="font-semibold">{product.delivery_price.toLocaleString()} so'm</span>
+                                <span className="font-semibold">{(product.delivery_price || 0).toLocaleString('uz-UZ')} so'm</span>
                               </div>
                             )}
 
@@ -730,23 +792,22 @@ export default function ProductDetailPage() {
 
                             <div className="flex justify-between font-bold text-lg text-blue-700">
                               <span>Jami:</span>
-                              <span>{calculateTotal().toLocaleString()} so'm</span>
+                              <span>{calculateTotal().toLocaleString('uz-UZ')} so'm</span>
                             </div>
                           </div>
                         </div>
 
                         <div className="grid grid-cols-1 gap-3">
-                          <Button onClick={handleQuickOrder} className="w-full btn-primary" size="lg">
+                          <Button onClick={handleQuickOrder} className="w-full btn-primary">
                             <Package className="w-5 h-5 mr-2" />
                             Buyurtma berish
                           </Button>
 
-                          {/* Telegram Order Button - Only show if seller is admin */}
-                          {product.users.username === "admin" && (
+                          {/* Telegram Order Button - only shown if seller is admin and has a bot setup */}
+                          {product.users?.username === "admin" && ( // Adjust 'admin' identifier as needed
                             <Button
                               onClick={handleTelegramOrder}
                               className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white"
-                              size="lg"
                             >
                               <Send className="w-5 h-5 mr-2" />
                               Telegram orqali buyurtma
@@ -760,7 +821,7 @@ export default function ProductDetailPage() {
               </div>
             </div>
 
-            {/* Features */}
+            {/* Product Features */}
             <div className="flex flex-wrap gap-3">
               {product.has_delivery && (
                 <Badge
@@ -768,7 +829,7 @@ export default function ProductDetailPage() {
                   className="flex items-center gap-2 p-3 bg-gradient-to-r from-blue-50 to-blue-100 border-blue-200"
                 >
                   <Truck className="w-4 h-4 text-blue-600" />
-                  <span className="text-blue-700">Yetkazib berish: {product.delivery_price.toLocaleString()} so'm</span>
+                  <span className="text-blue-700">Yetkazib berish: {(product.delivery_price || 0).toLocaleString('uz-UZ')} so'm</span>
                 </Badge>
               )}
               {product.has_warranty && (
@@ -791,6 +852,7 @@ export default function ProductDetailPage() {
               )}
             </div>
 
+            {/* Product Description */}
             {product.description && (
               <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl p-6">
                 <h3 className="font-semibold mb-3 text-gray-800">Tavsif</h3>
@@ -798,42 +860,44 @@ export default function ProductDetailPage() {
               </div>
             )}
 
-            {/* Seller Info */}
-            <Card className="bg-gradient-to-br from-indigo-50 to-indigo-100 border-indigo-200">
-              <CardContent className="p-6">
-                <h3 className="font-semibold mb-4 text-indigo-800 flex items-center gap-2">
-                  <User className="w-5 h-5" />
-                  Sotuvchi ma'lumotlari
-                </h3>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium text-indigo-900">
-                        {product.users.company_name || product.users.full_name}
-                      </p>
-                      {product.users.is_verified_seller && (
-                        <Badge className="bg-green-500 text-white text-xs mt-1">
-                          <CheckCircle className="w-3 h-3 mr-1" />
-                          Tasdiqlangan
-                        </Badge>
-                      )}
+            {/* Seller Information */}
+            {product.users && ( // Only show seller info if users data is available
+              <Card className="bg-gradient-to-br from-indigo-50 to-indigo-100 border-indigo-200">
+                <CardContent className="p-6">
+                  <h3 className="font-semibold mb-4 text-indigo-800 flex items-center gap-2">
+                    <User className="w-5 h-5" />
+                    Sotuvchi ma'lumotlari
+                  </h3>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-indigo-900">
+                          {product.users.company_name || product.users.full_name}
+                        </p>
+                        {product.users.is_verified_seller && (
+                          <Badge className="bg-green-500 text-white text-xs mt-1">
+                            <CheckCircle className="w-3 h-3 mr-1" />
+                            Tasdiqlangan
+                          </Badge>
+                        )}
+                      </div>
                     </div>
+                    <Button
+                      variant="outline"
+                      className="w-full bg-white/50 border-indigo-300 text-indigo-700 hover:bg-white"
+                      onClick={() => window.open(`tel:${product.users.phone}`)}
+                    >
+                      <Phone className="w-4 h-4 mr-2" />
+                      {product.users.phone}
+                    </Button>
                   </div>
-                  <Button
-                    variant="outline"
-                    className="w-full bg-white/50 border-indigo-300 text-indigo-700 hover:bg-white"
-                    onClick={() => window.open(`tel:${product.users.phone}`)}
-                  >
-                    <Phone className="w-4 h-4 mr-2" />
-                    {product.users.phone}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            )}
           </div>
         </div>
 
-        {/* Similar Products */}
+        {/* Similar Products Section */}
         {similarProducts.length > 0 && (
           <div className="mt-16">
             <div className="text-center mb-8">
@@ -858,7 +922,7 @@ export default function ProductDetailPage() {
                         fill
                         className="object-cover group-hover:scale-110 transition-transform duration-300"
                       />
-                      {similarProduct.stock_quantity <= 5 && similarProduct.stock_quantity > 0 && (
+                      {similarProduct.stock_quantity > 0 && similarProduct.stock_quantity <= 5 && (
                         <Badge className="absolute top-2 left-2 bg-orange-500 text-white text-xs">Kam qoldi</Badge>
                       )}
                       {similarProduct.stock_quantity === 0 && (
@@ -889,7 +953,7 @@ export default function ProductDetailPage() {
 
                       <div className="flex items-center justify-between">
                         <div className="text-lg font-bold text-blue-600">
-                          {similarProduct.price.toLocaleString()} so'm
+                          {similarProduct.price.toLocaleString('uz-UZ')} so'm
                         </div>
                         <div className="flex items-center gap-1 text-xs text-gray-500">
                           <Heart className="h-3 w-3" />
