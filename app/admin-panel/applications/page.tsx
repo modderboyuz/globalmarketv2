@@ -55,7 +55,7 @@ interface Application {
   reviewed_at?: string
   admin_notes?: string
   user_id?: string
-  users?: User | null // User type can be null if not found
+  users?: User | null
   // Seller application fields
   company_name?: string
   business_type?: string
@@ -64,9 +64,16 @@ interface Application {
   // Product application fields
   product_data?: {
     name: string
+    brand?: string // Added brand
     price: number
     description?: string
     images?: string[]
+    seller_id?: string // Added seller_id
+    category_id?: string // Added category_id
+    has_delivery?: boolean // Added has_delivery
+    product_type?: string // Added product_type
+    delivery_price?: number // Added delivery_price
+    stock_quantity?: number // Added stock_quantity
   }
   // Contact message fields
   name?: string
@@ -79,7 +86,7 @@ interface Application {
 
 export default function AdminApplicationsPage() {
   const router = useRouter()
-  const [currentUser, setCurrentUser] = useState<any>(null) // Stores current logged-in user info
+  const [currentUser, setCurrentUser] = useState<any>(null)
   const [applications, setApplications] = useState<Application[]>([])
   const [filteredApplications, setFilteredApplications] = useState<Application[]>([])
   const [loading, setLoading] = useState(true)
@@ -98,7 +105,6 @@ export default function AdminApplicationsPage() {
     rejected: 0,
   })
 
-  // Fetch current user and their admin status on mount
   useEffect(() => {
     const checkAdminAccess = async () => {
       try {
@@ -123,11 +129,11 @@ export default function AdminApplicationsPage() {
           return
         }
 
-        setCurrentUser(userData) // Store the admin user details
-        await fetchApplications() // Fetch applications after confirming admin status
+        setCurrentUser(userData)
+        await fetchApplications()
       } catch (error) {
         console.error("Error checking admin access:", error)
-        router.push("/") // Redirect to login or home if access check fails
+        router.push("/")
       } finally {
         setLoading(false)
       }
@@ -136,11 +142,9 @@ export default function AdminApplicationsPage() {
     checkAdminAccess()
   }, [router])
 
-  // Fetch all applications directly from Supabase
   const fetchApplications = async () => {
     setLoading(true)
     try {
-      // Fetch seller applications, explicitly specifying the relationship for users
       const { data: sellerApps, error: sellerError } = await supabase
         .from("seller_applications")
         .select(`
@@ -153,7 +157,6 @@ export default function AdminApplicationsPage() {
 
       if (sellerError) throw sellerError
 
-      // Fetch product applications, explicitly specifying the relationship for users
       const { data: productApps, error: productError } = await supabase
         .from("product_applications")
         .select(`
@@ -166,7 +169,6 @@ export default function AdminApplicationsPage() {
 
       if (productError) throw productError
 
-      // Fetch complaints, explicitly specifying the relationship for users
       const { data: complaints, error: complaintsError } = await supabase
         .from("complaints")
         .select(`
@@ -185,7 +187,6 @@ export default function AdminApplicationsPage() {
 
       if (complaintsError) throw complaintsError
 
-      // Combine and tag the applications
       const allApps: Application[] = [
         ...(sellerApps || []).map((app: any) => ({ ...app, type: "seller", users: app.users || null })),
         ...(productApps || []).map((app: any) => ({ ...app, type: "product", users: app.users || null })),
@@ -199,7 +200,6 @@ export default function AdminApplicationsPage() {
         })),
       ]
 
-      // Sort by created_at
       allApps.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
       setApplications(allApps)
@@ -212,7 +212,6 @@ export default function AdminApplicationsPage() {
     }
   }
 
-  // Calculate stats based on current applications
   const calculateStats = (appsData: Application[]) => {
     const stats = {
       total: appsData.length,
@@ -223,7 +222,6 @@ export default function AdminApplicationsPage() {
     setStats(stats)
   }
 
-  // Filter applications based on search query and dropdown selections
   useEffect(() => {
     let filtered = applications
 
@@ -238,7 +236,7 @@ export default function AdminApplicationsPage() {
           app.name?.toLowerCase().includes(lowerCaseSearch) ||
           app.subject?.toLowerCase().includes(lowerCaseSearch) ||
           app.message?.toLowerCase().includes(lowerCaseSearch) ||
-          app.users?.phone?.includes(searchQuery) // Direct phone search
+          app.users?.phone?.includes(searchQuery)
       )
     }
 
@@ -253,37 +251,38 @@ export default function AdminApplicationsPage() {
     setFilteredApplications(filtered)
   }, [applications, searchQuery, typeFilter, statusFilter])
 
-  // Handle application actions (approve, reject, etc.) directly with Supabase
   const handleAction = async (action: string) => {
-    if (!selectedApplication || !currentUser) return // Ensure application and user are loaded
+    if (!selectedApplication || !currentUser) return
 
-    setLoading(true) // Show loading indicator while processing
+    setLoading(true)
     try {
       let updateData: any = {
         updated_at: new Date().toISOString(),
         reviewed_at: new Date().toISOString(),
       }
 
-      // Determine table and update data based on type and action
+      let tableName = ""
       switch (selectedApplication.type) {
         case "seller":
+          tableName = "seller_applications"
           updateData.status = action === "approve" ? "approved" : action === "reject" ? "rejected" : action
           updateData.admin_notes = actionNotes
           break
         case "product":
+          tableName = "product_applications"
           updateData.status = action === "approve" ? "approved" : action === "reject" ? "rejected" : action
           updateData.admin_notes = actionNotes
           break
         case "complaint":
+          tableName = "complaints"
           updateData.status = action === "resolve" ? "resolved" : action === "reject" ? "rejected" : action
-          updateData.admin_response = actionNotes // Use notes as admin response for complaints
+          updateData.admin_response = actionNotes
           break
         default:
           throw new Error("Noto'g'ri application type")
       }
 
-      // Update the application in Supabase
-      const tableName = selectedApplication.type === "complaint" ? "complaints" : `${selectedApplication.type}_applications`
+      // 1. Update the application status first
       const { data: updatedApp, error: appUpdateError } = await supabase
         .from(tableName)
         .update(updateData)
@@ -293,7 +292,47 @@ export default function AdminApplicationsPage() {
 
       if (appUpdateError) throw appUpdateError
 
-      // If approving seller application, update user's seller status
+      // 2. If product application is approved, copy data to 'products' table
+      if (selectedApplication.type === "product" && action === "approve") {
+        if (!selectedApplication.product_data) {
+          throw new Error("Product data is missing for approval.")
+        }
+
+        const productToInsert = {
+          name: selectedApplication.product_data.name,
+          brand: selectedApplication.product_data.brand || null,
+          price: selectedApplication.product_data.price,
+          description: selectedApplication.product_data.description || null,
+          image_url: selectedApplication.product_data.images?.[0] || null, // Take the first image as main
+          seller_id: selectedApplication.user_id || selectedApplication.product_data.seller_id || null, // Use applicant's ID or from product data
+          category_id: selectedApplication.product_data.category_id || null,
+          has_delivery: selectedApplication.product_data.has_delivery || false,
+          product_type: selectedApplication.product_data.product_type || "physical",
+          delivery_price: selectedApplication.product_data.delivery_price || 0,
+          stock_quantity: selectedApplication.product_data.stock_quantity || 0,
+          // Add other fields from product_data that map to your 'products' table
+        }
+
+        // Check if seller_id is valid before inserting
+        if (!productToInsert.seller_id) {
+            toast.warn("Mahsulotni qo'shish uchun sotuvchi ID'si topilmadi. Mahsulot yaratilmadi.")
+        } else {
+            const { data: newProduct, error: productInsertError } = await supabase
+              .from("products")
+              .insert([productToInsert])
+              .select()
+              .single()
+
+            if (productInsertError) {
+              console.error("Error inserting product:", productInsertError)
+              // Decide how to handle this error: maybe revert application status or just warn
+              throw productInsertError
+            }
+            // Optionally, toast.success(`Mahsulot "${productToInsert.name}" muvaffaqiyatli yaratildi.`)
+        }
+      }
+
+      // 3. If approving seller application, update user's seller status
       if (selectedApplication.type === "seller" && (action === "approve" || action === "approve_verified")) {
         await supabase
           .from("users")
@@ -301,17 +340,16 @@ export default function AdminApplicationsPage() {
             is_seller: true,
             is_verified_seller: true,
           })
-          .eq("id", selectedApplication.user_id!) // Use the user_id from the application
+          .eq("id", selectedApplication.user_id!)
           .then(({ error: userUpdateError }) => {
             if (userUpdateError) {
               console.error("Error updating user status:", userUpdateError)
-              // Handle user update error if necessary
             }
           })
       }
 
       toast.success(`Ariza muvaffaqiyatli ${action === "approve" ? "tasdiqlandi" : action === "reject" ? "rad etildi" : action === "resolve" ? "hal qilindi" : action}.`)
-      await fetchApplications() // Re-fetch applications to reflect changes
+      await fetchApplications()
       setShowActionDialog(false)
       setSelectedApplication(null)
       setActionNotes("")
@@ -323,15 +361,13 @@ export default function AdminApplicationsPage() {
     }
   }
 
-  // Open action dialog with pre-filled data
   const openActionDialog = (application: Application, action: string) => {
     setSelectedApplication(application)
     setActionType(action)
-    setActionNotes("") // Clear previous notes
+    setActionNotes("")
     setShowActionDialog(true)
   }
 
-  // Export current filtered applications to CSV
   const exportApplications = async () => {
     if (!filteredApplications.length) {
       toast.warn("Eksport qilish uchun hech qanday ariza topilmadi.")
@@ -342,7 +378,7 @@ export default function AdminApplicationsPage() {
         ["ID", "Tur", "Holat", "Ariza beruvchi", "Email", "Telefon", "Sana", "Kompaniya/Mavzu", "Admin Eslatmasi"].join(","),
         ...filteredApplications.map((app) =>
           [
-            app.id.slice(-8), // Short ID for readability
+            app.id.slice(-8),
             app.type === "seller" ? "Sotuvchi" : app.type === "product" ? "Mahsulot" : "Murojaat",
             app.status === "pending" ? "Kutilmoqda" : app.status === "approved" || app.status === "approved_verified" ? "Tasdiqlangan" : app.status === "resolved" ? "Hal qilingan" : "Rad etilgan",
             app.users?.full_name || app.name || "Noma'lum",
@@ -370,7 +406,6 @@ export default function AdminApplicationsPage() {
     }
   }
 
-  // Helper to get badge UI for status
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "pending":
@@ -407,7 +442,6 @@ export default function AdminApplicationsPage() {
     }
   }
 
-  // Helper to get icon for application type
   const getTypeIcon = (type: string) => {
     switch (type) {
       case "seller":
@@ -421,7 +455,6 @@ export default function AdminApplicationsPage() {
     }
   }
 
-  // Helper to get display name for application type
   const getTypeName = (type: string) => {
     switch (type) {
       case "seller":
@@ -435,7 +468,6 @@ export default function AdminApplicationsPage() {
     }
   }
 
-  // Helper to format dates
   const formatDate = (dateString: string) => {
     if (!dateString) return "Noma'lum sana"
     return new Date(dateString).toLocaleDateString("uz-UZ", {
@@ -447,7 +479,6 @@ export default function AdminApplicationsPage() {
     })
   }
 
-  // Responsive phone number formatting
   const formatPhoneNumber = (phone?: string) => {
     if (!phone) return null
     if (phone.startsWith('+')) {
@@ -456,7 +487,6 @@ export default function AdminApplicationsPage() {
     return phone
   }
 
-  // Initial loading state
   if (loading) {
     return (
       <div className="space-y-6 p-4 lg:p-8">
@@ -480,10 +510,8 @@ export default function AdminApplicationsPage() {
     )
   }
 
-  // Main page content
   return (
     <div className="space-y-6 p-4 lg:p-8">
-      {/* Header Section */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl lg:text-3xl font-bold gradient-text">Arizalar</h1>
@@ -495,7 +523,6 @@ export default function AdminApplicationsPage() {
         </Button>
       </div>
 
-      {/* Stats Cards Section */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6">
         <Card className="card-beautiful">
           <CardContent className="p-3 lg:p-6 text-center">
@@ -527,7 +554,6 @@ export default function AdminApplicationsPage() {
         </Card>
       </div>
 
-      {/* Filters Section */}
       <Card className="card-beautiful">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -573,7 +599,6 @@ export default function AdminApplicationsPage() {
             </Select>
           </div>
 
-          {/* Applications List */}
           <div className="space-y-4">
             {loading ? (
               <div className="text-center py-8">
@@ -730,19 +755,19 @@ export default function AdminApplicationsPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {}} // Placeholder for pagination logic
+                  onClick={() => {}}
                   disabled={true}
                 >
                   <ChevronLeft className="h-4 w-4" />
                   Oldingi
                 </Button>
                 <span className="text-sm min-w-[60px] text-center">
-                  1 / 1 {/* Placeholder, proper page number needed */}
+                  1 / 1
                 </span>
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {}} // Placeholder for pagination logic
+                  onClick={() => {}}
                   disabled={true}
                 >
                   Keyingi
