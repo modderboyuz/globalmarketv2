@@ -7,10 +7,11 @@ import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
+import { Switch } from "@/components/ui/switch"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   ShoppingCart,
   RefreshCw,
@@ -20,9 +21,10 @@ import {
   Trash2,
   User,
   Phone,
-  MapPin,
   Truck,
   AlertCircle,
+  Shield,
+  RotateCcw,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
@@ -41,12 +43,22 @@ interface CartItem {
     author: string
     has_delivery: boolean
     delivery_price: number
+    has_warranty: boolean
+    warranty_months: number
+    has_return: boolean
+    return_days: number
   }
+}
+
+interface Neighborhood {
+  id: string
+  name: string
 }
 
 export default function CartPage() {
   const router = useRouter()
   const [cartItems, setCartItems] = useState<CartItem[]>([])
+  const [neighborhoods, setNeighborhoods] = useState<Neighborhood[]>([])
   const [loading, setLoading] = useState(true)
   const [orderLoading, setOrderLoading] = useState(false)
   const [user, setUser] = useState<any>(null)
@@ -54,11 +66,16 @@ export default function CartPage() {
   const [formData, setFormData] = useState({
     fullName: "",
     phone: "",
-    address: "",
+    neighborhood: "",
+    street: "",
+    houseNumber: "",
   })
+
+  const [deliveryOptions, setDeliveryOptions] = useState<{ [key: string]: boolean }>({})
 
   useEffect(() => {
     checkUser()
+    fetchNeighborhoods()
   }, [])
 
   const checkUser = async () => {
@@ -77,11 +94,25 @@ export default function CartPage() {
       setFormData({
         fullName: currentUser.user_metadata.full_name || "",
         phone: currentUser.user_metadata.phone || "",
-        address: currentUser.user_metadata.address || "",
+        neighborhood: "",
+        street: "",
+        houseNumber: "",
       })
     }
 
     fetchCartItems(currentUser.id)
+  }
+
+  const fetchNeighborhoods = async () => {
+    try {
+      const response = await fetch("/api/neighborhoods")
+      const result = await response.json()
+      if (result.success) {
+        setNeighborhoods(result.neighborhoods)
+      }
+    } catch (error) {
+      console.error("Error fetching neighborhoods:", error)
+    }
   }
 
   const fetchCartItems = async (userId: string) => {
@@ -100,13 +131,26 @@ export default function CartPage() {
             brand,
             author,
             has_delivery,
-            delivery_price
+            delivery_price,
+            has_warranty,
+            warranty_months,
+            has_return,
+            return_days
           )
         `)
         .eq("user_id", userId)
 
       if (error) throw error
       setCartItems(data || [])
+
+      // Initialize delivery options
+      const initialDeliveryOptions: { [key: string]: boolean } = {}
+      data?.forEach((item) => {
+        if (item.products?.has_delivery) {
+          initialDeliveryOptions[item.id] = false
+        }
+      })
+      setDeliveryOptions(initialDeliveryOptions)
     } catch (error) {
       console.error("Error fetching cart items:", error)
       toast.error("Savatcha ma'lumotlarini olishda xatolik")
@@ -142,6 +186,13 @@ export default function CartPage() {
     }
   }
 
+  const toggleDelivery = (cartId: string) => {
+    setDeliveryOptions((prev) => ({
+      ...prev,
+      [cartId]: !prev[cartId],
+    }))
+  }
+
   const handleOrder = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -150,7 +201,7 @@ export default function CartPage() {
       return
     }
 
-    if (!formData.fullName || !formData.phone || !formData.address) {
+    if (!formData.fullName || !formData.phone || !formData.neighborhood || !formData.street || !formData.houseNumber) {
       toast.error("Barcha maydonlarni to'ldiring")
       return
     }
@@ -159,8 +210,11 @@ export default function CartPage() {
 
     try {
       // Create orders for each cart item
-      const orderPromises = cartItems.map((item) =>
-        fetch("/api/orders", {
+      const orderPromises = cartItems.map((item) => {
+        const withDelivery = deliveryOptions[item.id] || false
+        const address = `${formData.neighborhood}, ${formData.street}, ${formData.houseNumber}`
+
+        return fetch("/api/orders", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -169,13 +223,17 @@ export default function CartPage() {
             productId: item.products.id,
             fullName: formData.fullName,
             phone: formData.phone,
-            address: formData.address,
+            address: address,
             quantity: item.quantity,
             userId: user.id,
             orderType: "cart",
+            withDelivery: withDelivery,
+            neighborhood: formData.neighborhood,
+            street: formData.street,
+            houseNumber: formData.houseNumber,
           }),
-        }),
-      )
+        })
+      })
 
       const results = await Promise.all(orderPromises)
 
@@ -221,12 +279,13 @@ export default function CartPage() {
   }
 
   const subtotal = cartItems.reduce((sum, item) => sum + (item.products?.price || 0) * item.quantity, 0)
-  const deliveryTotal = cartItems.reduce(
-    (sum, item) => (item.products?.has_delivery ? sum + (item.products?.delivery_price || 0) : sum),
-    0,
-  )
+  const deliveryTotal = cartItems.reduce((sum, item) => {
+    if (deliveryOptions[item.id] && item.products?.has_delivery) {
+      return sum + (item.products?.delivery_price || 0)
+    }
+    return sum
+  }, 0)
   const totalAmount = subtotal + deliveryTotal
-  const hasDeliveryItems = cartItems.some((item) => item.products?.has_delivery)
 
   if (loading) {
     return (
@@ -306,10 +365,16 @@ export default function CartPage() {
                                   <Badge className="badge-beautiful border-blue-200 text-blue-700 text-xs">
                                     {getProductTypeIcon(item.products?.product_type || "")}
                                   </Badge>
-                                  {item.products?.has_delivery && (
+                                  {item.products?.has_warranty && (
                                     <Badge className="badge-beautiful border-green-200 text-green-700 text-xs">
-                                      <Truck className="h-2 w-2 md:h-3 md:w-3 mr-1" />
-                                      Yetkazib berish
+                                      <Shield className="h-2 w-2 md:h-3 md:w-3 mr-1" />
+                                      {item.products.warranty_months} oy kafolat
+                                    </Badge>
+                                  )}
+                                  {item.products?.has_return && (
+                                    <Badge className="badge-beautiful border-orange-200 text-orange-700 text-xs">
+                                      <RotateCcw className="h-2 w-2 md:h-3 md:w-3 mr-1" />
+                                      {item.products.return_days} kun qaytarish
                                     </Badge>
                                   )}
                                 </div>
@@ -333,6 +398,24 @@ export default function CartPage() {
                                 <Trash2 className="h-3 w-3 md:h-4 md:w-4" />
                               </Button>
                             </div>
+
+                            {/* Delivery Option */}
+                            {item.products?.has_delivery && (
+                              <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <Truck className="h-4 w-4 text-blue-600" />
+                                    <span className="text-sm font-medium text-blue-800">
+                                      Yetkazib berish ({formatPrice(item.products.delivery_price)})
+                                    </span>
+                                  </div>
+                                  <Switch
+                                    checked={deliveryOptions[item.id] || false}
+                                    onCheckedChange={() => toggleDelivery(item.id)}
+                                  />
+                                </div>
+                              </div>
+                            )}
 
                             {/* Quantity and Price */}
                             <div className="flex items-center justify-between">
@@ -370,7 +453,7 @@ export default function CartPage() {
                                 <div className="text-lg md:text-2xl font-bold text-blue-600">
                                   {formatPrice((item.products?.price || 0) * item.quantity)}
                                 </div>
-                                {item.products?.has_delivery && (
+                                {deliveryOptions[item.id] && item.products?.has_delivery && (
                                   <div className="text-xs md:text-sm text-green-600">
                                     + {formatPrice(item.products?.delivery_price || 0)} yetkazib berish
                                   </div>
@@ -399,7 +482,7 @@ export default function CartPage() {
                         <span className="font-semibold">{formatPrice(subtotal)}</span>
                       </div>
 
-                      {hasDeliveryItems && (
+                      {deliveryTotal > 0 && (
                         <div className="flex justify-between text-base md:text-lg">
                           <span>Yetkazib berish:</span>
                           <span className="font-semibold text-green-600">{formatPrice(deliveryTotal)}</span>
@@ -413,20 +496,15 @@ export default function CartPage() {
                         <span className="text-blue-600">{formatPrice(totalAmount)}</span>
                       </div>
 
-                      {!hasDeliveryItems && (
-                        <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-4">
-                          <div className="flex items-start gap-2">
-                            <AlertCircle className="h-4 w-4 md:h-5 md:w-5 text-amber-600 mt-0.5 flex-shrink-0" />
-                            <div className="text-xs md:text-sm text-amber-800">
-                              <p className="font-medium mb-1">Yetkazib berish yo'q</p>
-                              <p>
-                                Bu mahsulotlar uchun yetkazib berish xizmati mavjud emas. Mahsulotlarni do'kondan olib
-                                ketishingiz kerak.
-                              </p>
-                            </div>
+                      <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-4">
+                        <div className="flex items-start gap-2">
+                          <AlertCircle className="h-4 w-4 md:h-5 md:w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                          <div className="text-xs md:text-sm text-amber-800">
+                            <p className="font-medium mb-1">Yetkazib berish haqida</p>
+                            <p>Yetkazib berish faqat Qashqadaryo viloyati, G'uzor tumani hududida amalga oshiriladi.</p>
                           </div>
                         </div>
-                      )}
+                      </div>
                     </CardContent>
                   </Card>
 
@@ -472,20 +550,52 @@ export default function CartPage() {
                         </div>
 
                         <div className="space-y-2">
-                          <Label htmlFor="address" className="text-sm md:text-base font-medium">
-                            Manzil *
+                          <Label htmlFor="neighborhood" className="text-sm md:text-base font-medium">
+                            Mahalla *
                           </Label>
-                          <div className="relative">
-                            <MapPin className="absolute left-3 top-3 h-4 w-4 md:h-5 md:w-5 text-gray-400" />
-                            <Textarea
-                              id="address"
-                              placeholder="To'liq manzil: shahar, tuman, ko'cha, uy raqami"
-                              className="input-beautiful pl-10 md:pl-12 min-h-[80px] md:min-h-[100px] text-sm md:text-base"
-                              value={formData.address}
-                              onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                              required
-                            />
-                          </div>
+                          <Select
+                            value={formData.neighborhood}
+                            onValueChange={(value) => setFormData({ ...formData, neighborhood: value })}
+                          >
+                            <SelectTrigger className="input-beautiful">
+                              <SelectValue placeholder="Mahallani tanlang" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {neighborhoods.map((neighborhood) => (
+                                <SelectItem key={neighborhood.id} value={neighborhood.name}>
+                                  {neighborhood.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="street" className="text-sm md:text-base font-medium">
+                            Ko'cha nomi *
+                          </Label>
+                          <Input
+                            id="street"
+                            placeholder="Ko'cha nomi"
+                            className="input-beautiful text-sm md:text-base"
+                            value={formData.street}
+                            onChange={(e) => setFormData({ ...formData, street: e.target.value })}
+                            required
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="houseNumber" className="text-sm md:text-base font-medium">
+                            Uy raqami *
+                          </Label>
+                          <Input
+                            id="houseNumber"
+                            placeholder="Uy raqami"
+                            className="input-beautiful text-sm md:text-base"
+                            value={formData.houseNumber}
+                            onChange={(e) => setFormData({ ...formData, houseNumber: e.target.value })}
+                            required
+                          />
                         </div>
 
                         <Button

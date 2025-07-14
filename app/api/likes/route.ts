@@ -10,43 +10,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Product ID va User ID talab qilinadi" }, { status: 400 })
     }
 
-    // Ensure user exists
-    const { data: existingUser, error: userCheckError } = await supabase
-      .from("users")
-      .select("id")
-      .eq("id", userId)
-      .single()
+    // Use the handle_like_toggle function
+    const { data, error } = await supabase.rpc("handle_like_toggle", {
+      product_id_param: productId,
+      user_id_param: userId,
+    })
 
-    if (userCheckError || !existingUser) {
-      return NextResponse.json({ error: "Foydalanuvchi topilmadi" }, { status: 404 })
+    if (error) {
+      console.error("Like toggle error:", error)
+      return NextResponse.json({ error: "Like qilishda xatolik yuz berdi" }, { status: 500 })
     }
 
-    // Check if like already exists
-    const { data: existingLike } = await supabase
-      .from("likes")
-      .select("id")
-      .eq("product_id", productId)
-      .eq("user_id", userId)
-      .single()
-
-    if (existingLike) {
-      // Remove like
-      const { error } = await supabase.from("likes").delete().eq("product_id", productId).eq("user_id", userId)
-
-      if (error) throw error
-
-      return NextResponse.json({ success: true, liked: false })
-    } else {
-      // Add like
-      const { error } = await supabase.from("likes").insert({
-        product_id: productId,
-        user_id: userId,
-      })
-
-      if (error) throw error
-
-      return NextResponse.json({ success: true, liked: true })
-    }
+    return NextResponse.json(data)
   } catch (error) {
     console.error("Like API Error:", error)
     return NextResponse.json({ error: "Like qilishda xatolik yuz berdi" }, { status: 500 })

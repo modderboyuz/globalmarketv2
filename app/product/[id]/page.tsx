@@ -8,10 +8,11 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
+import { Switch } from "@/components/ui/switch"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Dialog,
   DialogContent,
@@ -24,11 +25,9 @@ import {
   Star,
   User,
   Phone,
-  MapPin,
   ArrowLeft,
   Heart,
   Share2,
-  Package,
   Shield,
   RefreshCw,
   Plus,
@@ -39,6 +38,8 @@ import {
   ShoppingCart,
   LogIn,
   MessageSquare,
+  Truck,
+  RotateCcw,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
@@ -58,6 +59,12 @@ interface Product {
   view_count: number
   like_count: number
   average_rating: number
+  has_delivery: boolean
+  delivery_price: number
+  has_warranty: boolean
+  warranty_months: number
+  has_return: boolean
+  return_days: number
   categories: {
     name_uz: string
   }
@@ -80,6 +87,11 @@ interface Review {
   }
 }
 
+interface Neighborhood {
+  id: string
+  name: string
+}
+
 export default function ProductDetailPage() {
   const params = useParams()
   const router = useRouter()
@@ -88,6 +100,7 @@ export default function ProductDetailPage() {
   const [product, setProduct] = useState<Product | null>(null)
   const [reviews, setReviews] = useState<Review[]>([])
   const [similarProducts, setSimilarProducts] = useState<Product[]>([])
+  const [neighborhoods, setNeighborhoods] = useState<Neighborhood[]>([])
   const [loading, setLoading] = useState(true)
   const [orderLoading, setOrderLoading] = useState(false)
   const [cartLoading, setCartLoading] = useState(false)
@@ -97,11 +110,14 @@ export default function ProductDetailPage() {
   const [isLiked, setIsLiked] = useState(false)
   const [showOrderDialog, setShowOrderDialog] = useState(false)
   const [showLoginDialog, setShowLoginDialog] = useState(false)
+  const [withDelivery, setWithDelivery] = useState(false)
 
   const [formData, setFormData] = useState({
     fullName: "",
     phone: "",
-    address: "",
+    neighborhood: "",
+    street: "",
+    houseNumber: "",
   })
 
   useEffect(() => {
@@ -109,6 +125,7 @@ export default function ProductDetailPage() {
       fetchProductDetails()
       checkUser()
       incrementViewCount()
+      fetchNeighborhoods()
     }
   }, [productId])
 
@@ -122,12 +139,26 @@ export default function ProductDetailPage() {
       setFormData({
         fullName: currentUser.user_metadata.full_name || "",
         phone: currentUser.user_metadata.phone || "",
-        address: currentUser.user_metadata.address || "",
+        neighborhood: "",
+        street: "",
+        houseNumber: "",
       })
     }
 
     if (currentUser) {
       checkLikeStatus(currentUser.id)
+    }
+  }
+
+  const fetchNeighborhoods = async () => {
+    try {
+      const response = await fetch("/api/neighborhoods")
+      const result = await response.json()
+      if (result.success) {
+        setNeighborhoods(result.neighborhoods)
+      }
+    } catch (error) {
+      console.error("Error fetching neighborhoods:", error)
     }
   }
 
@@ -201,7 +232,7 @@ export default function ProductDetailPage() {
 
   const incrementViewCount = async () => {
     try {
-      await supabase.rpc("increment_view_count", { product_id: productId })
+      await supabase.rpc("increment_view_count", { product_id_param: productId })
     } catch (error) {
       console.error("Error incrementing view count:", error)
     }
@@ -232,25 +263,30 @@ export default function ProductDetailPage() {
     setLikeLoading(true)
 
     try {
-      const { data, error } = await supabase.rpc("handle_like_toggle", {
-        product_id_param: productId,
-        user_id_param: user.id,
+      const response = await fetch("/api/likes", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          productId: productId,
+          userId: user.id,
+        }),
       })
 
-      if (error) throw error
+      const result = await response.json()
 
-      if (data.success) {
-        setIsLiked(data.liked)
-        // Update product like count
+      if (result.success) {
+        setIsLiked(result.liked)
         if (product) {
           setProduct({
             ...product,
-            like_count: data.like_count,
+            like_count: result.like_count,
           })
         }
-        toast.success(data.liked ? "Like qilindi" : "Like olib tashlandi")
+        toast.success(result.liked ? "Like qilindi" : "Like olib tashlandi")
       } else {
-        throw new Error(data.error)
+        throw new Error(result.error)
       }
     } catch (error: any) {
       console.error("Error handling like:", error)
@@ -299,7 +335,7 @@ export default function ProductDetailPage() {
     e.preventDefault()
     if (!product) return
 
-    if (!formData.fullName || !formData.phone || !formData.address) {
+    if (!formData.fullName || !formData.phone || !formData.neighborhood || !formData.street || !formData.houseNumber) {
       toast.error("Barcha maydonlarni to'ldiring")
       return
     }
@@ -312,23 +348,36 @@ export default function ProductDetailPage() {
     setOrderLoading(true)
 
     try {
-      const { data, error } = await supabase.rpc("create_order", {
-        product_id_param: product.id,
-        full_name_param: formData.fullName,
-        phone_param: formData.phone,
-        address_param: formData.address,
-        quantity_param: quantity,
-        user_id_param: user?.id || null,
+      const address = `${formData.neighborhood}, ${formData.street}, ${formData.houseNumber}`
+
+      const response = await fetch("/api/orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          productId: product.id,
+          fullName: formData.fullName,
+          phone: formData.phone,
+          address: address,
+          quantity: quantity,
+          userId: user?.id || null,
+          withDelivery: withDelivery,
+          neighborhood: formData.neighborhood,
+          street: formData.street,
+          houseNumber: formData.houseNumber,
+        }),
       })
 
-      if (error) throw error
+      const result = await response.json()
 
-      if (data.success) {
+      if (result.success) {
         toast.success("Buyurtma muvaffaqiyatli berildi! Sizga tez orada aloqaga chiqamiz.")
 
         // Reset form
-        setFormData({ fullName: "", phone: "", address: "" })
+        setFormData({ fullName: "", phone: "", neighborhood: "", street: "", houseNumber: "" })
         setQuantity(1)
+        setWithDelivery(false)
         setShowOrderDialog(false)
 
         // Redirect to orders page if user is logged in
@@ -338,7 +387,7 @@ export default function ProductDetailPage() {
           }, 2000)
         }
       } else {
-        throw new Error(data.error)
+        throw new Error(result.error)
       }
     } catch (error: any) {
       toast.error(error.message || "Xatolik yuz berdi")
@@ -405,6 +454,14 @@ export default function ProductDetailPage() {
     return Array.from({ length: 5 }, (_, i) => (
       <Star key={i} className={`h-4 w-4 ${i < rating ? "fill-yellow-400 text-yellow-400" : "text-gray-300"}`} />
     ))
+  }
+
+  const calculateTotalPrice = () => {
+    let total = (product?.price || 0) * quantity
+    if (withDelivery && product?.has_delivery) {
+      total += product.delivery_price || 0
+    }
+    return total
   }
 
   if (loading) {
@@ -553,18 +610,24 @@ export default function ProductDetailPage() {
 
                 {/* Features */}
                 <div className="space-y-3">
-                  <div className="flex items-center space-x-3">
-                    <Package className="h-5 w-5 text-blue-600" />
-                    <span>Tez yetkazib berish</span>
-                  </div>
-                  <div className="flex items-center space-x-3">
-                    <Shield className="h-5 w-5 text-blue-600" />
-                    <span>Kafolat bilan</span>
-                  </div>
-                  <div className="flex items-center space-x-3">
-                    <RefreshCw className="h-5 w-5 text-blue-600" />
-                    <span>Qaytarish mumkin</span>
-                  </div>
+                  {product.has_delivery && (
+                    <div className="flex items-center space-x-3">
+                      <Truck className="h-5 w-5 text-blue-600" />
+                      <span>Yetkazib berish ({formatPrice(product.delivery_price)})</span>
+                    </div>
+                  )}
+                  {product.has_warranty && (
+                    <div className="flex items-center space-x-3">
+                      <Shield className="h-5 w-5 text-blue-600" />
+                      <span>{product.warranty_months} oy kafolat</span>
+                    </div>
+                  )}
+                  {product.has_return && (
+                    <div className="flex items-center space-x-3">
+                      <RotateCcw className="h-5 w-5 text-blue-600" />
+                      <span>{product.return_days} kun qaytarish</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Description */}
@@ -797,7 +860,7 @@ export default function ProductDetailPage() {
 
       {/* Order Dialog */}
       <Dialog open={showOrderDialog} onOpenChange={setShowOrderDialog}>
-        <DialogContent>
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Buyurtma berish</DialogTitle>
             <DialogDescription>{product?.name} mahsuloti uchun buyurtma ma'lumotlarini kiriting</DialogDescription>
@@ -834,27 +897,76 @@ export default function ProductDetailPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="address">Manzil *</Label>
-              <div className="relative">
-                <MapPin className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                <Textarea
-                  id="address"
-                  placeholder="To'liq manzil: shahar, tuman, ko'cha, uy raqami"
-                  className="input-beautiful pl-10 min-h-[80px]"
-                  value={formData.address}
-                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                  required
-                />
-              </div>
+              <Label htmlFor="neighborhood">Mahalla *</Label>
+              <Select
+                value={formData.neighborhood}
+                onValueChange={(value) => setFormData({ ...formData, neighborhood: value })}
+              >
+                <SelectTrigger className="input-beautiful">
+                  <SelectValue placeholder="Mahallani tanlang" />
+                </SelectTrigger>
+                <SelectContent>
+                  {neighborhoods.map((neighborhood) => (
+                    <SelectItem key={neighborhood.id} value={neighborhood.name}>
+                      {neighborhood.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="street">Ko'cha nomi *</Label>
+              <Input
+                id="street"
+                placeholder="Ko'cha nomi"
+                className="input-beautiful"
+                value={formData.street}
+                onChange={(e) => setFormData({ ...formData, street: e.target.value })}
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="houseNumber">Uy raqami *</Label>
+              <Input
+                id="houseNumber"
+                placeholder="Uy raqami"
+                className="input-beautiful"
+                value={formData.houseNumber}
+                onChange={(e) => setFormData({ ...formData, houseNumber: e.target.value })}
+                required
+              />
+            </div>
+
+            {/* Delivery Option */}
+            {product?.has_delivery && (
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Truck className="h-4 w-4 text-blue-600" />
+                    <span className="text-sm font-medium text-blue-800">
+                      Yetkazib berish ({formatPrice(product.delivery_price)})
+                    </span>
+                  </div>
+                  <Switch checked={withDelivery} onCheckedChange={setWithDelivery} />
+                </div>
+              </div>
+            )}
 
             <Separator />
 
             <div className="space-y-2">
               <div className="flex justify-between text-lg font-semibold">
                 <span>Jami:</span>
-                <span className="text-blue-600">{formatPrice(product?.price * quantity || 0)}</span>
+                <span className="text-blue-600">{formatPrice(calculateTotalPrice())}</span>
               </div>
+              {withDelivery && product?.has_delivery && (
+                <div className="text-sm text-gray-600">
+                  Mahsulot: {formatPrice(product.price * quantity)} + Yetkazib berish:{" "}
+                  {formatPrice(product.delivery_price)}
+                </div>
+              )}
             </div>
 
             <DialogFooter>

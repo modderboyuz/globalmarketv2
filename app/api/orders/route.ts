@@ -4,70 +4,50 @@ import { supabase } from "@/lib/supabase"
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { productId, fullName, phone, address, quantity = 1, userId, orderType = "immediate" } = body
+    const {
+      productId,
+      fullName,
+      phone,
+      address,
+      quantity = 1,
+      userId,
+      orderType = "immediate",
+      withDelivery = false,
+      neighborhood,
+      street,
+      houseNumber,
+    } = body
 
     if (!productId || !fullName || !phone || !address) {
-      return NextResponse.json({ error: "Barcha maydonlar talab qilinadi" }, { status: 400 })
+      return NextResponse.json({ error: "Barcha majburiy maydonlar talab qilinadi" }, { status: 400 })
     }
 
-    // Get product details
-    const { data: product, error: productError } = await supabase
-      .from("products")
-      .select("*, users!products_seller_id_fkey(full_name, phone)")
-      .eq("id", productId)
-      .single()
+    // Use the create_order function
+    const { data, error } = await supabase.rpc("create_order", {
+      product_id_param: productId,
+      full_name_param: fullName,
+      phone_param: phone,
+      address_param: address,
+      quantity_param: quantity,
+      user_id_param: userId,
+      with_delivery_param: withDelivery,
+      neighborhood_param: neighborhood,
+      street_param: street,
+      house_number_param: houseNumber,
+    })
 
-    if (productError || !product) {
-      return NextResponse.json({ error: "Mahsulot topilmadi" }, { status: 404 })
-    }
-
-    if (product.stock_quantity < quantity) {
-      return NextResponse.json({ error: "Yetarli miqdorda mahsulot yo'q" }, { status: 400 })
-    }
-
-    // Calculate total amount
-    const totalAmount = product.price * quantity
-
-    // Create order
-    const orderData = {
-      user_id: userId,
-      product_id: productId,
-      full_name: fullName,
-      phone: phone,
-      address: address,
-      delivery_address: address,
-      delivery_phone: phone,
-      quantity: quantity,
-      total_amount: totalAmount,
-      status: "pending",
-      is_agree: null,
-      is_client_went: null,
-      is_client_claimed: null,
-      pickup_address: null,
-      seller_notes: null,
-      client_notes: null,
-      created_at: new Date().toISOString(),
-    }
-
-    const { data: order, error: orderError } = await supabase.from("orders").insert(orderData).select().single()
-
-    if (orderError) {
-      console.error("Order creation error:", orderError)
+    if (error) {
+      console.error("Order creation error:", error)
       return NextResponse.json({ error: "Buyurtma yaratishda xatolik" }, { status: 500 })
     }
 
-    // Update product stock and order count
-    await supabase
-      .from("products")
-      .update({
-        stock_quantity: product.stock_quantity - quantity,
-        order_count: (product.order_count || 0) + 1,
-      })
-      .eq("id", productId)
+    if (!data.success) {
+      return NextResponse.json({ error: data.error }, { status: 400 })
+    }
 
     return NextResponse.json({
       success: true,
-      order: order,
+      order: data,
       message: "Buyurtma muvaffaqiyatli yaratildi",
     })
   } catch (error) {
@@ -96,7 +76,9 @@ export async function GET(request: NextRequest) {
             product_type,
             brand,
             author,
-            seller_id
+            seller_id,
+            has_delivery,
+            delivery_price
           ),
           users!orders_user_id_fkey (
             full_name,
@@ -155,7 +137,7 @@ export async function GET(request: NextRequest) {
       .from("orders")
       .select(`
         *,
-        products!orders_product_id_fkey (name, price),
+        products!orders_product_id_fkey (name, price, has_delivery, delivery_price),
         users!orders_user_id_fkey (full_name, email)
       `)
       .order("created_at", { ascending: false })
@@ -202,6 +184,7 @@ export async function PUT(request: NextRequest) {
       case "agree":
         updateData.is_agree = true
         updateData.status = "pending"
+        updateData.stage = 2
         updateData.pickup_address = pickupAddress || currentOrder.address
         if (notes) updateData.seller_notes = notes
         break
@@ -209,27 +192,32 @@ export async function PUT(request: NextRequest) {
       case "reject":
         updateData.is_agree = false
         updateData.status = "cancelled"
+        updateData.stage = 0
         if (notes) updateData.seller_notes = notes
         break
 
       case "client_went":
         updateData.is_client_went = true
+        updateData.stage = 3
         if (notes) updateData.client_notes = notes
         break
 
       case "client_not_went":
         updateData.is_client_went = false
+        updateData.stage = 2
         if (notes) updateData.client_notes = notes
         break
 
       case "product_given":
         updateData.is_client_claimed = true
         updateData.status = "completed"
+        updateData.stage = 4
         if (notes) updateData.seller_notes = notes
         break
 
       case "product_not_given":
         updateData.is_client_claimed = false
+        updateData.stage = 3
         if (notes) updateData.seller_notes = notes
         break
 
