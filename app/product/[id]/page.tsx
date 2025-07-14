@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog" // Import DialogFooter
 import {
   Heart,
   ShoppingCart,
@@ -29,7 +29,7 @@ import {
   Clock,
   CheckCircle,
   Send,
-  RefreshCw, // For loading states
+  RefreshCw,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
@@ -44,7 +44,7 @@ interface User {
   company_name?: string
   is_verified_seller: boolean
   is_admin: boolean
-  username?: string // Added username for admin check
+  username?: string
   created_at: string
   last_sign_in_at: string
 }
@@ -72,11 +72,11 @@ interface Product {
   created_at: string
   author?: string
   brand?: string
-  categories?: { // Made optional in case of missing category data
+  categories?: {
     name: string
     icon: string
   }
-  users?: User // Assuming users field is always present if product is fetched correctly
+  users?: User // Changed to optional as it might be null or undefined
 }
 
 interface SimilarProduct {
@@ -88,7 +88,7 @@ interface SimilarProduct {
   like_count: number
   order_count: number
   stock_quantity: number
-  users: { // Assuming users field is always present for similar products
+  users: {
     full_name: string
     company_name?: string
     is_verified_seller: boolean
@@ -101,7 +101,7 @@ interface Neighborhood {
 }
 
 export default function ProductDetailPage() {
-  const params = useParams<{ id: string }>() // Explicitly type params
+  const params = useParams<{ id: string }>()
   const router = useRouter()
   const [product, setProduct] = useState<Product | null>(null)
   const [similarProducts, setSimilarProducts] = useState<SimilarProduct[]>([])
@@ -109,10 +109,10 @@ export default function ProductDetailPage() {
   const [loading, setLoading] = useState(true)
   const [isLiked, setIsLiked] = useState(false)
   const [likesCount, setLikesCount] = useState(0)
-  const [user, setUser] = useState<User | null>(null) // Use User interface for logged-in user
+  const [user, setUser] = useState<User | null>(null)
   const [quantity, setQuantity] = useState(1)
   const [showQuickOrder, setShowQuickOrder] = useState(false)
-  const [isAdmin, setIsAdmin] = useState(false) // State to track if the current user is an admin
+  const [isAdmin, setIsAdmin] = useState(false)
 
   const [quickOrderForm, setQuickOrderForm] = useState({
     full_name: "",
@@ -123,7 +123,6 @@ export default function ProductDetailPage() {
     with_delivery: false,
   })
 
-  // Fetch product data, like status, user info, and neighborhoods on component mount
   useEffect(() => {
     if (params.id) {
       fetchProduct()
@@ -134,7 +133,6 @@ export default function ProductDetailPage() {
     }
   }, [params.id])
 
-  // Fetch user data and check admin status
   const checkUserAndAdminStatus = async () => {
     try {
       const {
@@ -142,26 +140,22 @@ export default function ProductDetailPage() {
       } = await supabase.auth.getUser()
 
       if (user) {
-        setUser(user) // Store basic user info
+        setUser(user)
         const { data: profile, error: profileError } = await supabase
           .from("users")
-          .select("id, full_name, phone, username") // Fetch necessary profile details
+          .select("id, full_name, phone, username")
           .eq("id", user.id)
           .single()
 
         if (profileError) {
           console.error("Error fetching user profile:", profileError.message)
-          // Continue without profile if error
         } else if (profile) {
-          // Update quick order form with user's info if available
           setQuickOrderForm((prev) => ({
             ...prev,
             full_name: profile.full_name || "",
             phone: profile.phone || "",
           }))
-
-          // Set admin status if username is 'admin' (or any other admin identifier)
-          setIsAdmin(profile.username === "admin") // Adjust 'admin' identifier as needed
+          setIsAdmin(profile.username === "admin")
         }
       }
     } catch (error) {
@@ -169,7 +163,6 @@ export default function ProductDetailPage() {
     }
   }
 
-  // Fetch product details and similar products
   const fetchProduct = async () => {
     setLoading(true)
     try {
@@ -180,18 +173,16 @@ export default function ProductDetailPage() {
           categories (name, icon),
           users (id, full_name, phone, company_name, is_verified_seller, username)
         `)
-        .eq("id", params.id!) // Use ! to assert that params.id is not null
-        .eq("is_active", true) // Only fetch active products
+        .eq("id", params.id!)
+        .eq("is_active", true)
         .single()
 
       if (error) throw error
       if (!data) {
-        // Handle case where product is not found or not active
         setProduct(null)
         toast.error("Mahsulot topilmadi yoki u faol emas.")
       } else {
         setProduct(data)
-        // Fetch similar products if category is available
         if (data.category_id) {
           fetchSimilarProducts(data.category_id, data.id)
         }
@@ -199,13 +190,12 @@ export default function ProductDetailPage() {
     } catch (error: any) {
       console.error("Error fetching product:", error.message)
       toast.error("Mahsulotni yuklashda xatolik")
-      setProduct(null) // Ensure product is null if fetch fails
+      setProduct(null)
     } finally {
       setLoading(false)
     }
   }
 
-  // Fetch similar products based on category
   const fetchSimilarProducts = async (categoryId: string, currentProductId: string) => {
     try {
       const { data, error } = await supabase
@@ -216,11 +206,11 @@ export default function ProductDetailPage() {
         `)
         .eq("category_id", categoryId)
         .eq("is_active", true)
-        .eq("is_approved", true) // Ensure only approved products are shown as similar
-        .neq("id", currentProductId) // Exclude the current product
-        .gt("stock_quantity", 0) // Only show products in stock
-        .order("order_count", { ascending: false }) // Order by popularity
-        .limit(8) // Limit to 8 similar products
+        .eq("is_approved", true)
+        .neq("id", currentProductId)
+        .gt("stock_quantity", 0)
+        .order("order_count", { ascending: false })
+        .limit(8)
 
       if (error) throw error
       setSimilarProducts(data || [])
@@ -229,18 +219,15 @@ export default function ProductDetailPage() {
     }
   }
 
-  // Increment product view count using a Supabase RPC function
   const incrementViewCount = async () => {
     if (!params.id) return
     try {
-      // Ensure the RPC function `increment_view_count` exists in your Supabase DB
       await supabase.rpc("increment_view_count", { product_id: params.id })
     } catch (error) {
       console.error("Error incrementing view count:", error)
     }
   }
 
-  // Fetch like status and count for the current product
   const fetchLikeStatus = async () => {
     if (!params.id) return
     try {
@@ -258,10 +245,9 @@ export default function ProductDetailPage() {
     }
   }
 
-  // Fetch neighborhoods for delivery address selection
   const fetchNeighborhoods = async () => {
     try {
-      const response = await fetch("/api/neighborhoods") // Assuming this API route exists
+      const response = await fetch("/api/neighborhoods")
       const data = await response.json()
       if (data.success) {
         setNeighborhoods(data.neighborhoods)
@@ -273,7 +259,6 @@ export default function ProductDetailPage() {
     }
   }
 
-  // Handle liking/unliking a product
   const handleLike = async () => {
     if (!user) {
       toast.error("Yoqtirish uchun tizimga kiring")
@@ -312,7 +297,6 @@ export default function ProductDetailPage() {
     }
   }
 
-  // Add product to the shopping cart
   const handleAddToCart = async () => {
     if (!user) {
       toast.error("Savatga qo'shish uchun tizimga kiring")
@@ -356,7 +340,6 @@ export default function ProductDetailPage() {
     }
   }
 
-  // Handle quick order submission
   const handleQuickOrder = async () => {
     if (!product) return
     if (quantity <= 0 || quantity > product.stock_quantity) {
@@ -399,7 +382,7 @@ export default function ProductDetailPage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(token && { Authorization: `Bearer ${token}` }), // Include token if user is logged in
+          ...(token && { Authorization: `Bearer ${token}` }),
         },
         body: JSON.stringify(orderData),
       })
@@ -409,11 +392,8 @@ export default function ProductDetailPage() {
       if (data.success) {
         toast.success("Buyurtma muvaffaqiyatli yaratildi!")
         setShowQuickOrder(false)
-        // Redirect to orders page if user is logged in
         if (user) {
           router.push("/orders")
-        } else {
-          // Optionally redirect anonymous users or show a confirmation
         }
       } else {
         toast.error(data.error || "Buyurtma yaratishda xatolik")
@@ -424,14 +404,12 @@ export default function ProductDetailPage() {
     }
   }
 
-  // Open Telegram order bot
   const handleTelegramOrder = () => {
     if (!product) return
-    const telegramUrl = `https://t.me/GlobalMarketshopBot?start=order_${product.id}` // Replace with your actual bot URL
+    const telegramUrl = `https://t.me/GlobalMarketshopBot?start=order_${product.id}`
     window.open(telegramUrl, "_blank")
   }
 
-  // Calculate total price including delivery if applicable
   const calculateTotal = () => {
     if (!product) return 0
     let total = product.price * quantity
@@ -441,7 +419,6 @@ export default function ProductDetailPage() {
     return total
   }
 
-  // Share product functionality
   const handleShare = async () => {
     if (navigator.share && product) {
       try {
@@ -453,8 +430,7 @@ export default function ProductDetailPage() {
       } catch (error) {
         console.error("Error sharing:", error)
       }
-    } else {
-      // Fallback for browsers that don't support Web Share API
+    } else if (product) {
       try {
         await navigator.clipboard.writeText(window.location.href)
         toast.success("Havola nusxalandi")
@@ -465,7 +441,6 @@ export default function ProductDetailPage() {
     }
   }
 
-  // Loading state UI
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
@@ -477,7 +452,6 @@ export default function ProductDetailPage() {
     )
   }
 
-  // Product not found UI
   if (!product) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
@@ -496,11 +470,9 @@ export default function ProductDetailPage() {
     )
   }
 
-  // Main product detail page UI
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
       <div className="container mx-auto px-4 py-4 lg:py-8">
-        {/* Breadcrumb Navigation */}
         <div className="flex items-center gap-2 mb-6">
           <Button variant="ghost" size="sm" onClick={() => router.back()} className="text-sm">
             <ArrowLeft className="h-4 w-4 mr-2" />
@@ -514,19 +486,16 @@ export default function ProductDetailPage() {
           <span className="text-gray-600 text-sm truncate">{product.name}</span>
         </div>
 
-        {/* Product Image and Info Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 mb-12">
-          {/* Product Image Section */}
           <div className="relative">
             <div className="aspect-[4/3] relative overflow-hidden rounded-3xl bg-gradient-to-br from-gray-100 to-gray-200 shadow-2xl">
               <Image
-                src={product.image_url || "/placeholder.svg?height=600&width=600"} // Fallback image
+                src={product.image_url || "/placeholder.svg?height=600&width=600"}
                 alt={product.name}
                 fill
                 className="object-contain p-4"
                 priority
               />
-              {/* Badges for Category and Stock */}
               <div className="absolute top-4 left-4 flex flex-col gap-2">
                 {product.categories?.name && (
                   <Badge className="bg-white/90 text-gray-800 shadow-lg">
@@ -546,7 +515,6 @@ export default function ProductDetailPage() {
                   <Badge className="bg-red-500 text-white shadow-lg">Tugagan</Badge>
                 )}
               </div>
-              {/* Action Buttons (Like, Share) */}
               <div className="absolute top-4 right-4 flex flex-col gap-2">
                 <Button
                   size="sm"
@@ -567,7 +535,6 @@ export default function ProductDetailPage() {
               </div>
             </div>
 
-            {/* Product Stats */}
             <div className="grid grid-cols-3 gap-4 mt-6">
               <Card className="text-center p-4 bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200">
                 <Eye className="h-5 w-5 text-blue-600 mx-auto mb-2" />
@@ -587,9 +554,7 @@ export default function ProductDetailPage() {
             </div>
           </div>
 
-          {/* Product Information Section */}
           <div className="space-y-6">
-            {/* Product Title and Rating */}
             <div>
               <h1 className="text-3xl lg:text-4xl font-bold mb-4 bg-gradient-to-r from-gray-800 to-gray-600 bg-clip-text text-transparent">
                 {product.name}
@@ -623,12 +588,10 @@ export default function ProductDetailPage() {
               )}
             </div>
 
-            {/* Price */}
             <div className="text-4xl lg:text-5xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
               {product.price.toLocaleString('uz-UZ')} so'm
             </div>
 
-            {/* Quantity Selector and Actions */}
             <div className="space-y-6">
               <div className="bg-white rounded-2xl p-6 shadow-lg border">
                 <Label htmlFor="quantity" className="text-lg font-semibold mb-4 block">
@@ -682,7 +645,7 @@ export default function ProductDetailPage() {
                         <Package className="w-5 h-5 mr-2" />
                         Tezkor buyurtma
                       </Button>
-                    </DialogDialogTrigger>
+                    </DialogTrigger>
                     <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
                       <DialogHeader>
                         <DialogTitle className="text-xl font-bold">Tezkor buyurtma</DialogTitle>
@@ -720,7 +683,7 @@ export default function ProductDetailPage() {
                             />
                             <Label htmlFor="quick_with_delivery" className="flex items-center gap-2 cursor-pointer">
                               <Truck className="w-4 h-4" />
-                              Yetkazib berish kerak (+{product.delivery_price?.toLocaleString('uz-UZ') || 0} so'm)
+                              Yetkazib berish kerak (+{(product.delivery_price || 0).toLocaleString('uz-UZ')} so'm)
                             </Label>
                           </div>
                         )}
@@ -803,8 +766,7 @@ export default function ProductDetailPage() {
                             Buyurtma berish
                           </Button>
 
-                          {/* Telegram Order Button - only shown if seller is admin and has a bot setup */}
-                          {product.users?.username === "admin" && ( // Adjust 'admin' identifier as needed
+                          {product.users?.username === "admin" && (
                             <Button
                               onClick={handleTelegramOrder}
                               className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white"
@@ -821,7 +783,6 @@ export default function ProductDetailPage() {
               </div>
             </div>
 
-            {/* Product Features */}
             <div className="flex flex-wrap gap-3">
               {product.has_delivery && (
                 <Badge
@@ -852,7 +813,6 @@ export default function ProductDetailPage() {
               )}
             </div>
 
-            {/* Product Description */}
             {product.description && (
               <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl p-6">
                 <h3 className="font-semibold mb-3 text-gray-800">Tavsif</h3>
@@ -860,8 +820,7 @@ export default function ProductDetailPage() {
               </div>
             )}
 
-            {/* Seller Information */}
-            {product.users && ( // Only show seller info if users data is available
+            {product.users && (
               <Card className="bg-gradient-to-br from-indigo-50 to-indigo-100 border-indigo-200">
                 <CardContent className="p-6">
                   <h3 className="font-semibold mb-4 text-indigo-800 flex items-center gap-2">
@@ -897,7 +856,6 @@ export default function ProductDetailPage() {
           </div>
         </div>
 
-        {/* Similar Products Section */}
         {similarProducts.length > 0 && (
           <div className="mt-16">
             <div className="text-center mb-8">
