@@ -95,14 +95,32 @@ export default function AdminUsersPage() {
       if (searchQuery) params.append("search", searchQuery)
       if (filter !== "all") params.append("filter", filter)
 
-      const response = await fetch(`/api/admin/users?${params}`)
+      // Fetch the session token to include in the request headers
+      const { data: session } = await supabase.auth.getSession()
+      const token = session?.session?.access_token
+
+      const response = await fetch(`/api/admin/users?${params}`, {
+        headers: {
+          'Authorization': `Bearer ${token}` // Include the token here
+        }
+      })
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          toast.error("Sizda ruxsat yo'q. Qayta kirish amalga oshirilmoqda.")
+          router.push("/login")
+          return
+        }
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
       const result = await response.json()
 
       if (result.success) {
         setUsers(result.users)
         setPagination(result.pagination)
       } else {
-        throw new Error(result.error)
+        throw new Error(result.error || "Unknown error")
       }
     } catch (error) {
       console.error("Error fetching users:", error)
@@ -119,7 +137,25 @@ export default function AdminUsersPage() {
       if (filter !== "all") params.append("filter", filter)
       params.append("export", "true")
 
-      const response = await fetch(`/api/admin/users?${params}`)
+      // Fetch the session token to include in the request headers
+      const { data: session } = await supabase.auth.getSession()
+      const token = session?.session?.access_token
+
+      const response = await fetch(`/api/admin/users?${params}`, {
+        headers: {
+          'Authorization': `Bearer ${token}` // Include the token here
+        }
+      })
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          toast.error("Sizda ruxsat yo'q. Qayta kirish amalga oshirilmoqda.")
+          router.push("/login")
+          return
+        }
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
       const result = await response.json()
 
       if (result.success) {
@@ -147,6 +183,8 @@ export default function AdminUsersPage() {
         window.URL.revokeObjectURL(url)
 
         toast.success("Foydalanuvchilar ro'yxati yuklab olindi")
+      } else {
+        throw new Error(result.error || "Unknown error")
       }
     } catch (error) {
       console.error("Error exporting users:", error)
@@ -155,6 +193,7 @@ export default function AdminUsersPage() {
   }
 
   const formatDate = (dateString: string) => {
+    if (!dateString) return "Noma'lum sana"
     return new Date(dateString).toLocaleDateString("uz-UZ", {
       year: "numeric",
       month: "short",
@@ -308,7 +347,7 @@ export default function AdminUsersPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setPagination({ ...pagination, page: pagination.page - 1 })}
+                  onClick={() => setPagination((prev) => ({ ...prev, page: prev.page - 1 }))}
                   disabled={pagination.page === 1}
                 >
                   <ChevronLeft className="h-4 w-4" />
@@ -320,7 +359,7 @@ export default function AdminUsersPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setPagination({ ...pagination, page: pagination.page + 1 })}
+                  onClick={() => setPagination((prev) => ({ ...prev, page: prev.page + 1 }))}
                   disabled={pagination.page === pagination.totalPages}
                 >
                   Keyingi
