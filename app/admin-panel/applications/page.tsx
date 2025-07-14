@@ -64,16 +64,18 @@ interface Application {
   // Product application fields
   product_data?: {
     name: string
-    brand?: string // Added brand
+    brand?: string
     price: number
     description?: string
     images?: string[]
-    seller_id?: string // Added seller_id
-    category_id?: string // Added category_id
-    has_delivery?: boolean // Added has_delivery
-    product_type?: string // Added product_type
-    delivery_price?: number // Added delivery_price
-    stock_quantity?: number // Added stock_quantity
+    seller_id?: string
+    category_id?: string
+    has_delivery?: boolean
+    product_type?: string
+    delivery_price?: number
+    stock_quantity?: number
+    // Add is_approved field if it exists in your product_applications JSONB or table
+    // is_approved?: boolean;
   }
   // Contact message fields
   name?: string
@@ -272,6 +274,10 @@ export default function AdminApplicationsPage() {
           tableName = "product_applications"
           updateData.status = action === "approve" ? "approved" : action === "reject" ? "rejected" : action
           updateData.admin_notes = actionNotes
+          // Agar product_applications jadvalida is_approved ustuni bo'lsa va uni true qilish kerak bo'lsa:
+          // Agar sizning product_applications jadvalingizda is_approved nomli ustun bo'lsa, uni shu yerda belgilang.
+          // Masalan: updateData.is_approved = true;
+          // Agar faqat status "approved" bo'lsa kifoya qilsa, bu qism keraksiz.
           break
         case "complaint":
           tableName = "complaints"
@@ -303,17 +309,16 @@ export default function AdminApplicationsPage() {
           brand: selectedApplication.product_data.brand || null,
           price: selectedApplication.product_data.price,
           description: selectedApplication.product_data.description || null,
-          image_url: selectedApplication.product_data.images?.[0] || null, // Take the first image as main
-          seller_id: selectedApplication.user_id || selectedApplication.product_data.seller_id || null, // Use applicant's ID or from product data
+          image_url: selectedApplication.product_data.image_url || null, // product_data dan image_url ni olish
+          seller_id: selectedApplication.user_id || selectedApplication.product_data.seller_id || null,
           category_id: selectedApplication.product_data.category_id || null,
           has_delivery: selectedApplication.product_data.has_delivery || false,
           product_type: selectedApplication.product_data.product_type || "physical",
           delivery_price: selectedApplication.product_data.delivery_price || 0,
           stock_quantity: selectedApplication.product_data.stock_quantity || 0,
-          // Add other fields from product_data that map to your 'products' table
         }
 
-        // Check if seller_id is valid before inserting
+        // Sanitize seller_id before insertion
         if (!productToInsert.seller_id) {
             toast.warn("Mahsulotni qo'shish uchun sotuvchi ID'si topilmadi. Mahsulot yaratilmadi.")
         } else {
@@ -325,10 +330,13 @@ export default function AdminApplicationsPage() {
 
             if (productInsertError) {
               console.error("Error inserting product:", productInsertError)
-              // Decide how to handle this error: maybe revert application status or just warn
+              // It's crucial to decide what happens if product insertion fails.
+              // Ideally, we'd revert the application status change here.
+              // For simplicity, we're just throwing an error which will be caught.
               throw productInsertError
             }
-            // Optionally, toast.success(`Mahsulot "${productToInsert.name}" muvaffaqiyatli yaratildi.`)
+            // Optionally, you can use the 'newProduct' data if needed.
+            // toast.success(`Mahsulot "${productToInsert.name}" muvaffaqiyatli yaratildi.`);
         }
       }
 
@@ -344,6 +352,7 @@ export default function AdminApplicationsPage() {
           .then(({ error: userUpdateError }) => {
             if (userUpdateError) {
               console.error("Error updating user status:", userUpdateError)
+              // Handle user update error
             }
           })
       }
@@ -745,7 +754,6 @@ export default function AdminApplicationsPage() {
             )}
           </div>
 
-          {/* Pagination Section (basic implementation) */}
           {filteredApplications.length > 0 && Math.ceil(applications.length / 10) > 1 && (
             <div className="flex flex-col sm:flex-row items-center justify-between mt-6 gap-4">
               <p className="text-sm text-gray-600">
