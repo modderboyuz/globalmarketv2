@@ -283,20 +283,27 @@ export default function ProductDetailPage() {
     if (!product) return
 
     try {
-      const { data, error } = await supabase.from("cart_items").upsert(
-        {
-          user_id: user.id,
+      const token = (await supabase.auth.getSession()).data.session?.access_token
+
+      const response = await fetch("/api/cart", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
           product_id: product.id,
           quantity: quantity,
-        },
-        {
-          onConflict: "user_id,product_id",
-        },
-      )
+        }),
+      })
 
-      if (error) throw error
+      const data = await response.json()
 
-      toast.success("Mahsulot savatga qo'shildi")
+      if (data.success) {
+        toast.success("Mahsulot savatga qo'shildi")
+      } else {
+        toast.error(data.error || "Savatga qo'shishda xatolik")
+      }
     } catch (error) {
       console.error("Error adding to cart:", error)
       toast.error("Savatga qo'shishda xatolik")
@@ -365,7 +372,7 @@ export default function ProductDetailPage() {
   const handleTelegramOrder = () => {
     if (!product) return
 
-    const telegramUrl = `https://t.me/GlobalMarketUzBot?start=product_${product.categories?.name || "mahsulot"}&product_id=${product.id}`
+    const telegramUrl = `https://t.me/GlobalMarketshopBot?start=order_${product.id}`
     window.open(telegramUrl, "_blank")
   }
 
@@ -557,7 +564,7 @@ export default function ProductDetailPage() {
               {product.price.toLocaleString()} so'm
             </div>
 
-            {/* Quantity and Actions - Moved up */}
+            {/* Quantity and Actions */}
             <div className="space-y-6">
               <div className="bg-white rounded-2xl p-6 shadow-lg border">
                 <Label htmlFor="quantity" className="text-lg font-semibold mb-4 block">

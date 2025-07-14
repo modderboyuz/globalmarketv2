@@ -1,6 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { supabase } from "@/lib/supabase"
-import * as XLSX from "xlsx"
 
 // Helper function to get the Supabase access token from the Authorization header
 async function getAccessToken(request: NextRequest): Promise<string | null> {
@@ -164,55 +163,43 @@ export async function GET(request: NextRequest) {
     // Sort the combined applications by 'created_at' in descending order
     applications.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
-    // If export is requested, generate Excel file
-    if (exportFormat === "xlsx") {
-      const exportData = applications.map((app) => ({
-        ID: app.id.slice(-8),
-        Tur:
-          app.type === "seller"
-            ? "Sotuvchi"
-            : app.type === "product"
-              ? "Mahsulot"
-              : app.type === "complaint"
-                ? "Shikoyat"
-                : "Murojaat",
-        Holat:
-          app.status === "pending"
-            ? "Kutilmoqda"
-            : app.status === "approved"
-              ? "Tasdiqlangan"
-              : app.status === "rejected"
-                ? "Rad etilgan"
+    // If export is requested, generate CSV file
+    if (exportFormat === "csv") {
+      const csvContent = [
+        ["ID", "Tur", "Holat", "Ariza beruvchi", "Email", "Telefon", "Sana", "Kompaniya/Mavzu", "Admin Eslatmasi"].join(
+          ",",
+        ),
+        ...applications.map((app) =>
+          [
+            app.id.slice(-8),
+            app.type === "seller"
+              ? "Sotuvchi"
+              : app.type === "product"
+                ? "Mahsulot"
+                : app.type === "complaint"
+                  ? "Shikoyat"
+                  : "Murojaat",
+            app.status === "pending"
+              ? "Kutilmoqda"
+              : app.status === "approved" || app.status === "approved_verified"
+                ? "Tasdiqlangan"
                 : app.status === "resolved"
                   ? "Hal qilingan"
-                  : app.status,
-        "Ariza beruvchi": app.users?.full_name || app.name || "Noma'lum",
-        Email: app.users?.email || app.email || "Noma'lum",
-        Telefon: app.users?.phone || app.phone || "Noma'lum",
-        Sana: new Date(app.created_at).toLocaleDateString("uz-UZ"),
-        "Kompaniya/Mavzu":
-          app.type === "seller" ? app.company_name || "" : app.type === "contact" ? app.subject || "" : "",
-        "Xabar/Tavsif":
-          app.type === "contact"
-            ? app.message || ""
-            : app.type === "seller"
-              ? app.description || ""
-              : app.type === "complaint"
-                ? app.complaint_text || ""
-                : "",
-        "Admin javobi": app.admin_notes || app.admin_response || "",
-      }))
+                  : "Rad etilgan",
+            app.users?.full_name || app.name || "Noma'lum",
+            app.users?.email || app.email || "Noma'lum",
+            app.users?.phone || app.phone || "Noma'lum",
+            new Date(app.created_at).toLocaleDateString(),
+            app.type === "seller" ? app.company_name || "" : app.type === "contact" ? app.subject || "" : "",
+            app.admin_notes || app.admin_response || "",
+          ].join(","),
+        ),
+      ].join("\n")
 
-      const ws = XLSX.utils.json_to_sheet(exportData)
-      const wb = XLSX.utils.book_new()
-      XLSX.utils.book_append_sheet(wb, ws, "Arizalar")
-
-      const excelBuffer = XLSX.write(wb, { bookType: "xlsx", type: "buffer" })
-
-      return new NextResponse(excelBuffer, {
+      return new NextResponse(csvContent, {
         headers: {
-          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          "Content-Disposition": `attachment; filename=arizalar-${new Date().toISOString().split("T")[0]}.xlsx`,
+          "Content-Type": "text/csv;charset=utf-8;",
+          "Content-Disposition": `attachment; filename=arizalar-${new Date().toISOString().split("T")[0]}.csv`,
         },
       })
     }
