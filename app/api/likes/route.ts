@@ -46,6 +46,9 @@ export async function POST(request: NextRequest) {
         throw deleteError
       }
 
+      // Update product like count
+      await supabase.rpc("decrement_like_count", { product_id })
+
       return NextResponse.json({
         success: true,
         liked: false,
@@ -61,6 +64,9 @@ export async function POST(request: NextRequest) {
       if (insertError) {
         throw insertError
       }
+
+      // Update product like count
+      await supabase.rpc("increment_like_count", { product_id })
 
       return NextResponse.json({
         success: true,
@@ -128,7 +134,7 @@ export async function GET(request: NextRequest) {
           *,
           products (
             id,
-            title,
+            name,
             price,
             image_url,
             description,

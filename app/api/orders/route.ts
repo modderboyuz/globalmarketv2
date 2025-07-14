@@ -32,34 +32,65 @@ export async function POST(request: NextRequest) {
       user_id = user?.id || null
     }
 
-    // Call the database function
-    const { data, error } = await supabase.rpc("create_order", {
-      product_id_param: product_id,
-      full_name_param: full_name,
-      phone_param: phone,
-      address_param: address,
-      quantity_param: quantity,
-      user_id_param: user_id,
-      with_delivery_param: with_delivery,
-      neighborhood_param: neighborhood,
-      street_param: street,
-      house_number_param: house_number,
-    })
+    // Get product details
+    const { data: product, error: productError } = await supabase
+      .from("products")
+      .select("*")
+      .eq("id", product_id)
+      .single()
 
-    if (error) {
-      console.error("Order creation error:", error)
-      return NextResponse.json({ error: "Buyurtma yaratishda xatolik" }, { status: 500 })
+    if (productError || !product) {
+      return NextResponse.json({ error: "Mahsulot topilmadi" }, { status: 404 })
     }
 
-    if (!data.success) {
-      return NextResponse.json({ error: data.error }, { status: 400 })
+    // Check stock
+    if (product.stock_quantity < quantity) {
+      return NextResponse.json({ error: "Yetarli mahsulot yo'q" }, { status: 400 })
+    }
+
+    // Calculate total price
+    let total_amount = product.price * quantity
+    let delivery_price = 0
+
+    if (with_delivery && product.has_delivery) {
+      delivery_price = product.delivery_price || 0
+      total_amount += delivery_price
+    }
+
+    // Create order
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .insert({
+        product_id,
+        user_id,
+        full_name,
+        phone,
+        address,
+        delivery_address: with_delivery ? `${neighborhood}, ${street}, ${house_number}` : null,
+        delivery_phone: phone,
+        quantity,
+        total_amount,
+        status: "pending",
+        is_agree: null,
+        is_client_went: null,
+        is_client_claimed: null,
+        pickup_address: null,
+        seller_notes: null,
+        client_notes: null,
+      })
+      .select()
+      .single()
+
+    if (orderError) {
+      console.error("Order creation error:", orderError)
+      return NextResponse.json({ error: "Buyurtma yaratishda xatolik" }, { status: 500 })
     }
 
     return NextResponse.json({
       success: true,
-      order_id: data.order_id,
-      total_price: data.total_price,
-      delivery_price: data.delivery_price,
+      order_id: order.id,
+      total_price: total_amount,
+      delivery_price,
       message: "Buyurtma muvaffaqiyatli yaratildi",
     })
   } catch (error) {
@@ -98,7 +129,7 @@ export async function GET(request: NextRequest) {
         *,
         products (
           id,
-          title,
+          name,
           price,
           image_url,
           seller_id,
@@ -151,10 +182,10 @@ export async function GET(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json()
-    const { order_id, status } = body
+    const { orderId, action, notes, pickupAddress, userId } = body
 
-    if (!order_id || !status) {
-      return NextResponse.json({ error: "Order ID va status majburiy" }, { status: 400 })
+    if (!orderId || !action) {
+      return NextResponse.json({ error: "Order ID va action majburiy" }, { status: 400 })
     }
 
     // Get authorization header
@@ -173,16 +204,50 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: "Invalid token" }, { status: 401 })
     }
 
-    // Update order status
-    const { data, error } = await supabase
-      .from("orders")
-      .update({
-        status,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", order_id)
-      .select()
-      .single()
+    // Get current order
+    const { data: order, error: orderError } = await supabase.from("orders").select("*").eq("id", orderId).single()
+
+    if (orderError || !order) {
+      return NextResponse.json({ error: "Buyurtma topilmadi" }, { status: 404 })
+    }
+
+    const updateData: any = {
+      updated_at: new Date().toISOString(),
+    }
+
+    switch (action) {
+      case "agree":
+        updateData.is_agree = true
+        updateData.pickup_address = pickupAddress || order.address
+        updateData.seller_notes = notes
+        break
+      case "reject":
+        updateData.is_agree = false
+        updateData.status = "cancelled"
+        updateData.seller_notes = notes
+        break
+      case "client_went":
+        updateData.is_client_went = true
+        updateData.client_notes = notes
+        break
+      case "client_not_went":
+        updateData.is_client_went = false
+        updateData.client_notes = notes
+        break
+      case "product_given":
+        updateData.is_client_claimed = true
+        updateData.status = "completed"
+        updateData.seller_notes = notes
+        break
+      case "product_not_given":
+        updateData.is_client_claimed = false
+        updateData.seller_notes = notes
+        break
+      default:
+        return NextResponse.json({ error: "Noto'g'ri action" }, { status: 400 })
+    }
+
+    const { data, error } = await supabase.from("orders").update(updateData).eq("id", orderId).select().single()
 
     if (error) {
       throw error

@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { supabase } from "@/lib/supabase"
+import * as XLSX from "xlsx"
 
 export async function GET(request: NextRequest) {
   try {
@@ -98,11 +99,32 @@ export async function GET(request: NextRequest) {
       throw error
     }
 
-    // For export, return all data
+    // For export, return XLSX file
     if (exportData) {
-      return NextResponse.json({
-        success: true,
-        users: users || [],
+      const worksheet = XLSX.utils.json_to_sheet(
+        users?.map((user) => ({
+          ID: user.id,
+          "To'liq ism": user.full_name,
+          Email: user.email,
+          Telefon: user.phone,
+          Username: user.username,
+          Sotuvchi: user.is_seller ? "Ha" : "Yo'q",
+          "Tasdiqlangan sotuvchi": user.is_verified_seller ? "Ha" : "Yo'q",
+          Admin: user.is_admin ? "Ha" : "Yo'q",
+          "Ro'yxatdan o'tgan": new Date(user.created_at).toLocaleDateString("uz-UZ"),
+        })) || [],
+      )
+
+      const workbook = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Foydalanuvchilar")
+
+      const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" })
+
+      return new NextResponse(buffer, {
+        headers: {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": `attachment; filename="users-${new Date().toISOString().split("T")[0]}.xlsx"`,
+        },
       })
     }
 
