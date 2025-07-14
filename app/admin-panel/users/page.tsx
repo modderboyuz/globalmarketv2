@@ -95,14 +95,18 @@ export default function AdminUsersPage() {
       if (searchQuery) params.append("search", searchQuery)
       if (filter !== "all") params.append("filter", filter)
 
-      // Fetch the session token to include in the request headers
       const { data: session } = await supabase.auth.getSession()
       const token = session?.session?.access_token
 
+      if (!token) {
+        router.push("/login")
+        return
+      }
+
       const response = await fetch(`/api/admin/users?${params}`, {
         headers: {
-          'Authorization': `Bearer ${token}` // Include the token here
-        }
+          Authorization: `Bearer ${token}`,
+        },
       })
 
       if (!response.ok) {
@@ -137,14 +141,18 @@ export default function AdminUsersPage() {
       if (filter !== "all") params.append("filter", filter)
       params.append("export", "true")
 
-      // Fetch the session token to include in the request headers
       const { data: session } = await supabase.auth.getSession()
       const token = session?.session?.access_token
 
+      if (!token) {
+        router.push("/login")
+        return
+      }
+
       const response = await fetch(`/api/admin/users?${params}`, {
         headers: {
-          'Authorization': `Bearer ${token}` // Include the token here
-        }
+          Authorization: `Bearer ${token}`,
+        },
       })
 
       if (!response.ok) {
@@ -192,40 +200,6 @@ export default function AdminUsersPage() {
     }
   }
 
-  // New function to fetch a single user for the detail page
-  const fetchUserDetail = async (userId: string) => {
-    try {
-      const { data: session } = await supabase.auth.getSession()
-      const token = session?.session?.access_token
-
-      const response = await fetch(`/api/admin/users?userId=${userId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      })
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          toast.error("Sizda ruxsat yo'q. Qayta kirish amalga oshirilmoqda.")
-          router.push("/login")
-          return null
-        }
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-
-      const result = await response.json()
-      if (result.success && result.user) {
-        return result.user
-      } else {
-        throw new Error(result.error || "Foydalanuvchi topilmadi")
-      }
-    } catch (error) {
-      console.error("Error fetching user detail:", error)
-      toast.error((error as Error).message)
-      return null
-    }
-  }
-
   const formatDate = (dateString: string) => {
     if (!dateString) return "Noma'lum sana"
     return new Date(dateString).toLocaleDateString("uz-UZ", {
@@ -235,15 +209,33 @@ export default function AdminUsersPage() {
     })
   }
 
+  // Responsive phone number display
+  const formatPhoneNumber = (phone?: string) => {
+    if (!phone) return null
+    // Basic formatting for responsiveness, e.g., adding spaces or hyphens
+    // You can customize this further based on desired formatting
+    if (phone.startsWith('+')) {
+      return `+${phone.substring(1, 4)} ${phone.substring(4, 7)} ${phone.substring(7, 9)} ${phone.substring(9, 11)} ${phone.substring(11)}`
+    }
+    return phone
+  }
+
   if (loading && users.length === 0) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 p-4 lg:p-8">
         <div className="animate-pulse space-y-6">
-          <div className="h-8 bg-gray-200 rounded w-1/4"></div>
-          <div className="h-16 bg-gray-200 rounded"></div>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="h-8 bg-gray-200 rounded w-1/4"></div>
+            <div className="h-10 w-full sm:w-auto bg-gray-200 rounded-md"></div>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="h-24 bg-gray-200 rounded-2xl"></div>
+            ))}
+          </div>
           <div className="space-y-4">
-            {[...Array(10)].map((_, i) => (
-              <div key={i} className="h-20 bg-gray-200 rounded"></div>
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="h-32 bg-gray-200 rounded-2xl"></div>
             ))}
           </div>
         </div>
@@ -252,14 +244,14 @@ export default function AdminUsersPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-4 lg:p-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold gradient-text">Foydalanuvchilar</h1>
-          <p className="text-gray-600">Barcha foydalanuvchilarni boshqaring</p>
+          <h1 className="text-2xl lg:text-3xl font-bold gradient-text">Foydalanuvchilar</h1>
+          <p className="text-gray-600 text-sm lg:text-base">Barcha foydalanuvchilarni boshqaring</p>
         </div>
-        <Button onClick={exportUsers} variant="outline">
+        <Button onClick={exportUsers} variant="outline" className="w-full sm:w-auto bg-transparent">
           <Download className="h-4 w-4 mr-2" />
           Excel yuklab olish
         </Button>
@@ -275,11 +267,11 @@ export default function AdminUsersPage() {
         </CardHeader>
         <CardContent>
           <div className="flex flex-col sm:flex-row gap-4 mb-6">
-            <div className="flex-1">
+            <div className="flex-1 min-w-[200px]">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
                 <Input
-                  placeholder="Ism, email, telefon yoki username bo'yicha qidirish..."
+                  placeholder="Ism, email, telefon bo'yicha qidirish..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="pl-10"
@@ -287,7 +279,7 @@ export default function AdminUsersPage() {
               </div>
             </div>
             <Select value={filter} onValueChange={setFilter}>
-              <SelectTrigger className="w-48">
+              <SelectTrigger className="w-full sm:w-48">
                 <SelectValue placeholder="Filter" />
               </SelectTrigger>
               <SelectContent>
@@ -307,25 +299,26 @@ export default function AdminUsersPage() {
                 <p className="text-gray-600">Yuklanmoqda...</p>
               </div>
             ) : users.length === 0 ? (
-              <div className="text-center py-8">
+              <div className="text-center py-12">
                 <Users className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-                <p className="text-gray-500">Foydalanuvchilar topilmadi</p>
+                <h3 className="text-xl font-semibold mb-2">Foydalanuvchilar topilmadi</h3>
+                <p className="text-gray-600">Hozirgi filtrlar bo'yicha foydalanuvchilar mavjud emas.</p>
               </div>
             ) : (
               users.map((userData) => (
-                <Card key={userData.id} className="border hover:shadow-md transition-shadow">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <Avatar className="h-12 w-12">
+                <Card key={userData.id} className="border hover:shadow-md transition-shadow duration-200">
+                  <CardContent className="p-4 lg:p-6">
+                    <div className="flex items-center justify-between gap-4 flex-wrap lg:flex-nowrap">
+                      <div className="flex items-center gap-4 flex-1 min-w-0">
+                        <Avatar className="h-12 w-12 shrink-0">
                           <AvatarImage src="/placeholder-user.jpg" />
                           <AvatarFallback>
                             {userData.full_name?.charAt(0) || userData.email?.charAt(0) || "U"}
                           </AvatarFallback>
                         </Avatar>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <h3 className="font-semibold text-lg">{userData.full_name || "Noma'lum"}</h3>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            <h3 className="font-semibold text-lg truncate">{userData.full_name || "Noma'lum"}</h3>
                             {userData.is_admin && (
                               <Badge variant="destructive">
                                 <Award className="h-3 w-3 mr-1" />
@@ -339,9 +332,13 @@ export default function AdminUsersPage() {
                               </Badge>
                             )}
                           </div>
-                          <p className="text-gray-600 mb-1">{userData.email}</p>
-                          {userData.phone && <p className="text-gray-600 mb-1">{userData.phone}</p>}
-                          {userData.company_name && <p className="text-blue-600 mb-1">{userData.company_name}</p>}
+                          <p className="text-gray-600 text-sm truncate">{userData.email}</p>
+                          {userData.phone && (
+                            <p className="text-gray-600 text-sm truncate">{formatPhoneNumber(userData.phone)}</p>
+                          )}
+                          {userData.company_name && (
+                            <p className="text-blue-600 text-sm truncate">{userData.company_name}</p>
+                          )}
                           <p className="text-sm text-gray-500">Ro'yxatdan o'tgan: {formatDate(userData.created_at)}</p>
                           {userData.last_sign_in_at && (
                             <p className="text-sm text-gray-500">
@@ -350,7 +347,7 @@ export default function AdminUsersPage() {
                           )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 shrink-0">
                         <Link href={`/admin-panel/user/${userData.id}`}>
                           <Button size="sm" variant="outline">
                             <Eye className="h-4 w-4 mr-2" />
@@ -358,7 +355,12 @@ export default function AdminUsersPage() {
                           </Button>
                         </Link>
                         {userData.phone && (
-                          <Button size="sm" variant="outline" onClick={() => window.open(`tel:${userData.phone}`)}>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => window.open(`tel:${userData.phone}`)}
+                            aria-label={`Qo'ng'iroq qilish ${userData.phone}`}
+                          >
                             <Phone className="h-4 w-4" />
                           </Button>
                         )}
@@ -372,7 +374,7 @@ export default function AdminUsersPage() {
 
           {/* Pagination */}
           {pagination.totalPages > 1 && (
-            <div className="flex items-center justify-between mt-6">
+            <div className="flex flex-col sm:flex-row items-center justify-between mt-6 gap-4">
               <p className="text-sm text-gray-600">
                 {pagination.total} tadan {(pagination.page - 1) * pagination.limit + 1}-
                 {Math.min(pagination.page * pagination.limit, pagination.total)} ko'rsatilmoqda
@@ -387,7 +389,7 @@ export default function AdminUsersPage() {
                   <ChevronLeft className="h-4 w-4" />
                   Oldingi
                 </Button>
-                <span className="text-sm">
+                <span className="text-sm min-w-[60px] text-center">
                   {pagination.page} / {pagination.totalPages}
                 </span>
                 <Button
