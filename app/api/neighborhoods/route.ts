@@ -3,52 +3,71 @@ import { supabase } from "@/lib/supabase"
 
 export async function GET(request: NextRequest) {
   try {
-    const { data, error } = await supabase.from("neighborhoods").select("*").eq("is_active", true).order("name")
+    const { data: neighborhoods, error } = await supabase.from("neighborhoods").select("*").order("name")
 
     if (error) {
-      console.error("Neighborhoods fetch error:", error)
-      return NextResponse.json({ error: "Mahallalarni olishda xatolik" }, { status: 500 })
+      throw error
     }
 
-    return NextResponse.json({ neighborhoods: data || [] })
+    return NextResponse.json({
+      success: true,
+      neighborhoods: neighborhoods || [],
+    })
   } catch (error) {
-    console.error("API Error:", error)
-    return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
+    console.error("Neighborhoods API error:", error)
+    return NextResponse.json({ error: "Server xatoligi" }, { status: 500 })
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { name, district = "G'uzor", region = "Qashqadaryo" } = body
+    const { name } = body
 
     if (!name) {
-      return NextResponse.json({ error: "Mahalla nomi kerak" }, { status: 400 })
+      return NextResponse.json({ error: "Mahalla nomi majburiy" }, { status: 400 })
     }
 
-    const { data, error } = await supabase
-      .from("neighborhoods")
-      .insert({
-        name,
-        district,
-        region,
-        is_active: true,
-      })
-      .select()
-      .single()
+    // Get authorization header
+    const authHeader = request.headers.get("authorization")
+    if (!authHeader) {
+      return NextResponse.json({ error: "Authorization required" }, { status: 401 })
+    }
+
+    const token = authHeader.replace("Bearer ", "")
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser(token)
+
+    if (authError || !user) {
+      return NextResponse.json({ error: "Invalid token" }, { status: 401 })
+    }
+
+    // Check if user is admin
+    const { data: userData } = await supabase.from("users").select("is_admin").eq("id", user.id).single()
+
+    if (!userData?.is_admin) {
+      return NextResponse.json({ error: "Admin huquqi talab qilinadi" }, { status: 403 })
+    }
+
+    // Insert neighborhood
+    const { data, error } = await supabase.from("neighborhoods").insert({ name }).select().single()
 
     if (error) {
-      console.error("Neighborhood creation error:", error)
-      return NextResponse.json({ error: "Mahalla yaratishda xatolik" }, { status: 500 })
+      if (error.code === "23505") {
+        return NextResponse.json({ error: "Bu mahalla allaqachon mavjud" }, { status: 400 })
+      }
+      throw error
     }
 
     return NextResponse.json({
       success: true,
       neighborhood: data,
-      message: "Mahalla muvaffaqiyatli yaratildi",
+      message: "Mahalla qo'shildi",
     })
   } catch (error) {
-    console.error("API Error:", error)
-    return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
+    console.error("Neighborhoods POST API error:", error)
+    return NextResponse.json({ error: "Server xatoligi" }, { status: 500 })
   }
 }

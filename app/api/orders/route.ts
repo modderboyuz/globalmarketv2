@@ -10,35 +10,40 @@ export async function POST(request: NextRequest) {
       phone,
       address,
       quantity,
-      user_id,
       with_delivery = false,
       neighborhood,
       street,
       house_number,
     } = body
 
-    // Validate required fields
     if (!product_id || !full_name || !phone || !address || !quantity) {
-      return NextResponse.json({ error: "Barcha majburiy maydonlarni to'ldiring" }, { status: 400 })
+      return NextResponse.json({ error: "Barcha maydonlar majburiy" }, { status: 400 })
     }
 
-    // If delivery is requested, validate delivery fields
-    if (with_delivery && (!neighborhood || !street || !house_number)) {
-      return NextResponse.json({ error: "Yetkazib berish uchun to'liq manzil kerak" }, { status: 400 })
+    // Get current user
+    const authHeader = request.headers.get("authorization")
+    let user_id = null
+
+    if (authHeader) {
+      const token = authHeader.replace("Bearer ", "")
+      const {
+        data: { user },
+      } = await supabase.auth.getUser(token)
+      user_id = user?.id || null
     }
 
-    // Call the create_order function
+    // Call the database function
     const { data, error } = await supabase.rpc("create_order", {
       product_id_param: product_id,
       full_name_param: full_name,
       phone_param: phone,
       address_param: address,
       quantity_param: quantity,
-      user_id_param: user_id || null,
+      user_id_param: user_id,
       with_delivery_param: with_delivery,
-      neighborhood_param: neighborhood || null,
-      street_param: street || null,
-      house_number_param: house_number || null,
+      neighborhood_param: neighborhood,
+      street_param: street,
+      house_number_param: house_number,
     })
 
     if (error) {
@@ -53,13 +58,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       order_id: data.order_id,
-      total_amount: data.total_amount,
+      total_price: data.total_price,
       delivery_price: data.delivery_price,
-      message: data.message,
+      message: "Buyurtma muvaffaqiyatli yaratildi",
     })
   } catch (error) {
-    console.error("API Error:", error)
-    return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
+    console.error("Order API error:", error)
+    return NextResponse.json({ error: "Server xatoligi" }, { status: 500 })
   }
 }
 
@@ -67,13 +72,29 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const user_id = searchParams.get("user_id")
-    const seller_id = searchParams.get("seller_id")
     const status = searchParams.get("status")
-    const stage = searchParams.get("stage")
+    const page = Number.parseInt(searchParams.get("page") || "1")
+    const limit = Number.parseInt(searchParams.get("limit") || "10")
 
-    let query = supabase
-      .from("orders")
-      .select(`
+    // Get authorization header
+    const authHeader = request.headers.get("authorization")
+    if (!authHeader) {
+      return NextResponse.json({ error: "Authorization required" }, { status: 401 })
+    }
+
+    const token = authHeader.replace("Bearer ", "")
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser(token)
+
+    if (authError || !user) {
+      return NextResponse.json({ error: "Invalid token" }, { status: 401 })
+    }
+
+    // Build query
+    let query = supabase.from("orders").select(
+      `
         *,
         products (
           id,
@@ -81,73 +102,99 @@ export async function GET(request: NextRequest) {
           price,
           image_url,
           seller_id,
-          users!products_seller_id_fkey (
-            full_name,
-            username
-          )
+          has_delivery,
+          delivery_price
         )
-      `)
-      .order("created_at", { ascending: false })
+      `,
+      { count: "exact" },
+    )
 
+    // Apply filters
     if (user_id) {
       query = query.eq("user_id", user_id)
-    }
-
-    if (seller_id) {
-      query = query.eq("products.seller_id", seller_id)
+    } else {
+      // If no user_id specified, show current user's orders
+      query = query.eq("user_id", user.id)
     }
 
     if (status) {
       query = query.eq("status", status)
     }
 
-    if (stage) {
-      query = query.eq("stage", Number.parseInt(stage))
-    }
+    // Apply pagination
+    const offset = (page - 1) * limit
+    query = query.range(offset, offset + limit - 1)
+    query = query.order("created_at", { ascending: false })
 
-    const { data, error } = await query
+    const { data: orders, error, count } = await query
 
     if (error) {
-      console.error("Orders fetch error:", error)
-      return NextResponse.json({ error: "Buyurtmalarni olishda xatolik" }, { status: 500 })
+      throw error
     }
 
-    return NextResponse.json({ orders: data || [] })
+    return NextResponse.json({
+      success: true,
+      orders: orders || [],
+      pagination: {
+        page,
+        limit,
+        total: count || 0,
+        totalPages: Math.ceil((count || 0) / limit),
+      },
+    })
   } catch (error) {
-    console.error("API Error:", error)
-    return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
+    console.error("Orders GET API error:", error)
+    return NextResponse.json({ error: "Server xatoligi" }, { status: 500 })
   }
 }
 
-export async function PATCH(request: NextRequest) {
+export async function PUT(request: NextRequest) {
   try {
     const body = await request.json()
-    const { order_id, status, stage, notes } = body
+    const { order_id, status } = body
 
-    if (!order_id) {
-      return NextResponse.json({ error: "Buyurtma ID kerak" }, { status: 400 })
+    if (!order_id || !status) {
+      return NextResponse.json({ error: "Order ID va status majburiy" }, { status: 400 })
     }
 
-    const updateData: any = { updated_at: new Date().toISOString() }
+    // Get authorization header
+    const authHeader = request.headers.get("authorization")
+    if (!authHeader) {
+      return NextResponse.json({ error: "Authorization required" }, { status: 401 })
+    }
 
-    if (status) updateData.status = status
-    if (stage) updateData.stage = stage
-    if (notes) updateData.notes = notes
+    const token = authHeader.replace("Bearer ", "")
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser(token)
 
-    const { data, error } = await supabase.from("orders").update(updateData).eq("id", order_id).select().single()
+    if (authError || !user) {
+      return NextResponse.json({ error: "Invalid token" }, { status: 401 })
+    }
+
+    // Update order status
+    const { data, error } = await supabase
+      .from("orders")
+      .update({
+        status,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", order_id)
+      .select()
+      .single()
 
     if (error) {
-      console.error("Order update error:", error)
-      return NextResponse.json({ error: "Buyurtmani yangilashda xatolik" }, { status: 500 })
+      throw error
     }
 
     return NextResponse.json({
       success: true,
       order: data,
-      message: "Buyurtma muvaffaqiyatli yangilandi",
+      message: "Buyurtma holati yangilandi",
     })
   } catch (error) {
-    console.error("API Error:", error)
-    return NextResponse.json({ error: "Server xatosi" }, { status: 500 })
+    console.error("Order update API error:", error)
+    return NextResponse.json({ error: "Server xatoligi" }, { status: 500 })
   }
 }
