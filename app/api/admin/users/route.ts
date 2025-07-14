@@ -1,5 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { supabase } from "@/lib/supabase"
+import { createClient } from "@supabase/supabase-js"
+
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
 export async function GET(request: NextRequest) {
   try {
@@ -9,16 +11,27 @@ export async function GET(request: NextRequest) {
     const page = Number.parseInt(searchParams.get("page") || "1")
     const limit = Number.parseInt(searchParams.get("limit") || "20")
     const userId = searchParams.get("userId")
+    const exportData = searchParams.get("export")
 
-    // Check if user is admin
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    // Get authorization header
+    const authHeader = request.headers.get("authorization")
+    if (!authHeader) {
+      return NextResponse.json({ error: "No authorization header" }, { status: 401 })
     }
 
+    const token = authHeader.replace("Bearer ", "")
+
+    // Verify user with token
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser(token)
+
+    if (authError || !user) {
+      return NextResponse.json({ error: "Invalid token" }, { status: 401 })
+    }
+
+    // Check if user is admin
     const { data: userData } = await supabase.from("users").select("is_admin").eq("id", user.id).single()
 
     if (!userData?.is_admin) {
@@ -65,25 +78,34 @@ export async function GET(request: NextRequest) {
     if (filter) {
       switch (filter) {
         case "sellers":
-          query = query.eq("is_verified_seller", true)
-          break
-        case "admins":
-          query = query.eq("is_admin", true)
+          query = query.eq("is_seller", true)
           break
         case "customers":
-          query = query.eq("is_verified_seller", false).eq("is_admin", false)
+          query = query.eq("is_seller", false).eq("is_admin", false)
           break
       }
     }
 
-    // Apply pagination
-    const offset = (page - 1) * limit
-    query = query.range(offset, offset + limit - 1).order("created_at", { ascending: false })
+    // Apply pagination for non-export requests
+    if (!exportData) {
+      const offset = (page - 1) * limit
+      query = query.range(offset, offset + limit - 1)
+    }
+
+    query = query.order("created_at", { ascending: false })
 
     const { data: users, error, count } = await query
 
     if (error) {
       throw error
+    }
+
+    // For export, return all data
+    if (exportData) {
+      return NextResponse.json({
+        success: true,
+        users: users || [],
+      })
     }
 
     return NextResponse.json({

@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useEffect, Suspense } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import Link from "next/link"
@@ -30,7 +29,6 @@ import {
   Store,
   UserCheck,
   UserX,
-  Crown,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
@@ -99,11 +97,6 @@ const sidebarItems = [
         title: "Mijozlarni boshqarish",
         href: "/admin-panel/users/customers",
         icon: UserX,
-      },
-      {
-        title: "Adminlarni boshqarish",
-        href: "/admin-panel/users/admins",
-        icon: Crown,
       },
     ],
   },
@@ -238,24 +231,24 @@ export default function AdminPanelLayout({
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Top Bar */}
-      <div className="bg-white border-b px-4 lg:px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <div className="bg-white border-b px-4 lg:px-6 py-3 lg:py-4 flex items-center justify-between">
+        <div className="flex items-center gap-2 lg:gap-4">
           <Button variant="ghost" size="sm" className="lg:hidden" onClick={() => setSidebarOpen(true)}>
             <Menu className="h-5 w-5" />
           </Button>
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-              <Shield className="h-5 w-5 text-white" />
+          <div className="flex items-center gap-2 lg:gap-3">
+            <div className="w-6 h-6 lg:w-8 lg:h-8 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
+              <Shield className="h-3 w-3 lg:h-5 lg:w-5 text-white" />
             </div>
-            <h1 className="font-bold text-xl">Admin Panel</h1>
+            <h1 className="font-bold text-lg lg:text-xl">Admin Panel</h1>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 lg:gap-4">
           <Button variant="ghost" size="sm" className="relative">
-            <Bell className="h-5 w-5" />
+            <Bell className="h-4 w-4 lg:h-5 lg:w-5" />
             {stats.pendingApplications > 0 && (
-              <Badge className="absolute -top-2 -right-2 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs">
+              <Badge className="absolute -top-1 -right-1 lg:-top-2 lg:-right-2 h-4 w-4 lg:h-5 lg:w-5 rounded-full p-0 flex items-center justify-center text-xs">
                 {stats.pendingApplications}
               </Badge>
             )}
@@ -263,18 +256,20 @@ export default function AdminPanelLayout({
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-                <Avatar className="h-8 w-8">
+              <Button variant="ghost" className="relative h-7 w-7 lg:h-8 lg:w-8 rounded-full">
+                <Avatar className="h-7 w-7 lg:h-8 lg:w-8">
                   <AvatarImage src={user.avatar_url || "/placeholder.svg"} alt={user.full_name} />
-                  <AvatarFallback>{user.full_name?.charAt(0) || user.email?.charAt(0)}</AvatarFallback>
+                  <AvatarFallback className="text-xs">
+                    {user.full_name?.charAt(0) || user.email?.charAt(0)}
+                  </AvatarFallback>
                 </Avatar>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="w-56" align="end" forceMount>
               <div className="flex items-center justify-start gap-2 p-2">
                 <div className="flex flex-col space-y-1 leading-none">
-                  <p className="font-medium">{user.full_name}</p>
-                  <p className="w-[200px] truncate text-sm text-muted-foreground">{user.email}</p>
+                  <p className="font-medium text-sm">{user.full_name}</p>
+                  <p className="w-[200px] truncate text-xs text-muted-foreground">{user.email}</p>
                   <Badge variant="destructive" className="text-xs w-fit">
                     <Shield className="h-3 w-3 mr-1" />
                     Admin
@@ -309,7 +304,7 @@ export default function AdminPanelLayout({
         <div
           className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r transform transition-transform duration-200 ease-in-out lg:translate-x-0 lg:static lg:inset-0 ${
             sidebarOpen ? "translate-x-0" : "-translate-x-full"
-          } mt-[73px] lg:mt-0`}
+          } mt-[57px] lg:mt-0`}
         >
           <div className="flex flex-col h-full pt-4">
             {/* Close button for mobile */}
@@ -320,7 +315,7 @@ export default function AdminPanelLayout({
             </div>
 
             {/* Navigation */}
-            <nav className="flex-1 px-4 space-y-2">
+            <nav className="flex-1 px-4 space-y-2 overflow-y-auto">
               {sidebarItems.map((item) => {
                 const isExpanded = expandedItems.includes(item.title)
                 const hasChildren = item.children && item.children.length > 0
@@ -330,15 +325,17 @@ export default function AdminPanelLayout({
                     <div key={item.title}>
                       <Button
                         variant="ghost"
-                        className="w-full justify-start text-left"
+                        className="w-full justify-start text-left text-sm"
                         onClick={() => toggleExpanded(item.title)}
                       >
-                        <item.icon className="h-5 w-5 mr-3" />
+                        <item.icon className="h-4 w-4 mr-3" />
                         <span className="flex-1">{item.title}</span>
-                        <span className={`transform transition-transform ${isExpanded ? "rotate-90" : ""}`}>▶</span>
+                        <span className={`transform transition-transform text-xs ${isExpanded ? "rotate-90" : ""}`}>
+                          ▶
+                        </span>
                       </Button>
                       {isExpanded && (
-                        <div className="ml-8 space-y-1 mt-1">
+                        <div className="ml-6 space-y-1 mt-1">
                           {item.children.map((child) => {
                             const isActive = pathname === child.href
                             return (
@@ -346,11 +343,11 @@ export default function AdminPanelLayout({
                                 key={child.href}
                                 href={child.href}
                                 onClick={() => setSidebarOpen(false)}
-                                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
                                   isActive ? "bg-blue-100 text-blue-700" : "text-gray-700 hover:bg-gray-100"
                                 }`}
                               >
-                                <child.icon className="h-4 w-4" />
+                                <child.icon className="h-3 w-3" />
                                 <span>{child.title}</span>
                               </Link>
                             )
@@ -371,7 +368,7 @@ export default function AdminPanelLayout({
                       isActive ? "bg-blue-100 text-blue-700" : "text-gray-700 hover:bg-gray-100"
                     }`}
                   >
-                    <item.icon className="h-5 w-5" />
+                    <item.icon className="h-4 w-4" />
                     <span>{item.title}</span>
                     {item.title === "Arizalar" && stats.pendingApplications > 0 && (
                       <Badge variant="destructive" className="ml-auto text-xs">

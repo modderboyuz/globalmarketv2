@@ -20,6 +20,7 @@ import {
   Eye,
   Phone,
   Award,
+  Download,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
@@ -107,12 +108,8 @@ export default function AdminPanelPage() {
         recentOrdersResult,
       ] = await Promise.all([
         supabase.from("users").select("*", { count: "exact", head: true }),
-        supabase
-          .from("users")
-          .select("*", { count: "exact", head: true })
-          .eq("is_seller", false)
-          .eq("is_verified_seller", false),
-        supabase.from("users").select("*", { count: "exact", head: true }).eq("is_verified_seller", true),
+        supabase.from("users").select("*", { count: "exact", head: true }).eq("is_seller", false).eq("is_admin", false),
+        supabase.from("users").select("*", { count: "exact", head: true }).eq("is_seller", true),
         supabase.from("products").select("*", { count: "exact", head: true }),
         supabase.from("products").select("*", { count: "exact", head: true }).eq("seller_id", adminId),
         supabase.from("orders").select("*", { count: "exact", head: true }),
@@ -162,6 +159,41 @@ export default function AdminPanelPage() {
     } catch (error) {
       console.error("Error fetching stats:", error)
       toast.error("Statistikani olishda xatolik")
+    }
+  }
+
+  const exportAllData = async () => {
+    try {
+      const { data: users } = await supabase.from("users").select("*")
+      const { data: products } = await supabase.from("products").select("*")
+      const { data: orders } = await supabase.from("orders").select("*")
+
+      // Create CSV content
+      const csvContent = [
+        "Type,ID,Name,Email,Phone,Created At",
+        ...(users || []).map(
+          (user) =>
+            `User,${user.id},${user.full_name || ""},${user.email || ""},${user.phone || ""},${user.created_at}`,
+        ),
+        ...(products || []).map((product) => `Product,${product.id},${product.name || ""},,,${product.created_at}`),
+        ...(orders || []).map(
+          (order) =>
+            `Order,${order.id},${order.full_name || ""},${order.phone || ""},${order.phone || ""},${order.created_at}`,
+        ),
+      ].join("\n")
+
+      const blob = new Blob([csvContent], { type: "text/csv" })
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `admin-data-${new Date().toISOString().split("T")[0]}.csv`
+      a.click()
+      window.URL.revokeObjectURL(url)
+
+      toast.success("Ma'lumotlar eksport qilindi")
+    } catch (error) {
+      console.error("Error exporting data:", error)
+      toast.error("Eksport qilishda xatolik")
     }
   }
 
@@ -216,56 +248,62 @@ export default function AdminPanelPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 lg:space-y-8">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold gradient-text">Admin Panel</h1>
-        <p className="text-gray-600">Tizimni boshqarish va nazorat qilish</p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl lg:text-3xl font-bold gradient-text">Admin Panel</h1>
+          <p className="text-gray-600 text-sm lg:text-base">Tizimni boshqarish va nazorat qilish</p>
+        </div>
+        <Button onClick={exportAllData} variant="outline" className="w-full sm:w-auto bg-transparent">
+          <Download className="h-4 w-4 mr-2" />
+          Barcha ma'lumotlarni eksport qilish
+        </Button>
       </div>
 
-      {/* Main Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      {/* Main Stats Cards - Mobile Responsive */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6">
         <Link href="/admin-panel/users">
           <Card className="card-beautiful hover:shadow-lg transition-all duration-300 cursor-pointer group">
-            <CardContent className="p-6 text-center">
-              <Users className="h-8 w-8 text-blue-600 mx-auto mb-2 group-hover:scale-110 transition-transform" />
-              <div className="text-2xl font-bold">{stats.totalUsers}</div>
-              <div className="text-sm text-gray-600">Jami foydalanuvchilar</div>
+            <CardContent className="p-3 lg:p-6 text-center">
+              <Users className="h-6 w-6 lg:h-8 lg:w-8 text-blue-600 mx-auto mb-2 group-hover:scale-110 transition-transform" />
+              <div className="text-lg lg:text-2xl font-bold">{stats.totalUsers}</div>
+              <div className="text-xs lg:text-sm text-gray-600">Jami foydalanuvchilar</div>
               <div className="text-xs text-gray-500 mt-1">
-                Sotuvchilar: {stats.totalSellers} | Mijozlar: {stats.totalCustomers}
+                S: {stats.totalSellers} | M: {stats.totalCustomers}
               </div>
             </CardContent>
           </Card>
         </Link>
 
         <Card className="card-beautiful">
-          <CardContent className="p-6 text-center">
-            <Package className="h-8 w-8 text-purple-600 mx-auto mb-2" />
-            <div className="text-2xl font-bold">{stats.totalProducts}</div>
-            <div className="text-sm text-gray-600">Jami mahsulotlar</div>
+          <CardContent className="p-3 lg:p-6 text-center">
+            <Package className="h-6 w-6 lg:h-8 lg:w-8 text-purple-600 mx-auto mb-2" />
+            <div className="text-lg lg:text-2xl font-bold">{stats.totalProducts}</div>
+            <div className="text-xs lg:text-sm text-gray-600">Jami mahsulotlar</div>
             <div className="text-xs text-gray-500 mt-1">
-              GlobalMarket: {stats.globalMarketProducts} | Boshqalar: {stats.otherSellerProducts}
+              GM: {stats.globalMarketProducts} | B: {stats.otherSellerProducts}
             </div>
           </CardContent>
         </Card>
 
         <Card className="card-beautiful">
-          <CardContent className="p-6 text-center">
-            <ShoppingCart className="h-8 w-8 text-orange-600 mx-auto mb-2" />
-            <div className="text-2xl font-bold">{stats.totalOrders}</div>
-            <div className="text-sm text-gray-600">Jami buyurtmalar</div>
+          <CardContent className="p-3 lg:p-6 text-center">
+            <ShoppingCart className="h-6 w-6 lg:h-8 lg:w-8 text-orange-600 mx-auto mb-2" />
+            <div className="text-lg lg:text-2xl font-bold">{stats.totalOrders}</div>
+            <div className="text-xs lg:text-sm text-gray-600">Jami buyurtmalar</div>
             <div className="text-xs text-gray-500 mt-1">
-              GlobalMarket: {stats.globalMarketOrders} | Boshqalar: {stats.otherSellerOrders}
+              GM: {stats.globalMarketOrders} | B: {stats.otherSellerOrders}
             </div>
           </CardContent>
         </Card>
 
         <Link href="/admin-panel/applications">
           <Card className="card-beautiful hover:shadow-lg transition-all duration-300 cursor-pointer group">
-            <CardContent className="p-6 text-center">
-              <FileText className="h-8 w-8 text-red-600 mx-auto mb-2 group-hover:scale-110 transition-transform" />
-              <div className="text-2xl font-bold">{stats.pendingApplications}</div>
-              <div className="text-sm text-gray-600">Kutilayotgan arizalar</div>
+            <CardContent className="p-3 lg:p-6 text-center">
+              <FileText className="h-6 w-6 lg:h-8 lg:w-8 text-red-600 mx-auto mb-2 group-hover:scale-110 transition-transform" />
+              <div className="text-lg lg:text-2xl font-bold">{stats.pendingApplications}</div>
+              <div className="text-xs lg:text-sm text-gray-600">Kutilayotgan arizalar</div>
             </CardContent>
           </Card>
         </Link>
@@ -275,16 +313,16 @@ export default function AdminPanelPage() {
       {stats.pendingApplications > 0 && (
         <Link href="/admin-panel/applications">
           <Card className="card-beautiful hover:shadow-lg transition-all duration-300 cursor-pointer border-l-4 border-l-red-500 bg-red-50/50">
-            <CardContent className="p-6">
+            <CardContent className="p-4 lg:p-6">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <FileText className="h-8 w-8 text-red-600" />
+                <div className="flex items-center gap-3 lg:gap-4">
+                  <FileText className="h-6 w-6 lg:h-8 lg:w-8 text-red-600" />
                   <div>
-                    <h3 className="text-xl font-bold">Kutilayotgan arizalar</h3>
-                    <p className="text-gray-600">Yangi arizalar sizning javobingizni kutmoqda</p>
+                    <h3 className="text-lg lg:text-xl font-bold">Kutilayotgan arizalar</h3>
+                    <p className="text-gray-600 text-sm lg:text-base">Yangi arizalar sizning javobingizni kutmoqda</p>
                   </div>
                 </div>
-                <Badge variant="destructive" className="text-lg px-3 py-1">
+                <Badge variant="destructive" className="text-base lg:text-lg px-2 lg:px-3 py-1">
                   {stats.pendingApplications}
                 </Badge>
               </div>
@@ -293,61 +331,70 @@ export default function AdminPanelPage() {
         </Link>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 lg:gap-8">
         {/* Recent Users */}
         <Card className="card-beautiful">
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-blue-600" />
-                Yaqinda qo'shilganlar
+                <TrendingUp className="h-4 w-4 lg:h-5 lg:w-5 text-blue-600" />
+                <span className="text-base lg:text-lg">Yaqinda qo'shilganlar</span>
               </div>
               <Link href="/admin-panel/users">
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" className="text-xs lg:text-sm bg-transparent">
                   Barchasini ko'rish
                 </Button>
               </Link>
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
+            <div className="space-y-3 lg:space-y-4">
               {stats.recentUsers.length === 0 ? (
-                <p className="text-gray-500 text-center py-4">Yaqinda qo'shilgan foydalanuvchilar yo'q</p>
+                <p className="text-gray-500 text-center py-4 text-sm lg:text-base">
+                  Yaqinda qo'shilgan foydalanuvchilar yo'q
+                </p>
               ) : (
                 stats.recentUsers.map((user) => (
-                  <div key={user.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                    <div className="flex items-center gap-3">
-                      <Avatar>
+                  <div key={user.id} className="flex items-center justify-between p-2 lg:p-3 bg-gray-50 rounded-lg">
+                    <div className="flex items-center gap-2 lg:gap-3">
+                      <Avatar className="h-8 w-8 lg:h-10 lg:w-10">
                         <AvatarImage src="/placeholder-user.jpg" />
-                        <AvatarFallback>{user.full_name?.charAt(0) || user.email?.charAt(0) || "U"}</AvatarFallback>
+                        <AvatarFallback className="text-xs lg:text-sm">
+                          {user.full_name?.charAt(0) || user.email?.charAt(0) || "U"}
+                        </AvatarFallback>
                       </Avatar>
                       <div>
-                        <p className="font-medium">{user.full_name || "Noma'lum"}</p>
-                        <p className="text-sm text-gray-600">{user.email}</p>
+                        <p className="font-medium text-sm lg:text-base">{user.full_name || "Noma'lum"}</p>
+                        <p className="text-xs lg:text-sm text-gray-600">{user.email}</p>
                         <p className="text-xs text-gray-500">{formatDate(user.created_at)}</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 lg:gap-2">
                       {user.is_admin && (
-                        <Badge variant="destructive">
-                          <Award className="h-3 w-3 mr-1" />
+                        <Badge variant="destructive" className="text-xs">
+                          <Award className="h-2 w-2 lg:h-3 lg:w-3 mr-1" />
                           Admin
                         </Badge>
                       )}
-                      {user.is_verified_seller && (
-                        <Badge className="bg-green-100 text-green-800">
-                          <Store className="h-3 w-3 mr-1" />
+                      {user.is_seller && (
+                        <Badge className="bg-green-100 text-green-800 text-xs">
+                          <Store className="h-2 w-2 lg:h-3 lg:w-3 mr-1" />
                           Sotuvchi
                         </Badge>
                       )}
                       <Link href={`/admin-panel/user/${user.id}`}>
-                        <Button size="sm" variant="outline">
-                          <Eye className="h-3 w-3" />
+                        <Button size="sm" variant="outline" className="h-6 w-6 lg:h-8 lg:w-8 p-0 bg-transparent">
+                          <Eye className="h-2 w-2 lg:h-3 lg:w-3" />
                         </Button>
                       </Link>
                       {user.phone && (
-                        <Button size="sm" variant="outline" onClick={() => window.open(`tel:${user.phone}`)}>
-                          <Phone className="h-3 w-3" />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 w-6 lg:h-8 lg:w-8 p-0 bg-transparent"
+                          onClick={() => window.open(`tel:${user.phone}`)}
+                        >
+                          <Phone className="h-2 w-2 lg:h-3 lg:w-3" />
                         </Button>
                       )}
                     </div>
@@ -363,37 +410,39 @@ export default function AdminPanelPage() {
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <ShoppingCart className="h-5 w-5 text-orange-600" />
-                Yaqinda yakunlangan buyurtmalar
+                <ShoppingCart className="h-4 w-4 lg:h-5 lg:w-5 text-orange-600" />
+                <span className="text-base lg:text-lg">Yaqinda yakunlangan buyurtmalar</span>
               </div>
               <Link href="/admin-panel/orders">
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" className="text-xs lg:text-sm bg-transparent">
                   Barchasini ko'rish
                 </Button>
               </Link>
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
+            <div className="space-y-3 lg:space-y-4">
               {stats.recentOrders.length === 0 ? (
-                <p className="text-gray-500 text-center py-4">Yaqinda yakunlangan buyurtmalar yo'q</p>
+                <p className="text-gray-500 text-center py-4 text-sm lg:text-base">
+                  Yaqinda yakunlangan buyurtmalar yo'q
+                </p>
               ) : (
                 stats.recentOrders.map((order) => (
-                  <div key={order.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div key={order.id} className="flex items-center justify-between p-2 lg:p-3 bg-gray-50 rounded-lg">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
-                        <p className="font-medium">#{order.id.slice(-8)}</p>
+                        <p className="font-medium text-sm lg:text-base">#{order.id.slice(-8)}</p>
                         {getOrderStatusBadge(order.status)}
                       </div>
-                      <p className="text-sm text-gray-600">{order.products?.name || "Mahsulot"}</p>
-                      <p className="text-sm text-gray-600">{order.users?.full_name || "Mijoz"}</p>
+                      <p className="text-xs lg:text-sm text-gray-600">{order.products?.name || "Mahsulot"}</p>
+                      <p className="text-xs lg:text-sm text-gray-600">{order.users?.full_name || "Mijoz"}</p>
                       <p className="text-xs text-gray-500">{formatDate(order.updated_at)}</p>
                     </div>
                     <div className="text-right">
-                      <p className="font-bold text-green-600">{formatPrice(order.total_amount)}</p>
+                      <p className="font-bold text-green-600 text-sm lg:text-base">{formatPrice(order.total_amount)}</p>
                       <Link href={`/admin-panel/order/${order.id}`}>
-                        <Button size="sm" variant="outline" className="mt-1 bg-transparent">
-                          <Eye className="h-3 w-3" />
+                        <Button size="sm" variant="outline" className="mt-1 bg-transparent h-6 w-6 lg:h-8 lg:w-8 p-0">
+                          <Eye className="h-2 w-2 lg:h-3 lg:w-3" />
                         </Button>
                       </Link>
                     </div>
