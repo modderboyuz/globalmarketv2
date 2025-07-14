@@ -29,10 +29,22 @@ import {
   Package,
   MessageSquare,
   Phone,
-  RefreshCw, // Added for loading state
+  RefreshCw,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
+
+interface User {
+  id: string
+  full_name: string
+  email: string
+  phone: string
+  company_name?: string
+  is_verified_seller: boolean
+  is_admin: boolean
+  created_at: string
+  last_sign_in_at: string
+}
 
 interface Application {
   id: string
@@ -43,12 +55,7 @@ interface Application {
   reviewed_at?: string
   admin_notes?: string
   user_id?: string
-  users?: {
-    full_name: string
-    email: string
-    phone: string
-    username: string
-  }
+  users?: User | null // User type can be null if not found
   // Seller application fields
   company_name?: string
   business_type?: string
@@ -72,7 +79,8 @@ interface Application {
 
 export default function AdminApplicationsPage() {
   const router = useRouter()
-  const [user, setUser] = useState<any>(null)
+  const [currentUser, setCurrentUser] = useState<any>(null) // Stores current logged-in user info
+  const [usersMap, setUsersMap] = useState<Map<string, User>>(new Map()) // To store user details fetched from Supabase
   const [applications, setApplications] = useState<Application[]>([])
   const [filteredApplications, setFilteredApplications] = useState<Application[]>([])
   const [loading, setLoading] = useState(true)
@@ -91,108 +99,147 @@ export default function AdminApplicationsPage() {
     rejected: 0,
   })
 
+  // Fetch current user and their admin status on mount
   useEffect(() => {
-    checkAdminAccess()
-  }, [])
+    const checkAdminAccess = async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
 
-  useEffect(() => {
-    filterApplications()
-  }, [applications, searchQuery, typeFilter, statusFilter])
-
-  const checkAdminAccess = async () => {
-    try {
-      const {
-        data: { user: currentUser },
-      } = await supabase.auth.getUser()
-
-      if (!currentUser) {
-        router.push("/login")
-        return
-      }
-
-      const { data: userData } = await supabase.from("users").select("*").eq("id", currentUser.id).single()
-
-      if (!userData?.is_admin) {
-        toast.error("Sizda admin huquqi yo'q")
-        router.push("/")
-        return
-      }
-
-      setUser(userData)
-      await fetchApplications()
-    } catch (error) {
-      console.error("Error checking admin access:", error)
-      router.push("/")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const fetchApplications = async () => {
-    try {
-      setLoading(true)
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
-      if (!session) {
-        router.push("/login")
-        return
-      }
-
-      const response = await fetch("/api/applications", {
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-      })
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          toast.error("Sizda ruxsat yo'q. Qayta kirish amalga oshirilmoqda.")
+        if (!user) {
           router.push("/login")
           return
         }
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
 
-      const result = await response.json()
+        const { data: userData, error: userError } = await supabase
+          .from("users")
+          .select("id, full_name, email, phone, company_name, is_verified_seller, is_admin, created_at, last_sign_in_at")
+          .eq("id", user.id)
+          .single()
 
-      if (result.success) {
-        setApplications(result.applications)
-        calculateStats(result.applications)
-      } else {
-        throw new Error(result.error || "Unknown error")
+        if (userError || !userData || !userData.is_admin) {
+          toast.error("Sizda admin huquqi yo'q")
+          router.push("/")
+          return
+        }
+
+        setCurrentUser(userData) // Store the admin user details
+        await fetchApplications() // Fetch applications after confirming admin status
+      } catch (error) {
+        console.error("Error checking admin access:", error)
+        router.push("/") // Redirect to login or home if access check fails
+      } finally {
+        setLoading(false)
       }
-    } catch (error) {
-      console.error("Error fetching applications:", error)
-      toast.error("Arizalarni olishda xatolik")
+    }
+
+    checkAdminAccess()
+  }, [router]) // Depend on router to push to login page
+
+  // Fetch all applications directly from Supabase
+  const fetchApplications = async () => {
+    setLoading(true)
+    try {
+      // Fetch seller applications
+      const { data: sellerApps, error: sellerError } = await supabase
+        .from("seller_applications")
+        .select(`
+          *,
+          users (
+            id, full_name, email, phone, username, company_name, is_verified_seller, is_admin, created_at, last_sign_in_at
+          )
+        `)
+        .order("created_at", { ascending: false })
+
+      if (sellerError) throw sellerError
+
+      // Fetch product applications
+      const { data: productApps, error: productError } = await supabase
+        .from("product_applications")
+        .select(`
+          *,
+          users (
+            id, full_name, email, phone, username, company_name, is_verified_seller, is_admin, created_at, last_sign_in_at
+          )
+        `)
+        .order("created_at", { ascending: false })
+
+      if (productError) throw productError
+
+      // Fetch complaints
+      const { data: complaints, error: complaintsError } = await supabase
+        .from("complaints")
+        .select(`
+          *,
+          users (
+            id, full_name, email, phone, username, company_name, is_verified_seller, is_admin, created_at, last_sign_in_at
+          ),
+          orders (
+            id,
+            products (
+              name
+            )
+          )
+        `)
+        .order("created_at", { ascending: false })
+
+      if (complaintsError) throw complaintsError
+
+      // Combine and tag the applications
+      const allApps: Application[] = [
+        ...(sellerApps || []).map((app: any) => ({ ...app, type: "seller", users: app.users || null })),
+        ...(productApps || []).map((app: any) => ({ ...app, type: "product", users: app.users || null })),
+        ...(complaints || []).map((app: any) => ({
+          ...app,
+          type: "complaint",
+          status: app.status || "pending",
+          admin_response: app.admin_response || null,
+          users: app.users || null,
+          orders: app.orders || null,
+        })),
+      ]
+
+      // Sort by created_at
+      allApps.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
+      setApplications(allApps)
+      calculateStats(allApps)
+    } catch (error: any) {
+      console.error("Error fetching applications directly from Supabase:", error)
+      toast.error(`Arizalarni olishda xatolik: ${error.message}`)
     } finally {
       setLoading(false)
     }
   }
 
-  const calculateStats = (applicationsData: Application[]) => {
+  // Calculate stats based on current applications
+  const calculateStats = (appsData: Application[]) => {
     const stats = {
-      total: applicationsData.length,
-      pending: applicationsData.filter((a) => a.status === "pending").length,
-      approved: applicationsData.filter((a) => a.status === "approved" || a.status === "approved_verified").length, // Include approved_verified
-      rejected: applicationsData.filter((a) => a.status === "rejected").length,
+      total: appsData.length,
+      pending: appsData.filter((a) => a.status === "pending").length,
+      approved: appsData.filter((a) => a.status === "approved" || a.status === "approved_verified").length,
+      rejected: appsData.filter((a) => a.status === "rejected").length,
     }
     setStats(stats)
   }
 
-  const filterApplications = () => {
+  // Filter applications based on search query and dropdown selections
+  useEffect(() => {
     let filtered = applications
 
     if (searchQuery) {
+      const lowerCaseSearch = searchQuery.toLowerCase()
       filtered = filtered.filter(
         (app) =>
-          app.users?.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          app.users?.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          app.company_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          app.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          app.subject?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          app.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          app.message?.toLowerCase().includes(searchQuery.toLowerCase()), // Search in message for contacts
+          app.id.toLowerCase().includes(lowerCaseSearch) ||
+          app.users?.full_name?.toLowerCase().includes(lowerCaseSearch) ||
+          app.users?.email?.toLowerCase().includes(lowerCaseSearch) ||
+          app.company_name?.toLowerCase().includes(lowerCaseSearch) ||
+          app.name?.toLowerCase().includes(lowerCaseSearch) ||
+          app.subject?.toLowerCase().includes(lowerCaseSearch) ||
+          app.message?.toLowerCase().includes(lowerCaseSearch) ||
+          app.users?.phone?.toLowerCase().includes(searchQuery) // Direct phone search
       )
     }
 
@@ -205,74 +252,102 @@ export default function AdminApplicationsPage() {
     }
 
     setFilteredApplications(filtered)
-  }
+  }, [applications, searchQuery, typeFilter, statusFilter])
 
+  // Handle application actions (approve, reject, etc.) directly with Supabase
   const handleAction = async (action: string) => {
-    if (!selectedApplication) return
+    if (!selectedApplication || !currentUser) return // Ensure application and user are loaded
 
+    setLoading(true) // Show loading indicator while processing
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
-      if (!session) {
-        router.push("/login")
-        return
+      let updateData: any = {
+        updated_at: new Date().toISOString(),
+        reviewed_at: new Date().toISOString(),
       }
 
-      const response = await fetch("/api/applications", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          id: selectedApplication.id,
-          type: selectedApplication.type,
-          action,
-          notes: actionNotes,
-        }),
-      })
-
-      if (!response.ok) {
-        const errorResult = await response.json()
-        throw new Error(errorResult.error || `HTTP error! status: ${response.status}`)
+      // Determine table and update data based on type and action
+      switch (selectedApplication.type) {
+        case "seller":
+          updateData.status = action === "approve" ? "approved" : action === "reject" ? "rejected" : action
+          updateData.admin_notes = actionNotes
+          break
+        case "product":
+          updateData.status = action === "approve" ? "approved" : action === "reject" ? "rejected" : action
+          updateData.admin_notes = actionNotes
+          break
+        case "complaint":
+          updateData.status = action === "resolve" ? "resolved" : action === "reject" ? "rejected" : action
+          updateData.admin_response = actionNotes // Use notes as admin response for complaints
+          break
+        default:
+          throw new Error("Noto'g'ri application type")
       }
 
-      const result = await response.json()
+      // Update the application in Supabase
+      const { data: updatedApp, error: appUpdateError } = await supabase
+        .from(selectedApplication.type === "complaint" ? "complaints" : `${selectedApplication.type}_applications`)
+        .update(updateData)
+        .eq("id", selectedApplication.id)
+        .select()
+        .single()
 
-      if (result.success) {
-        toast.success(result.message)
-        await fetchApplications() // Refresh the list
-        setShowActionDialog(false)
-        setSelectedApplication(null)
-        setActionNotes("")
-      } else {
-        throw new Error(result.error || "Unknown error")
+      if (appUpdateError) throw appUpdateError
+
+      // If approving seller application, update user's seller status
+      if (selectedApplication.type === "seller" && (action === "approve" || action === "approve_verified")) {
+        await supabase
+          .from("users")
+          .update({
+            is_seller: true,
+            is_verified_seller: true,
+          })
+          .eq("id", selectedApplication.user_id!) // Use the user_id from the application
+          .then(({ error: userUpdateError }) => {
+            if (userUpdateError) {
+              console.error("Error updating user status:", userUpdateError)
+              // Handle user update error if necessary
+            }
+          })
       }
+
+      toast.success(`Ariza muvaffaqiyatli ${action === "approve" ? "tasdiqlandi" : action === "reject" ? "rad etildi" : action === "resolve" ? "hal qilindi" : action}.`)
+      await fetchApplications() // Re-fetch applications to reflect changes
+      setShowActionDialog(false)
+      setSelectedApplication(null)
+      setActionNotes("")
     } catch (error: any) {
-      toast.error(error.message || "Xatolik yuz berdi")
+      console.error("Error handling application action:", error)
+      toast.error(`Xatolik yuz berdi: ${error.message}`)
+    } finally {
+      setLoading(false)
     }
   }
 
+  // Open action dialog with pre-filled data
   const openActionDialog = (application: Application, action: string) => {
     setSelectedApplication(application)
     setActionType(action)
-    setActionNotes("") // Clear notes when opening
+    setActionNotes("") // Clear previous notes
     setShowActionDialog(true)
   }
 
+  // Export current filtered applications to CSV
   const exportApplications = async () => {
+    if (!filteredApplications.length) {
+      toast.warn("Eksport qilish uchun hech qanday ariza topilmadi.")
+      return
+    }
     try {
       const csvContent = [
         ["ID", "Tur", "Holat", "Ariza beruvchi", "Email", "Telefon", "Sana", "Kompaniya/Mavzu", "Admin Eslatmasi"].join(","),
         ...filteredApplications.map((app) =>
           [
-            app.id.slice(-8),
+            app.id.slice(-8), // Short ID for readability
             app.type === "seller" ? "Sotuvchi" : app.type === "product" ? "Mahsulot" : "Murojaat",
             app.status === "pending" ? "Kutilmoqda" : app.status === "approved" || app.status === "approved_verified" ? "Tasdiqlangan" : "Rad etilgan",
-            app.users?.full_name || app.name || "",
-            app.users?.email || app.email || "",
-            app.users?.phone || app.phone || "",
+            app.users?.full_name || app.name || "Noma'lum",
+            app.users?.email || app.email || "Noma'lum",
+            app.users?.phone || app.phone || "Noma'lum",
             new Date(app.created_at).toLocaleDateString(),
             app.type === "seller" ? app.company_name || "" : app.type === "contact" ? app.subject || "" : "",
             app.admin_notes || "",
@@ -295,6 +370,7 @@ export default function AdminApplicationsPage() {
     }
   }
 
+  // Helper to get badge UI for status
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "pending":
@@ -305,7 +381,7 @@ export default function AdminApplicationsPage() {
           </Badge>
         )
       case "approved":
-      case "approved_verified": // Handle approved_verified as approved for display
+      case "approved_verified":
         return (
           <Badge className="bg-green-100 text-green-800">
             <CheckCircle className="h-3 w-3 mr-1" />
@@ -319,11 +395,19 @@ export default function AdminApplicationsPage() {
             Rad etilgan
           </Badge>
         )
+      case "resolved": // Added for complaints
+        return (
+          <Badge className="bg-blue-100 text-blue-800">
+            <CheckCircle className="h-3 w-3 mr-1" />
+            Hal qilingan
+          </Badge>
+        )
       default:
         return <Badge variant="outline">{status}</Badge>
     }
   }
 
+  // Helper to get icon for application type
   const getTypeIcon = (type: string) => {
     switch (type) {
       case "seller":
@@ -337,6 +421,7 @@ export default function AdminApplicationsPage() {
     }
   }
 
+  // Helper to get display name for application type
   const getTypeName = (type: string) => {
     switch (type) {
       case "seller":
@@ -350,6 +435,7 @@ export default function AdminApplicationsPage() {
     }
   }
 
+  // Helper to format dates
   const formatDate = (dateString: string) => {
     if (!dateString) return "Noma'lum sana"
     return new Date(dateString).toLocaleDateString("uz-UZ", {
@@ -361,19 +447,33 @@ export default function AdminApplicationsPage() {
     })
   }
 
+  // Responsive phone number formatting
+  const formatPhoneNumber = (phone?: string) => {
+    if (!phone) return null
+    // Basic formatting: +XXX XXX XX XX XXXXX
+    if (phone.startsWith('+')) {
+      return `+${phone.substring(1, 4)} ${phone.substring(4, 7)} ${phone.substring(7, 9)} ${phone.substring(9, 11)} ${phone.substring(11)}`
+    }
+    return phone // Return as is if not starting with '+'
+  }
+
+  // Initial loading state
   if (loading) {
     return (
       <div className="space-y-6 p-4 lg:p-8">
         <div className="animate-pulse space-y-6">
+          {/* Header skeleton */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="h-8 bg-gray-200 rounded w-1/4"></div>
             <div className="h-10 w-full sm:w-auto bg-gray-200 rounded-md"></div>
           </div>
+          {/* Stats skeleton */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6">
             {[...Array(4)].map((_, i) => (
               <div key={i} className="h-24 bg-gray-200 rounded-2xl"></div>
             ))}
           </div>
+          {/* Applications list skeleton */}
           <div className="space-y-4">
             {[...Array(5)].map((_, i) => (
               <div key={i} className="h-32 bg-gray-200 rounded-2xl"></div>
@@ -384,9 +484,10 @@ export default function AdminApplicationsPage() {
     )
   }
 
+  // Main page content
   return (
     <div className="space-y-6 p-4 lg:p-8">
-      {/* Header */}
+      {/* Header Section */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl lg:text-3xl font-bold gradient-text">Arizalar</h1>
@@ -398,7 +499,7 @@ export default function AdminApplicationsPage() {
         </Button>
       </div>
 
-      {/* Stats Cards */}
+      {/* Stats Cards Section */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6">
         <Card className="card-beautiful">
           <CardContent className="p-3 lg:p-6 text-center">
@@ -430,7 +531,7 @@ export default function AdminApplicationsPage() {
         </Card>
       </div>
 
-      {/* Filters */}
+      {/* Filters Section */}
       <Card className="card-beautiful">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -471,30 +572,39 @@ export default function AdminApplicationsPage() {
                 <SelectItem value="pending">Kutilmoqda</SelectItem>
                 <SelectItem value="approved">Tasdiqlangan</SelectItem>
                 <SelectItem value="rejected">Rad etilgan</SelectItem>
+                <SelectItem value="resolved">Hal qilingan</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
           {/* Applications List */}
           <div className="space-y-4">
-            {filteredApplications.length === 0 ? (
+            {loading ? ( // Show skeleton if loading
+              <div className="text-center py-8">
+                <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
+                <p className="text-gray-600">Yuklanmoqda...</p>
+              </div>
+            ) : filteredApplications.length === 0 ? ( // Show message if no applications found
               <div className="text-center py-12">
                 <FileText className="h-16 w-16 text-gray-300 mx-auto mb-4" />
                 <h3 className="text-xl font-semibold mb-2">Arizalar yo'q</h3>
                 <p className="text-gray-600">Tanlangan mezonlarga mos keladigan arizalar topilmadi.</p>
               </div>
             ) : (
+              // Render applications list
               filteredApplications.map((application) => (
                 <Card key={application.id} className="border hover:shadow-md transition-shadow duration-200">
                   <CardContent className="p-4 lg:p-6">
-                    <div className="flex items-start justify-between mb-4 flex-wrap lg:flex-nowrap gap-4">
+                    <div className="flex items-start justify-between gap-4 flex-wrap lg:flex-nowrap">
                       <div className="flex items-start gap-4 flex-1 min-w-0">
+                        {/* Application Type Icon */}
                         <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center shrink-0">
                           {getTypeIcon(application.type)}
                         </div>
+                        {/* Application Details */}
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-2 flex-wrap">
-                            <h3 className="font-semibold truncate">Ariza #{application.id.slice(-8)}</h3>
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            <h3 className="font-semibold text-lg truncate">Ariza #{application.id.slice(-8)}</h3>
                             {getStatusBadge(application.status)}
                           </div>
                           <p className="text-sm text-gray-600 truncate">
@@ -512,8 +622,8 @@ export default function AdminApplicationsPage() {
                           </p>
                         </div>
                       </div>
-
-                      <div className="flex gap-2 shrink-0">
+                      {/* Action Buttons (View, Call) */}
+                      <div className="flex items-center gap-2 shrink-0">
                         <Button
                           size="sm"
                           variant="outline"
@@ -538,9 +648,9 @@ export default function AdminApplicationsPage() {
                       </div>
                     </div>
 
-                    {/* Quick Info for Seller/Contact */}
+                    {/* Quick Info (Company/Subject) */}
                     {(application.type === "seller" || application.type === "contact") && (
-                      <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+                      <div className="mt-4 p-3 bg-gray-50 rounded-lg">
                         {application.type === "seller" && application.company_name && (
                           <p className="text-sm font-medium text-gray-800 mb-1">
                             Kompaniya: {application.company_name}
@@ -557,18 +667,20 @@ export default function AdminApplicationsPage() {
                       </div>
                     )}
 
-                    {/* Action Buttons for Pending applications */}
-                    {application.status === "pending" && (
+                    {/* Action Buttons for Pending/Resolve */}
+                    {(application.status === "pending" || (application.type === "complaint" && application.status === "pending")) && (
                       <div className="flex gap-2 flex-wrap mt-3">
-                        <Button
-                          size="sm"
-                          className="bg-green-600 hover:bg-green-700"
-                          onClick={() => openActionDialog(application, "approve")}
-                        >
-                          <CheckCircle className="h-4 w-4 mr-2" />
-                          Tasdiqlash
-                        </Button>
-                        {application.type === "seller" && (
+                        {application.type !== "complaint" && ( // Show approve for seller/product
+                          <Button
+                            size="sm"
+                            className="bg-green-600 hover:bg-green-700"
+                            onClick={() => openActionDialog(application, "approve")}
+                          >
+                            <CheckCircle className="h-4 w-4 mr-2" />
+                            Tasdiqlash
+                          </Button>
+                        )}
+                        {application.type === "seller" && ( // Special button for seller verification
                           <Button
                             size="sm"
                             className="bg-blue-600 hover:bg-blue-700"
@@ -576,6 +688,16 @@ export default function AdminApplicationsPage() {
                           >
                             <CheckCircle className="h-4 w-4 mr-2" />
                             Verified qilish
+                          </Button>
+                        )}
+                        {application.type === "complaint" && ( // Show resolve for complaints
+                          <Button
+                            size="sm"
+                            className="bg-green-600 hover:bg-green-700"
+                            onClick={() => openActionDialog(application, "resolve")}
+                          >
+                            <CheckCircle className="h-4 w-4 mr-2" />
+                            Hal qilish
                           </Button>
                         )}
                         <Button
@@ -590,11 +712,17 @@ export default function AdminApplicationsPage() {
                       </div>
                     )}
 
-                    {/* Admin Notes */}
+                    {/* Admin Notes Display */}
                     {application.admin_notes && (
                       <div className="mt-4 p-3 bg-gray-50 rounded-lg">
                         <p className="text-sm font-medium text-gray-700 mb-1">Admin eslatmasi:</p>
                         <p className="text-sm text-gray-600">{application.admin_notes}</p>
+                      </div>
+                    )}
+                    {application.admin_response && application.type === "complaint" && (
+                      <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                        <p className="text-sm font-medium text-blue-700 mb-1">Admin javobi:</p>
+                        <p className="text-sm text-blue-600">{application.admin_response}</p>
                       </div>
                     )}
                   </CardContent>
@@ -602,13 +730,49 @@ export default function AdminApplicationsPage() {
               ))
             )}
           </div>
+
+          {/* Pagination Section */}
+          {filteredApplications.length > 0 && Math.ceil(applications.length / 10) > 1 && ( // Simple pagination logic, might need improvement for large datasets
+            <div className="flex flex-col sm:flex-row items-center justify-between mt-6 gap-4">
+              <p className="text-sm text-gray-600">
+                {applications.length} tadan {filteredApplications.length} ko'rsatilmoqda
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setFilteredApplications(applications.slice((Math.max(0, Math.ceil(applications.length / 10) - 1 - 1)) * 10, Math.ceil(applications.length / 10) * 10))
+                  }}
+                  disabled={true /* Pagination logic needs proper implementation based on filteredApplications */}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Oldingi
+                </Button>
+                <span className="text-sm min-w-[60px] text-center">
+                  1 / 1
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setFilteredApplications(applications.slice(10, 20))
+                  }}
+                  disabled={true /* Pagination logic needs proper implementation */}
+                >
+                  Keyingi
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
       {/* Details Dialog */}
       <Dialog open={showDetailsDialog} onOpenChange={(isOpen) => {
         setShowDetailsDialog(isOpen)
-        if (!isOpen) setSelectedApplication(null) // Clear selection when closing
+        if (!isOpen) setSelectedApplication(null)
       }}>
         <DialogContent className="max-w-2xl w-full max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -621,7 +785,7 @@ export default function AdminApplicationsPage() {
 
           {selectedApplication ? (
             <div className="space-y-6">
-              {/* User/Applicant Info */}
+              {/* User/Applicant Info Card */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Ariza beruvchi haqida</CardTitle>
@@ -650,7 +814,7 @@ export default function AdminApplicationsPage() {
                 </CardContent>
               </Card>
 
-              {/* Application Details */}
+              {/* Application Details Card */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Ariza haqida</CardTitle>
@@ -679,7 +843,7 @@ export default function AdminApplicationsPage() {
                 </CardContent>
               </Card>
 
-              {/* Type-specific Content */}
+              {/* Type-specific Content Cards */}
               {(selectedApplication.type === "seller" || selectedApplication.type === "product") && (
                 <Card>
                   <CardHeader>
@@ -692,22 +856,13 @@ export default function AdminApplicationsPage() {
                       {selectedApplication.type === "seller" && (
                         <>
                           {selectedApplication.company_name && (
-                            <p>
-                              <span className="font-semibold">Kompaniya nomi: </span>
-                              <span className="text-gray-700">{selectedApplication.company_name}</span>
-                            </p>
+                            <p><span className="font-semibold">Kompaniya nomi: </span><span className="text-gray-700">{selectedApplication.company_name}</span></p>
                           )}
                           {selectedApplication.business_type && (
-                            <p>
-                              <span className="font-semibold">Biznes turi: </span>
-                              <span className="text-gray-700">{selectedApplication.business_type}</span>
-                            </p>
+                            <p><span className="font-semibold">Biznes turi: </span><span className="text-gray-700">{selectedApplication.business_type}</span></p>
                           )}
                           {selectedApplication.experience && (
-                            <p>
-                              <span className="font-semibold">Tajriba: </span>
-                              <span className="text-gray-700">{selectedApplication.experience}</span>
-                            </p>
+                            <p><span className="font-semibold">Tajriba: </span><span className="text-gray-700">{selectedApplication.experience}</span></p>
                           )}
                           {selectedApplication.description && (
                             <div>
@@ -720,16 +875,10 @@ export default function AdminApplicationsPage() {
                       {selectedApplication.type === "product" && selectedApplication.product_data && (
                         <>
                           {selectedApplication.product_data.name && (
-                            <p>
-                              <span className="font-semibold">Mahsulot nomi: </span>
-                              <span className="text-gray-700">{selectedApplication.product_data.name}</span>
-                            </p>
+                            <p><span className="font-semibold">Mahsulot nomi: </span><span className="text-gray-700">{selectedApplication.product_data.name}</span></p>
                           )}
                           {selectedApplication.product_data.price !== undefined && (
-                            <p>
-                              <span className="font-semibold">Narxi: </span>
-                              <span className="text-gray-700">{selectedApplication.product_data.price.toLocaleString('uz-UZ')} so'm</span>
-                            </p>
+                            <p><span className="font-semibold">Narxi: </span><span className="text-gray-700">{selectedApplication.product_data.price.toLocaleString('uz-UZ')} so'm</span></p>
                           )}
                           {selectedApplication.product_data.description && (
                             <div>
@@ -747,7 +896,7 @@ export default function AdminApplicationsPage() {
                                     src={imgUrl}
                                     alt={`Mahsulot rasmi ${index + 1}`}
                                     className="w-20 h-20 object-cover rounded-md cursor-pointer"
-                                    onClick={() => window.open(imgUrl)} // Open image in new tab
+                                    onClick={() => window.open(imgUrl)}
                                   />
                                 ))}
                               </div>
@@ -760,7 +909,7 @@ export default function AdminApplicationsPage() {
                 </Card>
               )}
 
-              {/* Contact Message */}
+              {/* Contact Message Card */}
               {selectedApplication.type === "contact" && (
                 <Card>
                   <CardHeader>
@@ -769,10 +918,7 @@ export default function AdminApplicationsPage() {
                   <CardContent>
                     <div className="space-y-3 text-sm">
                       {selectedApplication.subject && (
-                        <p>
-                          <span className="font-semibold">Mavzu: </span>
-                          <span className="text-gray-700">{selectedApplication.subject}</span>
-                        </p>
+                        <p><span className="font-semibold">Mavzu: </span><span className="text-gray-700">{selectedApplication.subject}</span></p>
                       )}
                       {selectedApplication.message && (
                         <div>
@@ -791,7 +937,7 @@ export default function AdminApplicationsPage() {
                 </Card>
               )}
 
-              {/* Admin Notes */}
+              {/* Admin Notes Card */}
               {selectedApplication.admin_notes && (
                 <Card>
                   <CardHeader>
@@ -828,7 +974,7 @@ export default function AdminApplicationsPage() {
       <Dialog open={showActionDialog} onOpenChange={(isOpen) => {
         setShowActionDialog(isOpen)
         if (!isOpen) {
-          setSelectedApplication(null) // Clear selection when closing
+          setSelectedApplication(null)
           setActionNotes("")
         }
       }}>
@@ -868,7 +1014,7 @@ export default function AdminApplicationsPage() {
             <Button variant="outline" onClick={() => setShowActionDialog(false)}>
               Bekor qilish
             </Button>
-            <Button onClick={() => handleAction(actionType)}>
+            <Button onClick={() => handleAction(actionType)} disabled={loading}>
               {actionType === "approve" && "Tasdiqlash"}
               {actionType === "approve_verified" && "Tasdiqlash va Verified qilish"}
               {actionType === "reject" && "Rad etish"}
