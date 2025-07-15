@@ -27,6 +27,7 @@ import {
   LogOut,
   Store,
   UserCheck,
+  Megaphone,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
@@ -97,6 +98,11 @@ const sidebarItems = [
     title: "Arizalar",
     href: "/admin-panel/applications",
     icon: FileText,
+  },
+  {
+    title: "Reklamalar",
+    href: "/admin-panel/ads",
+    icon: Megaphone,
   },
 ]
 
@@ -325,7 +331,7 @@ export default function AdminPanelLayout({
         <div
           className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r transform transition-transform duration-200 ease-in-out lg:translate-x-0 lg:static lg:inset-0 ${
             sidebarOpen ? "translate-x-0" : "-translate-x-full"
-          } ${window.innerWidth < 1024 ? "mt-[57px]" : ""}`}
+          } ${typeof window !== "undefined" && window.innerWidth < 1024 ? "mt-[57px]" : ""}`}
         >
           <div className="flex flex-col h-full pt-4">
             {/* Close button for mobile */}

@@ -193,3 +193,124 @@ export async function GET(request: NextRequest) {
     )
   }
 }
+
+export async function PUT(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const { orderId, action, notes, pickupAddress } = body
+
+    if (!orderId || !action) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Order ID va action majburiy",
+        },
+        { status: 400 },
+      )
+    }
+
+    // Get authorization header
+    const authHeader = request.headers.get("authorization")
+    if (!authHeader) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Authorization required",
+        },
+        { status: 401 },
+      )
+    }
+
+    const token = authHeader.replace("Bearer ", "")
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser(token)
+
+    if (authError || !user) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Invalid token",
+        },
+        { status: 401 },
+      )
+    }
+
+    // Get current order
+    const { data: order, error: orderError } = await supabase.from("orders").select("*").eq("id", orderId).single()
+
+    if (orderError || !order) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Buyurtma topilmadi",
+        },
+        { status: 404 },
+      )
+    }
+
+    const updateData: any = {
+      updated_at: new Date().toISOString(),
+    }
+
+    switch (action) {
+      case "agree":
+        updateData.is_agree = true
+        updateData.pickup_address = pickupAddress || order.address
+        updateData.seller_notes = notes
+        break
+      case "reject":
+        updateData.is_agree = false
+        updateData.status = "cancelled"
+        updateData.seller_notes = notes
+        break
+      case "client_went":
+        updateData.is_client_went = true
+        updateData.client_notes = notes
+        break
+      case "client_not_went":
+        updateData.is_client_went = false
+        updateData.client_notes = notes
+        break
+      case "product_given":
+        updateData.is_client_claimed = true
+        updateData.status = "completed"
+        updateData.seller_notes = notes
+        break
+      case "product_not_given":
+        updateData.is_client_claimed = false
+        updateData.seller_notes = notes
+        break
+      default:
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Noto'g'ri action",
+          },
+          { status: 400 },
+        )
+    }
+
+    const { data, error } = await supabase.from("orders").update(updateData).eq("id", orderId).select().single()
+
+    if (error) {
+      throw error
+    }
+
+    return NextResponse.json({
+      success: true,
+      order: data,
+      message: "Buyurtma holati yangilandi",
+    })
+  } catch (error) {
+    console.error("Orders PUT error:", error)
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Server xatoligi",
+      },
+      { status: 500 },
+    )
+  }
+}

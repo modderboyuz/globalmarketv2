@@ -5,6 +5,7 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const product_id = searchParams.get("product_id")
+    const user_id = searchParams.get("user_id")
 
     if (!product_id) {
       return NextResponse.json(
@@ -16,9 +17,9 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Get authorization header (optional for GET)
+    // Get authorization header
     const authHeader = request.headers.get("authorization")
-    let user_id = null
+    let currentUserId = null
 
     if (authHeader) {
       const token = authHeader.replace("Bearer ", "")
@@ -29,49 +30,36 @@ export async function GET(request: NextRequest) {
         } = await supabase.auth.getUser(token)
 
         if (!authError && user) {
-          user_id = user.id
+          currentUserId = user.id
         }
       } catch (authError) {
         console.error("Auth error:", authError)
       }
     }
 
-    // Get total likes count
-    const { count: likesCount, error: countError } = await supabase
+    // Get like status for current user
+    let isLiked = false
+    if (currentUserId) {
+      const { data: like } = await supabase
+        .from("likes")
+        .select("id")
+        .eq("user_id", currentUserId)
+        .eq("product_id", product_id)
+        .single()
+
+      isLiked = !!like
+    }
+
+    // Get total like count
+    const { count: likeCount } = await supabase
       .from("likes")
       .select("*", { count: "exact", head: true })
       .eq("product_id", product_id)
 
-    if (countError) {
-      console.error("Error counting likes:", countError)
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Yoqtirishlarni sanashda xatolik",
-        },
-        { status: 500 },
-      )
-    }
-
-    // Check if current user liked this product
-    let liked = false
-    if (user_id) {
-      const { data: userLike, error: likeError } = await supabase
-        .from("likes")
-        .select("id")
-        .eq("product_id", product_id)
-        .eq("user_id", user_id)
-        .single()
-
-      if (!likeError && userLike) {
-        liked = true
-      }
-    }
-
     return NextResponse.json({
       success: true,
-      liked,
-      likes_count: likesCount || 0,
+      isLiked,
+      likeCount: likeCount || 0,
     })
   } catch (error) {
     console.error("Likes GET error:", error)
@@ -106,7 +94,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: "Tizimga kiring",
+          error: "Authorization required",
         },
         { status: 401 },
       )
@@ -122,78 +110,72 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: "Noto'g'ri token",
+          error: "Invalid token",
         },
         { status: 401 },
       )
     }
 
-    // Check if user already liked this product
-    const { data: existingLike, error: checkError } = await supabase
+    // Check if like already exists
+    const { data: existingLike } = await supabase
       .from("likes")
       .select("id")
-      .eq("product_id", product_id)
       .eq("user_id", user.id)
+      .eq("product_id", product_id)
       .single()
 
-    if (checkError && checkError.code !== "PGRST116") {
-      console.error("Error checking existing like:", checkError)
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Yoqtirishni tekshirishda xatolik",
-        },
-        { status: 500 },
-      )
-    }
-
-    let liked = false
-    let message = ""
-
     if (existingLike) {
-      // Unlike - remove the like
-      const { error: deleteError } = await supabase.from("likes").delete().eq("id", existingLike.id)
+      // Remove like
+      const { error: deleteError } = await supabase
+        .from("likes")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("product_id", product_id)
 
       if (deleteError) {
-        console.error("Error removing like:", deleteError)
-        return NextResponse.json(
-          {
-            success: false,
-            error: "Yoqtirishni olib tashlashda xatolik",
-          },
-          { status: 500 },
-        )
+        throw deleteError
       }
 
-      liked = false
-      message = "Yoqtirish olib tashlandi"
+      // Update product like count
+      const { error: updateError } = await supabase.rpc("decrement_like_count", {
+        product_id: product_id,
+      })
+
+      if (updateError) {
+        console.error("Error decrementing like count:", updateError)
+      }
+
+      return NextResponse.json({
+        success: true,
+        liked: false,
+        message: "Like olib tashlandi",
+      })
     } else {
-      // Like - add new like
+      // Add like
       const { error: insertError } = await supabase.from("likes").insert({
-        product_id,
         user_id: user.id,
+        product_id: product_id,
       })
 
       if (insertError) {
-        console.error("Error adding like:", insertError)
-        return NextResponse.json(
-          {
-            success: false,
-            error: "Yoqtirishni qo'shishda xatolik",
-          },
-          { status: 500 },
-        )
+        throw insertError
       }
 
-      liked = true
-      message = "Mahsulot yoqtirildi"
-    }
+      // Update product like count
+      const { error: updateError } = await supabase.rpc("increment_like_count", {
+        product_id: product_id,
+      })
 
-    return NextResponse.json({
-      success: true,
-      liked,
-      message,
-    })
+      if (updateError) {
+        console.error("Error incrementing like count:", updateError)
+      }
+
+      return NextResponse.json({
+        success: true,
+        liked: true,
+        message: "Like qo'shildi",
+      })
+    }
   } catch (error) {
     console.error("Likes POST error:", error)
     return NextResponse.json(

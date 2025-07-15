@@ -1,31 +1,67 @@
 import { NextResponse } from "next/server"
-import { supabase } from "@/lib/supabase"
+
+const neighborhoods = [
+  "Amir Temur",
+  "Beruniy",
+  "Chilonzor",
+  "Bektemir",
+  "Mirzo Ulug'bek",
+  "Mirobod",
+  "Olmazor",
+  "Sergeli",
+  "Shayxontohur",
+  "Uchtepa",
+  "Yakkasaroy",
+  "Yunusobod",
+  "Yashnobod",
+  "Yangihayot",
+  "Qibray",
+  "Zangiota",
+  "Toshkent tumani",
+  "Oqqo'rg'on",
+  "Bo'stonliq",
+  "Parkent",
+  "Piskent",
+  "Quyichirchiq",
+  "O'rtachirchiq",
+  "Yuqorichirchiq",
+  "Angren",
+  "Bekobod",
+  "Olmaliq",
+  "Chirchiq",
+  "Yangiyul",
+  "Guliston",
+  "Sirdaryo",
+  "Boyovut",
+  "Mirzaobod",
+  "Oqoltin",
+  "Sardoba",
+  "Xovos",
+  "Samarqand",
+  "Bukhoro",
+  "Xiva",
+  "Urganch",
+  "Nukus",
+  "Termiz",
+  "Qarshi",
+  "Navoiy",
+  "Jizzax",
+  "Guliston",
+  "Andijon",
+  "Farg'ona",
+  "Namangan",
+  "Qo'qon",
+  "Margilan",
+]
 
 export async function GET() {
   try {
-    const { data: neighborhoods, error } = await supabase
-      .from("neighborhoods")
-      .select("id, name")
-      .eq("is_active", true)
-      .order("name")
-
-    if (error) {
-      console.error("Error fetching neighborhoods:", error)
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Mahallalarni olishda xatolik",
-        },
-        { status: 500 },
-      )
-    }
-
     return NextResponse.json({
       success: true,
-      neighborhoods: neighborhoods || [],
+      neighborhoods: neighborhoods.sort(),
     })
   } catch (error) {
-    console.error("Neighborhoods API error:", error)
+    console.error("Neighborhoods GET error:", error)
     return NextResponse.json(
       {
         success: false,
