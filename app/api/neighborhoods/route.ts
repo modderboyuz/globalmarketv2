@@ -1,71 +1,32 @@
 import { NextResponse } from "next/server"
-
-const neighborhoods = [
-  "Amir Temur",
-  "Beruniy",
-  "Chilonzor",
-  "Bektemir",
-  "Mirzo Ulug'bek",
-  "Mirobod",
-  "Olmazor",
-  "Sergeli",
-  "Shayxontohur",
-  "Uchtepa",
-  "Yakkasaroy",
-  "Yunusobod",
-  "Yashnobod",
-  "Yangihayot",
-  "Qibray",
-  "Zangiota",
-  "Toshkent tumani",
-  "Oqqo'rg'on",
-  "Bo'stonliq",
-  "Parkent",
-  "Piskent",
-  "Quyichirchiq",
-  "O'rtachirchiq",
-  "Yuqorichirchiq",
-  "Angren",
-  "Bekobod",
-  "Olmaliq",
-  "Chirchiq",
-  "Yangiyul",
-  "Guliston",
-  "Sirdaryo",
-  "Boyovut",
-  "Mirzaobod",
-  "Oqoltin",
-  "Sardoba",
-  "Xovos",
-  "Samarqand",
-  "Bukhoro",
-  "Xiva",
-  "Urganch",
-  "Nukus",
-  "Termiz",
-  "Qarshi",
-  "Navoiy",
-  "Jizzax",
-  "Guliston",
-  "Andijon",
-  "Farg'ona",
-  "Namangan",
-  "Qo'qon",
-  "Margilan",
-]
+import { supabase } from "@/lib/supabase" // Make sure supabase client is configured
 
 export async function GET() {
   try {
+    // Fetch neighborhoods from the Supabase 'neighborhoods' table
+    const { data: neighborhoods, error } = await supabase
+      .from("neighborhoods")
+      .select("id, name") // Select only id and name
+      .eq("is_active", true) // Filter for active neighborhoods
+      .order("name", { ascending: true }) // Order them alphabetically
+
+    if (error) {
+      console.error("Supabase fetch neighborhoods error:", error.message)
+      throw error // Throw error to be caught by the catch block
+    }
+
+    // If data is fetched successfully, return it
     return NextResponse.json({
       success: true,
-      neighborhoods: neighborhoods.sort(),
+      neighborhoods: neighborhoods || [], // Return empty array if no neighborhoods found
     })
-  } catch (error) {
-    console.error("Neighborhoods GET error:", error)
+  } catch (error: any) {
+    console.error("GET /api/neighborhoods Error:", error.message)
+    // Return a 500 Internal Server Error for any exceptions
     return NextResponse.json(
       {
         success: false,
-        error: "Server xatoligi",
+        error: "Mahallalarni olishda server xatoligi.", // User-friendly error message
       },
       { status: 500 },
     )

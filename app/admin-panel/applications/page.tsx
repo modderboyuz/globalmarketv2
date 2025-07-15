@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -145,7 +145,6 @@ export default function AdminApplicationsPage() {
   const fetchApplications = async () => {
     setLoading(true)
     try {
-      // Fetch seller applications
       const { data: sellerApps, error: sellerError } = await supabase
         .from("seller_applications")
         .select(`
@@ -158,7 +157,6 @@ export default function AdminApplicationsPage() {
 
       if (sellerError) throw sellerError
 
-      // Fetch product applications
       const { data: productApps, error: productError } = await supabase
         .from("product_applications")
         .select(`
@@ -171,7 +169,6 @@ export default function AdminApplicationsPage() {
 
       if (productError) throw productError
 
-      // Fetch complaints
       const { data: complaints, error: complaintsError } = await supabase
         .from("complaints")
         .select(`
@@ -190,18 +187,16 @@ export default function AdminApplicationsPage() {
 
       if (complaintsError) throw complaintsError
 
-      // Fetch contact messages
       const { data: contactMessages, error: contactError } = await supabase
         .from("contact_messages")
         .select(`
           id, name, email, phone, subject, message, status, admin_response, created_at, updated_at,
           users (id, full_name, email, phone, username)
         `)
-        .order("created_at", { ascending: false }) // Sort by creation date
+        .order("created_at", { ascending: false })
 
       if (contactError) throw contactError
 
-      // Combine all data with type identifier
       const allApps: Application[] = [
         ...(sellerApps || []).map((app: any) => ({ ...app, type: "seller", users: app.users || null })),
         ...(productApps || []).map((app: any) => ({ ...app, type: "product", users: app.users || null })),
@@ -213,21 +208,19 @@ export default function AdminApplicationsPage() {
           users: app.users || null,
           orders: app.orders || null,
         })),
-        ...(contactMessages || []).map((msg: any) => ({ // Map contact messages
+        ...(contactMessages || []).map((msg: any) => ({
           ...msg,
           type: "contact",
           status: msg.status || "pending",
           admin_response: msg.admin_response || null,
-          // Combine user and message data if user is logged in
           users: msg.user_id ? {
             id: msg.user_id,
             full_name: msg.full_name || msg.name,
             email: msg.email,
             phone: msg.phone,
-            username: msg.users?.username // Assuming users join provides username
-            // Other user fields might be missing if not joined correctly
+            username: msg.users?.username
           } : null,
-          name: msg.name, // Keep direct fields for anonymous messages
+          name: msg.name,
           email: msg.email,
           phone: msg.phone,
           subject: msg.subject,
@@ -235,7 +228,6 @@ export default function AdminApplicationsPage() {
         })),
       ]
 
-      // Sort all combined applications by created_at
       allApps.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
       setApplications(allApps)
@@ -254,7 +246,6 @@ export default function AdminApplicationsPage() {
       pending: appsData.filter((a) => a.status === "pending").length,
       approved: appsData.filter((a) => a.status === "approved" || a.status === "approved_verified").length,
       rejected: appsData.filter((a) => a.status === "rejected").length,
-      // Add 'resolved' for complaints if needed in stats
     }
     setStats(stats)
   }
@@ -312,13 +303,13 @@ export default function AdminApplicationsPage() {
           break
         case "complaint":
           tableName = "complaints"
-          updateData.status = action === "resolve" ? "resolved" : action === "reject" ? "stopped" : action // Use 'stopped' for reject
-          updateData.admin_response = actionNotes // For complaints, notes go to admin_response
+          updateData.status = action === "resolve" ? "resolved" : action === "reject" ? "stopped" : action
+          updateData.admin_response = actionNotes
           break
-        case "contact": // Handle contact messages
+        case "contact":
           tableName = "contact_messages"
           updateData.status = action === "approve" ? "completed" : action === "reject" ? "stopped" : action
-          updateData.admin_response = actionNotes // For contact messages, notes go to admin_response
+          updateData.admin_response = actionNotes
           break
         default:
           throw new Error("Noto'g'ri application type")
@@ -475,11 +466,18 @@ export default function AdminApplicationsPage() {
             Hal qilingan
           </Badge>
         )
-      case "stopped": // For rejected contact messages or complaints
+      case "stopped":
         return (
           <Badge variant="outline" className="bg-gray-100 text-gray-700">
             <XCircle className="h-3 w-3 mr-1" />
             To'xtatilgan
+          </Badge>
+        )
+      case "completed":
+        return (
+          <Badge className="bg-blue-100 text-blue-800">
+            <CheckCircle className="h-3 w-3 mr-1" />
+            Bajarilgan
           </Badge>
         )
       default:
@@ -493,6 +491,8 @@ export default function AdminApplicationsPage() {
         return <User className="h-4 w-4" />
       case "product":
         return <Package className="h-4 w-4" />
+      case "complaint":
+        return <MessageSquare className="h-4 w-4" />
       case "contact":
         return <MessageSquare className="h-4 w-4" />
       default:
@@ -765,7 +765,7 @@ export default function AdminApplicationsPage() {
                             Hal qilish
                           </Button>
                         )}
-                        {application.type === "contact" && ( // Contact message actions
+                        {application.type === "contact" && (
                           <>
                             <Button
                               size="sm"
@@ -786,7 +786,7 @@ export default function AdminApplicationsPage() {
                             </Button>
                           </>
                         )}
-                        {application.type !== "contact" && ( // Reject action for non-contact types
+                        {application.type !== "contact" && (
                           <Button
                             size="sm"
                             variant="outline"
@@ -806,16 +806,10 @@ export default function AdminApplicationsPage() {
                         <p className="text-sm text-gray-600">{application.admin_notes}</p>
                       </div>
                     )}
-                    {application.admin_response && application.type === "complaint" && (
+                    {application.admin_response && (application.type === "complaint" || application.type === "contact") && (
                       <div className="mt-4 p-3 bg-blue-50 rounded-lg">
                         <p className="text-sm font-medium text-blue-700 mb-1">Admin javobi:</p>
                         <p className="text-sm text-blue-600">{application.admin_response}</p>
-                      </div>
-                    )}
-                    {application.admin_response && application.type === "contact" && (
-                      <div className="mt-4 p-3 bg-green-50 rounded-lg">
-                        <p className="text-sm font-medium text-green-700 mb-1">Admin javobi:</p>
-                        <p className="text-sm text-green-600">{application.admin_response}</p>
                       </div>
                     )}
                   </CardContent>
