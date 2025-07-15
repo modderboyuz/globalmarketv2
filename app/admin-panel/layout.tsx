@@ -19,7 +19,6 @@ import {
   Package,
   Users,
   FileText,
-  Settings,
   ShoppingCart,
   Menu,
   X,
@@ -28,7 +27,6 @@ import {
   LogOut,
   Store,
   UserCheck,
-  UserX,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
@@ -93,43 +91,12 @@ const sidebarItems = [
         href: "/admin-panel/users/sellers",
         icon: UserCheck,
       },
-      {
-        title: "Mijozlarni boshqarish",
-        href: "/admin-panel/users/customers",
-        icon: UserX,
-      },
     ],
   },
   {
     title: "Arizalar",
+    href: "/admin-panel/applications",
     icon: FileText,
-    children: [
-      {
-        title: "Barcha arizalar",
-        href: "/admin-panel/applications",
-        icon: FileText,
-      },
-      {
-        title: "Sotuvchilik arizalari",
-        href: "/admin-panel/applications/seller",
-        icon: UserCheck,
-      },
-      {
-        title: "Mahsulot sotish arizalari",
-        href: "/admin-panel/applications/product",
-        icon: Package,
-      },
-      {
-        title: "Murojaatlar",
-        href: "/admin-panel/applications/contact",
-        icon: Bell,
-      },
-    ],
-  },
-  {
-    title: "Sozlamalar",
-    href: "/admin-panel/settings",
-    icon: Settings,
   },
 ]
 
@@ -230,25 +197,25 @@ export default function AdminPanelLayout({
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Top Bar */}
-      <div className="bg-white border-b px-4 lg:px-6 py-3 lg:py-4 flex items-center justify-between">
-        <div className="flex items-center gap-2 lg:gap-4">
-          <Button variant="ghost" size="sm" className="lg:hidden" onClick={() => setSidebarOpen(true)}>
+      {/* Mobile Top Bar */}
+      <div className="lg:hidden bg-white border-b px-4 py-3 flex items-center justify-between sticky top-0 z-50">
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => setSidebarOpen(true)}>
             <Menu className="h-5 w-5" />
           </Button>
-          <div className="flex items-center gap-2 lg:gap-3">
-            <div className="w-6 h-6 lg:w-8 lg:h-8 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-              <Shield className="h-3 w-3 lg:h-5 lg:w-5 text-white" />
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
+              <Shield className="h-3 w-3 text-white" />
             </div>
-            <h1 className="font-bold text-lg lg:text-xl">Admin Panel</h1>
+            <h1 className="font-bold text-lg">Admin Panel</h1>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 lg:gap-4">
+        <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" className="relative">
-            <Bell className="h-4 w-4 lg:h-5 lg:w-5" />
+            <Bell className="h-4 w-4" />
             {stats.pendingApplications > 0 && (
-              <Badge className="absolute -top-1 -right-1 lg:-top-2 lg:-right-2 h-4 w-4 lg:h-5 lg:w-5 rounded-full p-0 flex items-center justify-center text-xs">
+              <Badge className="absolute -top-1 -right-1 h-4 w-4 rounded-full p-0 flex items-center justify-center text-xs">
                 {stats.pendingApplications}
               </Badge>
             )}
@@ -256,8 +223,8 @@ export default function AdminPanelLayout({
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="relative h-7 w-7 lg:h-8 lg:w-8 rounded-full">
-                <Avatar className="h-7 w-7 lg:h-8 lg:w-8">
+              <Button variant="ghost" className="relative h-7 w-7 rounded-full">
+                <Avatar className="h-7 w-7">
                   <AvatarImage src={user.avatar_url || "/placeholder.svg"} alt={user.full_name} />
                   <AvatarFallback className="text-xs">
                     {user.full_name?.charAt(0) || user.email?.charAt(0)}
@@ -278,12 +245,6 @@ export default function AdminPanelLayout({
               </div>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
-                <Link href="/profile" className="flex items-center">
-                  <Settings className="mr-2 h-4 w-4" />
-                  <span>Profil</span>
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
                 <Link href="/" className="flex items-center">
                   <Home className="mr-2 h-4 w-4" />
                   <span>Bosh sahifaga qaytish</span>
@@ -299,16 +260,76 @@ export default function AdminPanelLayout({
         </div>
       </div>
 
+      {/* Desktop Top Bar */}
+      <div className="hidden lg:block bg-white border-b px-6 py-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
+              <Shield className="h-5 w-5 text-white" />
+            </div>
+            <h1 className="font-bold text-xl">Admin Panel</h1>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="sm" className="relative">
+              <Bell className="h-5 w-5" />
+              {stats.pendingApplications > 0 && (
+                <Badge className="absolute -top-2 -right-2 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs">
+                  {stats.pendingApplications}
+                </Badge>
+              )}
+            </Button>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+                  <Avatar className="h-8 w-8">
+                    <AvatarImage src={user.avatar_url || "/placeholder.svg"} alt={user.full_name} />
+                    <AvatarFallback className="text-xs">
+                      {user.full_name?.charAt(0) || user.email?.charAt(0)}
+                    </AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-56" align="end" forceMount>
+                <div className="flex items-center justify-start gap-2 p-2">
+                  <div className="flex flex-col space-y-1 leading-none">
+                    <p className="font-medium text-sm">{user.full_name}</p>
+                    <p className="w-[200px] truncate text-xs text-muted-foreground">{user.email}</p>
+                    <Badge variant="destructive" className="text-xs w-fit">
+                      <Shield className="h-3 w-3 mr-1" />
+                      Admin
+                    </Badge>
+                  </div>
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <Link href="/" className="flex items-center">
+                    <Home className="mr-2 h-4 w-4" />
+                    <span>Bosh sahifaga qaytish</span>
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleLogout}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  <span>Chiqish</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      </div>
+
       <div className="flex">
         {/* Sidebar */}
         <div
           className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r transform transition-transform duration-200 ease-in-out lg:translate-x-0 lg:static lg:inset-0 ${
             sidebarOpen ? "translate-x-0" : "-translate-x-full"
-          } mt-[57px] lg:mt-0`}
+          } ${window.innerWidth < 1024 ? "mt-[57px]" : ""}`}
         >
           <div className="flex flex-col h-full pt-4">
             {/* Close button for mobile */}
-            <div className="flex justify-end px-4 lg:hidden">
+            <div className="flex justify-end px-4 lg:hidden mb-4">
               <Button variant="ghost" size="sm" onClick={() => setSidebarOpen(false)}>
                 <X className="h-5 w-5" />
               </Button>
@@ -373,11 +394,6 @@ export default function AdminPanelLayout({
                     {item.title === "Arizalar" && stats.pendingApplications > 0 && (
                       <Badge variant="destructive" className="ml-auto text-xs">
                         {stats.pendingApplications}
-                      </Badge>
-                    )}
-                    {item.title === "Buyurtmalar" && stats.newOrders > 0 && (
-                      <Badge variant="destructive" className="ml-auto text-xs">
-                        {stats.newOrders}
                       </Badge>
                     )}
                   </Link>

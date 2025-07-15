@@ -180,13 +180,14 @@ export default function EditProduct() {
       const fileName = `${Math.random()}.${fileExt}`
       const filePath = `products/${fileName}`
 
-      const { error: uploadError } = await supabase.storage.from("products").upload(filePath, file)
+      // Upload to 'images' bucket instead of 'products'
+      const { error: uploadError } = await supabase.storage.from("images").upload(filePath, file)
 
       if (uploadError) throw uploadError
 
       const {
         data: { publicUrl },
-      } = supabase.storage.from("products").getPublicUrl(filePath)
+      } = supabase.storage.from("images").getPublicUrl(filePath)
 
       setProductData({ ...productData, image_url: publicUrl })
       toast.success("Rasm muvaffaqiyatli yuklandi")

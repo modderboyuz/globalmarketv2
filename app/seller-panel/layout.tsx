@@ -141,7 +141,7 @@ export default function SellerPanelLayout({ children }: SellerLayoutProps) {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Mobile Header */}
-      <div className="lg:hidden bg-white border-b border-gray-200 px-4 py-3">
+      <div className="lg:hidden bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-50">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(true)}>
@@ -161,7 +161,7 @@ export default function SellerPanelLayout({ children }: SellerLayoutProps) {
         <div
           className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-0 ${
             sidebarOpen ? "translate-x-0" : "-translate-x-full"
-          }`}
+          } ${window.innerWidth < 1024 ? "mt-[57px]" : ""}`}
         >
           <div className="flex flex-col h-full">
             {/* Sidebar Header */}
@@ -205,7 +205,7 @@ export default function SellerPanelLayout({ children }: SellerLayoutProps) {
             </div>
 
             {/* Navigation */}
-            <nav className="flex-1 p-4">
+            <nav className="flex-1 p-4 overflow-y-auto">
               <ul className="space-y-2">
                 {sidebarItems.map((item) => {
                   const isActive = pathname === item.href
