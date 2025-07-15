@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -74,8 +74,6 @@ interface Application {
     product_type?: string
     delivery_price?: number
     stock_quantity?: number
-    // Add is_approved field if it exists in your product_applications JSONB or table
-    // is_approved?: boolean;
   }
   // Contact message fields
   name?: string
@@ -147,6 +145,7 @@ export default function AdminApplicationsPage() {
   const fetchApplications = async () => {
     setLoading(true)
     try {
+      // Fetch seller applications
       const { data: sellerApps, error: sellerError } = await supabase
         .from("seller_applications")
         .select(`
@@ -159,6 +158,7 @@ export default function AdminApplicationsPage() {
 
       if (sellerError) throw sellerError
 
+      // Fetch product applications
       const { data: productApps, error: productError } = await supabase
         .from("product_applications")
         .select(`
@@ -171,6 +171,7 @@ export default function AdminApplicationsPage() {
 
       if (productError) throw productError
 
+      // Fetch complaints
       const { data: complaints, error: complaintsError } = await supabase
         .from("complaints")
         .select(`
@@ -189,6 +190,18 @@ export default function AdminApplicationsPage() {
 
       if (complaintsError) throw complaintsError
 
+      // Fetch contact messages
+      const { data: contactMessages, error: contactError } = await supabase
+        .from("contact_messages")
+        .select(`
+          id, name, email, phone, subject, message, status, admin_response, created_at, updated_at,
+          users (id, full_name, email, phone, username)
+        `)
+        .order("created_at", { ascending: false }) // Sort by creation date
+
+      if (contactError) throw contactError
+
+      // Combine all data with type identifier
       const allApps: Application[] = [
         ...(sellerApps || []).map((app: any) => ({ ...app, type: "seller", users: app.users || null })),
         ...(productApps || []).map((app: any) => ({ ...app, type: "product", users: app.users || null })),
@@ -200,14 +213,35 @@ export default function AdminApplicationsPage() {
           users: app.users || null,
           orders: app.orders || null,
         })),
+        ...(contactMessages || []).map((msg: any) => ({ // Map contact messages
+          ...msg,
+          type: "contact",
+          status: msg.status || "pending",
+          admin_response: msg.admin_response || null,
+          // Combine user and message data if user is logged in
+          users: msg.user_id ? {
+            id: msg.user_id,
+            full_name: msg.full_name || msg.name,
+            email: msg.email,
+            phone: msg.phone,
+            username: msg.users?.username // Assuming users join provides username
+            // Other user fields might be missing if not joined correctly
+          } : null,
+          name: msg.name, // Keep direct fields for anonymous messages
+          email: msg.email,
+          phone: msg.phone,
+          subject: msg.subject,
+          message: msg.message,
+        })),
       ]
 
+      // Sort all combined applications by created_at
       allApps.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
       setApplications(allApps)
       calculateStats(allApps)
     } catch (error: any) {
-      console.error("Error fetching applications directly from Supabase:", error)
+      console.error("Error fetching applications directly from Supabase:", error.message)
       toast.error(`Arizalarni olishda xatolik: ${error.message}`)
     } finally {
       setLoading(false)
@@ -220,6 +254,7 @@ export default function AdminApplicationsPage() {
       pending: appsData.filter((a) => a.status === "pending").length,
       approved: appsData.filter((a) => a.status === "approved" || a.status === "approved_verified").length,
       rejected: appsData.filter((a) => a.status === "rejected").length,
+      // Add 'resolved' for complaints if needed in stats
     }
     setStats(stats)
   }
@@ -274,15 +309,16 @@ export default function AdminApplicationsPage() {
           tableName = "product_applications"
           updateData.status = action === "approve" ? "approved" : action === "reject" ? "rejected" : action
           updateData.admin_notes = actionNotes
-          // Agar product_applications jadvalida is_approved ustuni bo'lsa va uni true qilish kerak bo'lsa:
-          // Agar sizning product_applications jadvalingizda is_approved nomli ustun bo'lsa, uni shu yerda belgilang.
-          // Masalan: updateData.is_approved = true;
-          // Agar faqat status "approved" bo'lsa kifoya qilsa, bu qism keraksiz.
           break
         case "complaint":
           tableName = "complaints"
-          updateData.status = action === "resolve" ? "resolved" : action === "reject" ? "rejected" : action
-          updateData.admin_response = actionNotes
+          updateData.status = action === "resolve" ? "resolved" : action === "reject" ? "stopped" : action // Use 'stopped' for reject
+          updateData.admin_response = actionNotes // For complaints, notes go to admin_response
+          break
+        case "contact": // Handle contact messages
+          tableName = "contact_messages"
+          updateData.status = action === "approve" ? "completed" : action === "reject" ? "stopped" : action
+          updateData.admin_response = actionNotes // For contact messages, notes go to admin_response
           break
         default:
           throw new Error("Noto'g'ri application type")
@@ -309,7 +345,7 @@ export default function AdminApplicationsPage() {
           brand: selectedApplication.product_data.brand || null,
           price: selectedApplication.product_data.price,
           description: selectedApplication.product_data.description || null,
-          image_url: selectedApplication.product_data.image_url || null, // product_data dan image_url ni olish
+          image_url: selectedApplication.product_data.image_url || null,
           seller_id: selectedApplication.user_id || selectedApplication.product_data.seller_id || null,
           category_id: selectedApplication.product_data.category_id || null,
           has_delivery: selectedApplication.product_data.has_delivery || false,
@@ -318,25 +354,19 @@ export default function AdminApplicationsPage() {
           stock_quantity: selectedApplication.product_data.stock_quantity || 0,
         }
 
-        // Sanitize seller_id before insertion
         if (!productToInsert.seller_id) {
-            toast.warn("Mahsulotni qo'shish uchun sotuvchi ID'si topilmadi. Mahsulot yaratilmadi.")
+          toast.warn("Mahsulotni qo'shish uchun sotuvchi ID'si topilmadi. Mahsulot yaratilmadi.")
         } else {
-            const { data: newProduct, error: productInsertError } = await supabase
-              .from("products")
-              .insert([productToInsert])
-              .select()
-              .single()
+          const { data: newProduct, error: productInsertError } = await supabase
+            .from("products")
+            .insert([productToInsert])
+            .select()
+            .single()
 
-            if (productInsertError) {
-              console.error("Error inserting product:", productInsertError)
-              // It's crucial to decide what happens if product insertion fails.
-              // Ideally, we'd revert the application status change here.
-              // For simplicity, we're just throwing an error which will be caught.
-              throw productInsertError
-            }
-            // Optionally, you can use the 'newProduct' data if needed.
-            // toast.success(`Mahsulot "${productToInsert.name}" muvaffaqiyatli yaratildi.`);
+          if (productInsertError) {
+            console.error("Error inserting product:", productInsertError)
+            throw productInsertError
+          }
         }
       }
 
@@ -352,12 +382,11 @@ export default function AdminApplicationsPage() {
           .then(({ error: userUpdateError }) => {
             if (userUpdateError) {
               console.error("Error updating user status:", userUpdateError)
-              // Handle user update error
             }
           })
       }
 
-      toast.success(`Ariza muvaffaqiyatli ${action === "approve" ? "tasdiqlandi" : action === "reject" ? "rad etildi" : action === "resolve" ? "hal qilindi" : action}.`)
+      toast.success(`Ariza muvaffaqiyatli ${action === "approve" ? "tasdiqlandi" : action === "reject" ? "rad etildi" : action === "resolve" ? "hal qilindi" : action === "completed" ? "bajarildi" : action === "stopped" ? "to'xtatildi" : action}.`)
       await fetchApplications()
       setShowActionDialog(false)
       setSelectedApplication(null)
@@ -388,8 +417,8 @@ export default function AdminApplicationsPage() {
         ...filteredApplications.map((app) =>
           [
             app.id.slice(-8),
-            app.type === "seller" ? "Sotuvchi" : app.type === "product" ? "Mahsulot" : "Murojaat",
-            app.status === "pending" ? "Kutilmoqda" : app.status === "approved" || app.status === "approved_verified" ? "Tasdiqlangan" : app.status === "resolved" ? "Hal qilingan" : "Rad etilgan",
+            app.type === "seller" ? "Sotuvchi" : app.type === "product" ? "Mahsulot" : app.type === "complaint" ? "Shikoyat" : "Murojaat",
+            app.status === "pending" ? "Kutilmoqda" : app.status === "approved" || app.status === "approved_verified" ? "Tasdiqlangan" : app.status === "resolved" ? "Hal qilingan" : app.status === "stopped" ? "To'xtatilgan" : "Rad etilgan",
             app.users?.full_name || app.name || "Noma'lum",
             app.users?.email || app.email || "Noma'lum",
             app.users?.phone || app.phone || "Noma'lum",
@@ -446,6 +475,13 @@ export default function AdminApplicationsPage() {
             Hal qilingan
           </Badge>
         )
+      case "stopped": // For rejected contact messages or complaints
+        return (
+          <Badge variant="outline" className="bg-gray-100 text-gray-700">
+            <XCircle className="h-3 w-3 mr-1" />
+            To'xtatilgan
+          </Badge>
+        )
       default:
         return <Badge variant="outline">{status}</Badge>
     }
@@ -470,6 +506,8 @@ export default function AdminApplicationsPage() {
         return "Sotuvchi arizasi"
       case "product":
         return "Mahsulot arizasi"
+      case "complaint":
+        return "Shikoyat"
       case "contact":
         return "Murojaat"
       default:
@@ -591,6 +629,7 @@ export default function AdminApplicationsPage() {
                 <SelectItem value="all">Barcha turlar</SelectItem>
                 <SelectItem value="seller">Sotuvchi arizalari</SelectItem>
                 <SelectItem value="product">Mahsulot arizalari</SelectItem>
+                <SelectItem value="complaint">Shikoyatlar</SelectItem>
                 <SelectItem value="contact">Murojaatlar</SelectItem>
               </SelectContent>
             </Select>
@@ -604,6 +643,8 @@ export default function AdminApplicationsPage() {
                 <SelectItem value="approved">Tasdiqlangan</SelectItem>
                 <SelectItem value="rejected">Rad etilgan</SelectItem>
                 <SelectItem value="resolved">Hal qilingan</SelectItem>
+                <SelectItem value="stopped">To'xtatilgan</SelectItem>
+                <SelectItem value="completed">Bajarilgan</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -694,7 +735,7 @@ export default function AdminApplicationsPage() {
 
                     {(application.status === "pending" || (application.type === "complaint" && application.status === "pending")) && (
                       <div className="flex gap-2 flex-wrap mt-3">
-                        {application.type !== "complaint" && (
+                        {application.type !== "complaint" && application.type !== "contact" && (
                           <Button
                             size="sm"
                             className="bg-green-600 hover:bg-green-700"
@@ -724,15 +765,38 @@ export default function AdminApplicationsPage() {
                             Hal qilish
                           </Button>
                         )}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="border-red-200 text-red-600 hover:bg-red-50"
-                          onClick={() => openActionDialog(application, "reject")}
-                        >
-                          <XCircle className="h-4 w-4 mr-2" />
-                          Rad etish
-                        </Button>
+                        {application.type === "contact" && ( // Contact message actions
+                          <>
+                            <Button
+                              size="sm"
+                              className="bg-green-600 hover:bg-green-700"
+                              onClick={() => openActionDialog(application, "completed")}
+                            >
+                              <CheckCircle className="h-4 w-4 mr-2" />
+                              Bajarildi
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="border-red-200 text-red-600 hover:bg-red-50"
+                              onClick={() => openActionDialog(application, "stopped")}
+                            >
+                              <XCircle className="h-4 w-4 mr-2" />
+                              To'xtatish
+                            </Button>
+                          </>
+                        )}
+                        {application.type !== "contact" && ( // Reject action for non-contact types
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-red-200 text-red-600 hover:bg-red-50"
+                            onClick={() => openActionDialog(application, "reject")}
+                          >
+                            <XCircle className="h-4 w-4 mr-2" />
+                            Rad etish
+                          </Button>
+                        )}
                       </div>
                     )}
 
@@ -746,6 +810,12 @@ export default function AdminApplicationsPage() {
                       <div className="mt-4 p-3 bg-blue-50 rounded-lg">
                         <p className="text-sm font-medium text-blue-700 mb-1">Admin javobi:</p>
                         <p className="text-sm text-blue-600">{application.admin_response}</p>
+                      </div>
+                    )}
+                    {application.admin_response && application.type === "contact" && (
+                      <div className="mt-4 p-3 bg-green-50 rounded-lg">
+                        <p className="text-sm font-medium text-green-700 mb-1">Admin javobi:</p>
+                        <p className="text-sm text-green-600">{application.admin_response}</p>
                       </div>
                     )}
                   </CardContent>
@@ -998,6 +1068,8 @@ export default function AdminApplicationsPage() {
               {actionType === "approve_verified" && "Arizani tasdiqlash va Verified qilish"}
               {actionType === "reject" && "Arizani rad etish"}
               {actionType === "resolve" && "Murojaatni hal qilish"}
+              {actionType === "completed" && "Ishni tugallash"}
+              {actionType === "stopped" && "Amalni to'xtatish"}
             </DialogTitle>
             <DialogDescription>
               {selectedApplication && `Ariza #${selectedApplication.id.slice(-8)} uchun amalni bajaring.`}
@@ -1007,13 +1079,15 @@ export default function AdminApplicationsPage() {
           <div className="space-y-4">
             <div>
               <Label htmlFor="actionNotes">
-                {actionType === "reject" ? "Rad etish sababi" : actionType === "resolve" ? "Admin javobi" : "Qo'shimcha eslatma"} (ixtiyoriy)
+                {actionType === "reject" ? "Rad etish sababi" : actionType === "resolve" ? "Admin javobi" : actionType === "stopped" ? "To'xtatish sababi" : actionType === "completed" ? "Bajarilgani haqida eslatma" : "Qo'shimcha eslatma"} (ixtiyoriy)
               </Label>
               <Textarea
                 id="actionNotes"
                 placeholder={
                   actionType === "reject" ? "Arizani nima uchun rad etyapsiz..." :
                   actionType === "resolve" ? "Admin javobingizni kiriting..." :
+                  actionType === "stopped" ? "Nima uchun to'xtatildi..." :
+                  actionType === "completed" ? "Qanday bajarildi..." :
                   "Qo'shimcha ma'lumot yoki eslatmalar..."
                 }
                 value={actionNotes}
@@ -1032,6 +1106,8 @@ export default function AdminApplicationsPage() {
               {actionType === "approve_verified" && "Tasdiqlash va Verified qilish"}
               {actionType === "reject" && "Rad etish"}
               {actionType === "resolve" && "Hal qilish"}
+              {actionType === "completed" && "Tasdiqlash"}
+              {actionType === "stopped" && "To'xtatish"}
             </Button>
           </DialogFooter>
         </DialogContent>
