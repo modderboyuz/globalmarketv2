@@ -178,10 +178,21 @@ export default function AdminGlobalMarketOrdersPage() {
 
   const updateOrderStatus = async (orderId: string, action: string, notes?: string, address?: string) => {
     try {
+      // Get the current session token
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+
+      if (!session?.access_token) {
+        toast.error("Avtorizatsiya xatoligi")
+        return
+      }
+
       const response = await fetch("/api/orders", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
           orderId,
@@ -476,10 +487,10 @@ export default function AdminGlobalMarketOrdersPage() {
                         {canTakeAction(order, "agree") && (
                           <div className="space-y-2">
                             <Button
-                              onClick={() => {
+                              onClick={async () => {
                                 setSelectedOrder(order)
                                 setPickupAddress(order.address)
-                                updateOrderStatus(order.id, "agree", "", order.address)
+                                await updateOrderStatus(order.id, "agree", "", order.address)
                               }}
                               className="w-full bg-green-600 hover:bg-green-700"
                             >
@@ -487,9 +498,9 @@ export default function AdminGlobalMarketOrdersPage() {
                               Qabul qilish
                             </Button>
                             <Button
-                              onClick={() => {
+                              onClick={async () => {
                                 setSelectedOrder(order)
-                                updateOrderStatus(order.id, "reject", "Buyurtma rad etildi")
+                                await updateOrderStatus(order.id, "reject", "Buyurtma rad etildi")
                               }}
                               variant="outline"
                               className="w-full border-red-200 text-red-600 hover:bg-red-50 bg-transparent"
@@ -503,8 +514,8 @@ export default function AdminGlobalMarketOrdersPage() {
                         {canTakeAction(order, "product_given") && (
                           <div className="space-y-2">
                             <Button
-                              onClick={() => {
-                                updateOrderStatus(order.id, "product_given", "Mahsulot berildi")
+                              onClick={async () => {
+                                await updateOrderStatus(order.id, "product_given", "Mahsulot berildi")
                               }}
                               className="w-full bg-green-600 hover:bg-green-700"
                             >
@@ -512,8 +523,8 @@ export default function AdminGlobalMarketOrdersPage() {
                               Mahsulot berdim
                             </Button>
                             <Button
-                              onClick={() => {
-                                updateOrderStatus(order.id, "product_not_given", "Mahsulot berilmadi")
+                              onClick={async () => {
+                                await updateOrderStatus(order.id, "product_not_given", "Mahsulot berilmadi")
                               }}
                               variant="outline"
                               className="w-full border-red-200 text-red-600 hover:bg-red-50 bg-transparent"

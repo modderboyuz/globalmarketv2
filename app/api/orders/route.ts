@@ -237,8 +237,19 @@ export async function PUT(request: NextRequest) {
       )
     }
 
-    // Get current order
-    const { data: order, error: orderError } = await supabase.from("orders").select("*").eq("id", orderId).single()
+    // Get current order with product info
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .select(`
+        *,
+        products (
+          id,
+          seller_id,
+          order_count
+        )
+      `)
+      .eq("id", orderId)
+      .single()
 
     if (orderError || !order) {
       return NextResponse.json(
@@ -250,9 +261,27 @@ export async function PUT(request: NextRequest) {
       )
     }
 
+    // Check if user is the seller or admin
+    const { data: userData } = await supabase.from("users").select("is_admin").eq("id", user.id).single()
+
+    const isAdmin = userData?.is_admin
+    const isSeller = order.products?.seller_id === user.id
+
+    if (!isAdmin && !isSeller) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Sizda bu buyurtmani o'zgartirish huquqi yo'q",
+        },
+        { status: 403 },
+      )
+    }
+
     const updateData: any = {
       updated_at: new Date().toISOString(),
     }
+
+    let shouldIncrementOrderCount = false
 
     switch (action) {
       case "agree":
@@ -277,6 +306,7 @@ export async function PUT(request: NextRequest) {
         updateData.is_client_claimed = true
         updateData.status = "completed"
         updateData.seller_notes = notes
+        shouldIncrementOrderCount = true // Only increment when order is completed
         break
       case "product_not_given":
         updateData.is_client_claimed = false
@@ -292,10 +322,26 @@ export async function PUT(request: NextRequest) {
         )
     }
 
+    // Start a transaction to update both order and product
     const { data, error } = await supabase.from("orders").update(updateData).eq("id", orderId).select().single()
 
     if (error) {
       throw error
+    }
+
+    // If order is completed, increment product order_count
+    if (shouldIncrementOrderCount && order.products?.id) {
+      const { error: productError } = await supabase
+        .from("products")
+        .update({
+          order_count: (order.products.order_count || 0) + order.quantity,
+        })
+        .eq("id", order.products.id)
+
+      if (productError) {
+        console.error("Error updating product order_count:", productError)
+        // Don't fail the whole operation, just log the error
+      }
     }
 
     return NextResponse.json({
