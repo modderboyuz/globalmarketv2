@@ -1,14 +1,14 @@
 "use client"
 
-import type React from "react"
-
-import { useState, useEffect, Fragment } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Dialog,
   DialogContent,
@@ -17,7 +17,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Textarea } from "@/components/ui/textarea"
 import {
   FileText,
   Search,
@@ -26,45 +25,43 @@ import {
   XCircle,
   Clock,
   Download,
-  UserIcon,
+  User,
   Package,
   MessageSquare,
   Phone,
+  RefreshCw,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 
-/* -------------------------------------------------------------------------- */
-/*                                   Types                                    */
-/* -------------------------------------------------------------------------- */
+interface User {
+  id: string
+  full_name: string
+  email: string
+  phone: string
+  company_name?: string
+  is_verified_seller: boolean
+  is_admin: boolean
+  created_at: string
+  last_sign_in_at: string
+}
 
 interface Application {
   id: string
-  type: "seller" | "product" | "contact" | "complaint"
-  status: "pending" | "approved" | "approved_verified" | "rejected" | "responded" | "resolved"
+  type: string
+  status: string
   created_at: string
   updated_at: string
   reviewed_at?: string
   admin_notes?: string
-  admin_response?: string
   user_id?: string
-  users?: {
-    id: string
-    full_name: string
-    email: string
-    phone: string
-    company_name?: string
-    is_verified_seller: boolean
-    is_admin: boolean
-    created_at: string
-    last_sign_in_at: string
-  } | null
-  /* Seller */
+  users?: User | null
+  // Seller application fields
   company_name?: string
   business_type?: string
   experience?: string
   description?: string
-  /* Product */
+  // Product application fields
   product_data?: {
     name: string
     brand?: string
@@ -77,57 +74,32 @@ interface Application {
     product_type?: string
     delivery_price?: number
     stock_quantity?: number
+    // Add is_approved field if it exists in your product_applications JSONB or table
+    // is_approved?: boolean;
   }
-  /* Contact / Complaint */
+  // Contact message fields
   name?: string
   email?: string
   phone?: string
   subject?: string
   message?: string
-  full_name?: string
-  message_type?: string
-  book_request_title?: string
-  book_request_author?: string
+  admin_response?: string
 }
-
-/* -------------------------------------------------------------------------- */
-/*                           Component: AdminApplications                     */
-/* -------------------------------------------------------------------------- */
 
 export default function AdminApplicationsPage() {
   const router = useRouter()
-
-  /* ------------------------------ State ----------------------------------- */
-  const [currentUser, setCurrentUser] = useState<{
-    id: string
-    full_name: string
-    email: string
-    phone: string
-    company_name?: string
-    is_verified_seller: boolean
-    is_admin: boolean
-    created_at: string
-    last_sign_in_at: string
-  } | null>(null)
+  const [currentUser, setCurrentUser] = useState<any>(null)
   const [applications, setApplications] = useState<Application[]>([])
   const [filteredApplications, setFilteredApplications] = useState<Application[]>([])
   const [loading, setLoading] = useState(true)
-
   const [searchQuery, setSearchQuery] = useState("")
-  const [typeFilter, setTypeFilter] = useState<"all" | Application["type"]>("all")
-  const [statusFilter, setStatusFilter] = useState<"all" | Application["status"]>("all")
-
+  const [typeFilter, setTypeFilter] = useState("all")
+  const [statusFilter, setStatusFilter] = useState("all")
   const [selectedApplication, setSelectedApplication] = useState<Application | null>(null)
   const [showDetailsDialog, setShowDetailsDialog] = useState(false)
-
-  /* Action dialog */
   const [showActionDialog, setShowActionDialog] = useState(false)
-  const [actionType, setActionType] = useState<"approve" | "approve_verified" | "reject" | "respond" | "resolve" | "">(
-    "",
-  )
+  const [actionType, setActionType] = useState("")
   const [actionNotes, setActionNotes] = useState("")
-
-  /* Stats */
   const [stats, setStats] = useState({
     total: 0,
     pending: 0,
@@ -135,9 +107,6 @@ export default function AdminApplicationsPage() {
     rejected: 0,
   })
 
-  /* ------------------------------------------------------------------------ */
-  /*                         Check admin & fetch apps                         */
-  /* ------------------------------------------------------------------------ */
   useEffect(() => {
     const checkAdminAccess = async () => {
       try {
@@ -150,24 +119,22 @@ export default function AdminApplicationsPage() {
           return
         }
 
-        const { data: userData, error } = await supabase
+        const { data: userData, error: userError } = await supabase
           .from("users")
-          .select(
-            "id, full_name, email, phone, company_name, is_verified_seller, is_admin, created_at, last_sign_in_at",
-          )
+          .select("id, full_name, email, phone, company_name, is_verified_seller, is_admin, created_at, last_sign_in_at")
           .eq("id", user.id)
           .single()
 
-        if (error || !userData || !userData.is_admin) {
-          toast.error("Sizda admin huquqi yo‘q")
+        if (userError || !userData || !userData.is_admin) {
+          toast.error("Sizda admin huquqi yo'q")
           router.push("/")
           return
         }
 
         setCurrentUser(userData)
         await fetchApplications()
-      } catch (err) {
-        console.error("Error checking admin access:", err)
+      } catch (error) {
+        console.error("Error checking admin access:", error)
         router.push("/")
       } finally {
         setLoading(false)
@@ -175,80 +142,280 @@ export default function AdminApplicationsPage() {
     }
 
     checkAdminAccess()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [router])
 
-  /* --------------------------- Fetch Applications ------------------------- */
   const fetchApplications = async () => {
     setLoading(true)
     try {
-      const session = await supabase.auth.getSession()
-      const token = session.data.session?.access_token
-      if (!token) {
-        toast.error("Tizimga qayta kiring")
-        return
-      }
+      const { data: sellerApps, error: sellerError } = await supabase
+        .from("seller_applications")
+        .select(`
+          *,
+          users:users!seller_applications_user_id_fkey (
+            id, full_name, email, phone, username, company_name, is_verified_seller, is_admin, created_at, last_sign_in_at
+          )
+        `)
+        .order("created_at", { ascending: false })
 
-      const res = await fetch("/api/applications", {
-        headers: { Authorization: `Bearer ${token}` },
-      })
+      if (sellerError) throw sellerError
 
-      const data = await res.json()
-      if (data.success) {
-        setApplications(data.applications || [])
-        calculateStats(data.applications || [])
-      } else {
-        toast.error(data.error || "Arizalarni olishda xatolik")
-      }
-    } catch (err) {
-      console.error(err)
-      toast.error("Arizalarni olishda xatolik")
+      const { data: productApps, error: productError } = await supabase
+        .from("product_applications")
+        .select(`
+          *,
+          users:users!product_applications_user_id_fkey (
+            id, full_name, email, phone, username, company_name, is_verified_seller, is_admin, created_at, last_sign_in_at
+          )
+        `)
+        .order("created_at", { ascending: false })
+
+      if (productError) throw productError
+
+      const { data: complaints, error: complaintsError } = await supabase
+        .from("complaints")
+        .select(`
+          *,
+          users:users!complaints_user_id_fkey (
+            id, full_name, email, phone, username, company_name, is_verified_seller, is_admin, created_at, last_sign_in_at
+          ),
+          orders (
+            id,
+            products (
+              name
+            )
+          )
+        `)
+        .order("created_at", { ascending: false })
+
+      if (complaintsError) throw complaintsError
+
+      const allApps: Application[] = [
+        ...(sellerApps || []).map((app: any) => ({ ...app, type: "seller", users: app.users || null })),
+        ...(productApps || []).map((app: any) => ({ ...app, type: "product", users: app.users || null })),
+        ...(complaints || []).map((app: any) => ({
+          ...app,
+          type: "complaint",
+          status: app.status || "pending",
+          admin_response: app.admin_response || null,
+          users: app.users || null,
+          orders: app.orders || null,
+        })),
+      ]
+
+      allApps.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
+      setApplications(allApps)
+      calculateStats(allApps)
+    } catch (error: any) {
+      console.error("Error fetching applications directly from Supabase:", error)
+      toast.error(`Arizalarni olishda xatolik: ${error.message}`)
     } finally {
       setLoading(false)
     }
   }
 
-  const calculateStats = (apps: Application[]) => {
-    setStats({
-      total: apps.length,
-      pending: apps.filter((a) => a.status === "pending").length,
-      approved: apps.filter((a) => ["approved", "approved_verified", "responded"].includes(a.status)).length,
-      rejected: apps.filter((a) => a.status === "rejected").length,
-    })
+  const calculateStats = (appsData: Application[]) => {
+    const stats = {
+      total: appsData.length,
+      pending: appsData.filter((a) => a.status === "pending").length,
+      approved: appsData.filter((a) => a.status === "approved" || a.status === "approved_verified").length,
+      rejected: appsData.filter((a) => a.status === "rejected").length,
+    }
+    setStats(stats)
   }
 
-  /* ------------------------------- Filters -------------------------------- */
   useEffect(() => {
-    let filtered = [...applications]
+    let filtered = applications
 
     if (searchQuery) {
-      const q = searchQuery.toLowerCase()
+      const lowerCaseSearch = searchQuery.toLowerCase()
       filtered = filtered.filter(
-        (a) =>
-          a.id.toLowerCase().includes(q) ||
-          a.users?.full_name?.toLowerCase().includes(q) ||
-          a.users?.email?.toLowerCase().includes(q) ||
-          a.company_name?.toLowerCase().includes(q) ||
-          a.name?.toLowerCase().includes(q) ||
-          a.full_name?.toLowerCase().includes(q) ||
-          a.subject?.toLowerCase().includes(q) ||
-          a.message?.toLowerCase().includes(q) ||
-          a.users?.phone?.includes(searchQuery) ||
-          a.phone?.includes(searchQuery),
+        (app) =>
+          app.id.toLowerCase().includes(lowerCaseSearch) ||
+          app.users?.full_name?.toLowerCase().includes(lowerCaseSearch) ||
+          app.users?.email?.toLowerCase().includes(lowerCaseSearch) ||
+          app.company_name?.toLowerCase().includes(lowerCaseSearch) ||
+          app.name?.toLowerCase().includes(lowerCaseSearch) ||
+          app.subject?.toLowerCase().includes(lowerCaseSearch) ||
+          app.message?.toLowerCase().includes(lowerCaseSearch) ||
+          app.users?.phone?.includes(searchQuery)
       )
     }
 
-    if (typeFilter !== "all") filtered = filtered.filter((a) => a.type === typeFilter)
-    if (statusFilter !== "all") filtered = filtered.filter((a) => a.status === statusFilter)
+    if (typeFilter !== "all") {
+      filtered = filtered.filter((app) => app.type === typeFilter)
+    }
+
+    if (statusFilter !== "all") {
+      filtered = filtered.filter((app) => app.status === statusFilter)
+    }
 
     setFilteredApplications(filtered)
   }, [applications, searchQuery, typeFilter, statusFilter])
 
-  /* ------------------------------------------------------------------------ */
-  /*                             Helper Functions                             */
-  /* ------------------------------------------------------------------------ */
+  const handleAction = async (action: string) => {
+    if (!selectedApplication || !currentUser) return
 
-  const getStatusBadge = (status: Application["status"]) => {
+    setLoading(true)
+    try {
+      let updateData: any = {
+        updated_at: new Date().toISOString(),
+        reviewed_at: new Date().toISOString(),
+      }
+
+      let tableName = ""
+      switch (selectedApplication.type) {
+        case "seller":
+          tableName = "seller_applications"
+          updateData.status = action === "approve" ? "approved" : action === "reject" ? "rejected" : action
+          updateData.admin_notes = actionNotes
+          break
+        case "product":
+          tableName = "product_applications"
+          updateData.status = action === "approve" ? "approved" : action === "reject" ? "rejected" : action
+          updateData.admin_notes = actionNotes
+          // Agar product_applications jadvalida is_approved ustuni bo'lsa va uni true qilish kerak bo'lsa:
+          // Agar sizning product_applications jadvalingizda is_approved nomli ustun bo'lsa, uni shu yerda belgilang.
+          // Masalan: updateData.is_approved = true;
+          // Agar faqat status "approved" bo'lsa kifoya qilsa, bu qism keraksiz.
+          break
+        case "complaint":
+          tableName = "complaints"
+          updateData.status = action === "resolve" ? "resolved" : action === "reject" ? "rejected" : action
+          updateData.admin_response = actionNotes
+          break
+        default:
+          throw new Error("Noto'g'ri application type")
+      }
+
+      // 1. Update the application status first
+      const { data: updatedApp, error: appUpdateError } = await supabase
+        .from(tableName)
+        .update(updateData)
+        .eq("id", selectedApplication.id)
+        .select()
+        .single()
+
+      if (appUpdateError) throw appUpdateError
+
+      // 2. If product application is approved, copy data to 'products' table
+      if (selectedApplication.type === "product" && action === "approve") {
+        if (!selectedApplication.product_data) {
+          throw new Error("Product data is missing for approval.")
+        }
+
+        const productToInsert = {
+          name: selectedApplication.product_data.name,
+          brand: selectedApplication.product_data.brand || null,
+          price: selectedApplication.product_data.price,
+          description: selectedApplication.product_data.description || null,
+          image_url: selectedApplication.product_data.image_url || null, // product_data dan image_url ni olish
+          seller_id: selectedApplication.user_id || selectedApplication.product_data.seller_id || null,
+          category_id: selectedApplication.product_data.category_id || null,
+          has_delivery: selectedApplication.product_data.has_delivery || false,
+          product_type: selectedApplication.product_data.product_type || "physical",
+          delivery_price: selectedApplication.product_data.delivery_price || 0,
+          stock_quantity: selectedApplication.product_data.stock_quantity || 0,
+        }
+
+        // Sanitize seller_id before insertion
+        if (!productToInsert.seller_id) {
+            toast.warn("Mahsulotni qo'shish uchun sotuvchi ID'si topilmadi. Mahsulot yaratilmadi.")
+        } else {
+            const { data: newProduct, error: productInsertError } = await supabase
+              .from("products")
+              .insert([productToInsert])
+              .select()
+              .single()
+
+            if (productInsertError) {
+              console.error("Error inserting product:", productInsertError)
+              // It's crucial to decide what happens if product insertion fails.
+              // Ideally, we'd revert the application status change here.
+              // For simplicity, we're just throwing an error which will be caught.
+              throw productInsertError
+            }
+            // Optionally, you can use the 'newProduct' data if needed.
+            // toast.success(`Mahsulot "${productToInsert.name}" muvaffaqiyatli yaratildi.`);
+        }
+      }
+
+      // 3. If approving seller application, update user's seller status
+      if (selectedApplication.type === "seller" && (action === "approve" || action === "approve_verified")) {
+        await supabase
+          .from("users")
+          .update({
+            is_seller: true,
+            is_verified_seller: true,
+          })
+          .eq("id", selectedApplication.user_id!)
+          .then(({ error: userUpdateError }) => {
+            if (userUpdateError) {
+              console.error("Error updating user status:", userUpdateError)
+              // Handle user update error
+            }
+          })
+      }
+
+      toast.success(`Ariza muvaffaqiyatli ${action === "approve" ? "tasdiqlandi" : action === "reject" ? "rad etildi" : action === "resolve" ? "hal qilindi" : action}.`)
+      await fetchApplications()
+      setShowActionDialog(false)
+      setSelectedApplication(null)
+      setActionNotes("")
+    } catch (error: any) {
+      console.error("Error handling application action:", error)
+      toast.error(`Xatolik yuz berdi: ${error.message}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const openActionDialog = (application: Application, action: string) => {
+    setSelectedApplication(application)
+    setActionType(action)
+    setActionNotes("")
+    setShowActionDialog(true)
+  }
+
+  const exportApplications = async () => {
+    if (!filteredApplications.length) {
+      toast.warn("Eksport qilish uchun hech qanday ariza topilmadi.")
+      return
+    }
+    try {
+      const csvContent = [
+        ["ID", "Tur", "Holat", "Ariza beruvchi", "Email", "Telefon", "Sana", "Kompaniya/Mavzu", "Admin Eslatmasi"].join(","),
+        ...filteredApplications.map((app) =>
+          [
+            app.id.slice(-8),
+            app.type === "seller" ? "Sotuvchi" : app.type === "product" ? "Mahsulot" : "Murojaat",
+            app.status === "pending" ? "Kutilmoqda" : app.status === "approved" || app.status === "approved_verified" ? "Tasdiqlangan" : app.status === "resolved" ? "Hal qilingan" : "Rad etilgan",
+            app.users?.full_name || app.name || "Noma'lum",
+            app.users?.email || app.email || "Noma'lum",
+            app.users?.phone || app.phone || "Noma'lum",
+            new Date(app.created_at).toLocaleDateString(),
+            app.type === "seller" ? app.company_name || "" : app.type === "contact" ? app.subject || "" : "",
+            app.admin_notes || "",
+          ].join(","),
+        ),
+      ].join("\n")
+
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `applications-${new Date().toISOString().split("T")[0]}.csv`
+      a.click()
+      window.URL.revokeObjectURL(url)
+
+      toast.success("Arizalar ro'yxati eksport qilindi")
+    } catch (error) {
+      console.error("Error exporting applications:", error)
+      toast.error("Eksport qilishda xatolik")
+    }
+  }
+
+  const getStatusBadge = (status: string) => {
     switch (status) {
       case "pending":
         return (
@@ -259,15 +426,10 @@ export default function AdminApplicationsPage() {
         )
       case "approved":
       case "approved_verified":
-      case "responded":
         return (
           <Badge className="bg-green-100 text-green-800">
             <CheckCircle className="h-3 w-3 mr-1" />
-            {status === "approved_verified"
-              ? "Tasdiqlangan (Verified)"
-              : status === "responded"
-                ? "Javob berilgan"
-                : "Tasdiqlangan"}
+            {status === "approved_verified" ? "Tasdiqlangan (Verified)" : "Tasdiqlangan"}
           </Badge>
         )
       case "rejected":
@@ -289,21 +451,20 @@ export default function AdminApplicationsPage() {
     }
   }
 
-  const getTypeIcon = (type: Application["type"]) => {
+  const getTypeIcon = (type: string) => {
     switch (type) {
       case "seller":
-        return <UserIcon className="h-4 w-4" />
+        return <User className="h-4 w-4" />
       case "product":
         return <Package className="h-4 w-4" />
       case "contact":
-      case "complaint":
         return <MessageSquare className="h-4 w-4" />
       default:
         return <FileText className="h-4 w-4" />
     }
   }
 
-  const getTypeName = (type: Application["type"]) => {
+  const getTypeName = (type: string) => {
     switch (type) {
       case "seller":
         return "Sotuvchi arizasi"
@@ -311,167 +472,97 @@ export default function AdminApplicationsPage() {
         return "Mahsulot arizasi"
       case "contact":
         return "Murojaat"
-      case "complaint":
-        return "Shikoyat"
       default:
         return "Noma'lum"
     }
   }
 
-  const formatDate = (str?: string) => {
-    if (!str) return "Noma'lum sana"
-    try {
-      return new Date(str).toLocaleDateString("uz-UZ", {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    } catch {
-      return "Noto‘g‘ri sana"
-    }
+  const formatDate = (dateString: string) => {
+    if (!dateString) return "Noma'lum sana"
+    return new Date(dateString).toLocaleDateString("uz-UZ", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
   }
 
-  /* ------------------------------------------------------------------------ */
-  /*                           Action & Dialog Logic                          */
-  /* ------------------------------------------------------------------------ */
-
-  const openActionDialog = (
-    application: Application,
-    action: "approve" | "approve_verified" | "reject" | "respond" | "resolve",
-  ) => {
-    setSelectedApplication(application)
-    setActionType(action)
-    setActionNotes("")
-    setShowActionDialog(true)
+  const formatPhoneNumber = (phone?: string) => {
+    if (!phone) return null
+    if (phone.startsWith('+')) {
+      return `+${phone.substring(1, 4)} ${phone.substring(4, 7)} ${phone.substring(7, 9)} ${phone.substring(9, 11)} ${phone.substring(11)}`
+    }
+    return phone
   }
 
-  const handleAction = async () => {
-    if (!selectedApplication || !actionType) return
-    setLoading(true)
-    try {
-      const session = await supabase.auth.getSession()
-      const token = session.data.session?.access_token
-      if (!token) {
-        toast.error("Tizimga qayta kiring")
-        return
-      }
-
-      const res = await fetch("/api/applications", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          id: selectedApplication.id,
-          type: selectedApplication.type,
-          action: actionType,
-          notes: actionNotes,
-        }),
-      })
-
-      const data = await res.json()
-      if (data.success) {
-        toast.success(data.message || "Ariza yangilandi")
-        await fetchApplications()
-        setShowActionDialog(false)
-        setSelectedApplication(null)
-      } else {
-        toast.error(data.error || "Xatolik yuz berdi")
-      }
-    } catch (err) {
-      console.error(err)
-      toast.error("Xatolik yuz berdi")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  /* ------------------------------------------------------------------------ */
-  /*                               CSV Export                                 */
-  /* ------------------------------------------------------------------------ */
-
-  const exportApplications = async () => {
-    if (!filteredApplications.length) {
-      toast.warning("Eksport qilish uchun maʼlumot yo‘q")
-      return
-    }
-    try {
-      const session = await supabase.auth.getSession()
-      const token = session.data.session?.access_token
-      if (!token) {
-        toast.error("Tizimga qayta kiring")
-        return
-      }
-      const res = await fetch("/api/applications?export=csv", {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (res.ok) {
-        const blob = await res.blob()
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement("a")
-        a.href = url
-        a.download = `arizalar-${new Date().toISOString().split("T")[0]}.csv`
-        a.click()
-        URL.revokeObjectURL(url)
-        toast.success("CSV eksport qilindi")
-      } else {
-        toast.error("Eksport qilishda xatolik")
-      }
-    } catch (err) {
-      console.error(err)
-      toast.error("Eksport qilishda xatolik")
-    }
-  }
-
-  /* ------------------------------------------------------------------------ */
-  /*                                 Render                                   */
-  /* ------------------------------------------------------------------------ */
-
-  if (loading)
+  if (loading) {
     return (
-      <div className="p-4 lg:p-8 space-y-6">
+      <div className="space-y-6 p-4 lg:p-8">
         <div className="animate-pulse space-y-6">
-          <div className="h-8 bg-gray-200 rounded w-1/4"></div>
-          <div className="h-10 bg-gray-200 rounded-md w-full"></div>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {Array.from({ length: 4 }).map((_, i) => (
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="h-8 bg-gray-200 rounded w-1/4"></div>
+            <div className="h-10 w-full sm:w-auto bg-gray-200 rounded-md"></div>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6">
+            {[...Array(4)].map((_, i) => (
               <div key={i} className="h-24 bg-gray-200 rounded-2xl"></div>
+            ))}
+          </div>
+          <div className="space-y-4">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="h-32 bg-gray-200 rounded-2xl"></div>
             ))}
           </div>
         </div>
       </div>
     )
+  }
 
   return (
     <div className="space-y-6 p-4 lg:p-8">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl lg:text-3xl font-bold">Arizalar</h1>
+          <h1 className="text-2xl lg:text-3xl font-bold gradient-text">Arizalar</h1>
           <p className="text-gray-600 text-sm lg:text-base">Barcha arizalar va murojaatlar</p>
         </div>
         <Button onClick={exportApplications} variant="outline" className="w-full sm:w-auto bg-transparent">
           <Download className="h-4 w-4 mr-2" />
-          CSV yuklab olish
+          Excel yuklab olish
         </Button>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6">
-        <StatCard icon={<FileText className="h-6 w-6 text-blue-600" />} value={stats.total} label="Jami arizalar" />
-        <StatCard icon={<Clock className="h-6 w-6 text-yellow-600" />} value={stats.pending} label="Kutilmoqda" />
-        <StatCard
-          icon={<CheckCircle className="h-6 w-6 text-green-600" />}
-          value={stats.approved}
-          label="Tasdiqlangan"
-        />
-        <StatCard icon={<XCircle className="h-6 w-6 text-red-600" />} value={stats.rejected} label="Rad etilgan" />
+        <Card className="card-beautiful">
+          <CardContent className="p-3 lg:p-6 text-center">
+            <FileText className="h-6 w-6 lg:h-8 lg:w-8 text-blue-600 mx-auto mb-2" />
+            <div className="text-lg lg:text-2xl font-bold">{stats.total}</div>
+            <div className="text-xs lg:text-sm text-gray-600">Jami arizalar</div>
+          </CardContent>
+        </Card>
+        <Card className="card-beautiful">
+          <CardContent className="p-3 lg:p-6 text-center">
+            <Clock className="h-6 w-6 lg:h-8 lg:w-8 text-yellow-600 mx-auto mb-2" />
+            <div className="text-lg lg:text-2xl font-bold">{stats.pending}</div>
+            <div className="text-xs lg:text-sm text-gray-600">Kutilmoqda</div>
+          </CardContent>
+        </Card>
+        <Card className="card-beautiful">
+          <CardContent className="p-3 lg:p-6 text-center">
+            <CheckCircle className="h-6 w-6 lg:h-8 lg:w-8 text-green-600 mx-auto mb-2" />
+            <div className="text-lg lg:text-2xl font-bold">{stats.approved}</div>
+            <div className="text-xs lg:text-sm text-gray-600">Tasdiqlangan</div>
+          </CardContent>
+        </Card>
+        <Card className="card-beautiful">
+          <CardContent className="p-3 lg:p-6 text-center">
+            <XCircle className="h-6 w-6 lg:h-8 lg:w-8 text-red-600 mx-auto mb-2" />
+            <div className="text-lg lg:text-2xl font-bold">{stats.rejected}</div>
+            <div className="text-xs lg:text-sm text-gray-600">Rad etilgan</div>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Filters & Table */}
       <Card className="card-beautiful">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -479,33 +570,33 @@ export default function AdminApplicationsPage() {
             Arizalar ro'yxati
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-6">
-          {/* Filters */}
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="flex-1 min-w-[200px] relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input
-                placeholder="ID, ism, email, telefon..."
-                className="pl-10"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
+        <CardContent>
+          <div className="flex flex-col sm:flex-row gap-4 mb-6">
+            <div className="flex-1 min-w-[200px]">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                <Input
+                  placeholder="Ariza ID, ism, email, kompaniya, mavzu bo'yicha qidirish..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
             </div>
             <Select value={typeFilter} onValueChange={setTypeFilter}>
               <SelectTrigger className="w-full sm:w-48">
-                <SelectValue placeholder="Tur" />
+                <SelectValue placeholder="Tur bo'yicha" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Barcha turlar</SelectItem>
-                <SelectItem value="seller">Sotuvchi</SelectItem>
-                <SelectItem value="product">Mahsulot</SelectItem>
-                <SelectItem value="contact">Murojaat</SelectItem>
-                <SelectItem value="complaint">Shikoyat</SelectItem>
+                <SelectItem value="seller">Sotuvchi arizalari</SelectItem>
+                <SelectItem value="product">Mahsulot arizalari</SelectItem>
+                <SelectItem value="contact">Murojaatlar</SelectItem>
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-full sm:w-48">
-                <SelectValue placeholder="Holat" />
+                <SelectValue placeholder="Holat bo'yicha" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Barcha holatlar</SelectItem>
@@ -513,65 +604,69 @@ export default function AdminApplicationsPage() {
                 <SelectItem value="approved">Tasdiqlangan</SelectItem>
                 <SelectItem value="rejected">Rad etilgan</SelectItem>
                 <SelectItem value="resolved">Hal qilingan</SelectItem>
-                <SelectItem value="responded">Javob berilgan</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
-          {/* List */}
-          {filteredApplications.length === 0 ? (
-            <EmptyState />
-          ) : (
-            <div className="space-y-4">
-              {filteredApplications.map((app) => (
-                <Card key={app.id} className="border hover:shadow-sm transition-shadow">
+          <div className="space-y-4">
+            {loading ? (
+              <div className="text-center py-8">
+                <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
+                <p className="text-gray-600">Yuklanmoqda...</p>
+              </div>
+            ) : filteredApplications.length === 0 ? (
+              <div className="text-center py-12">
+                <FileText className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+                <h3 className="text-xl font-semibold mb-2">Arizalar yo'q</h3>
+                <p className="text-gray-600">Tanlangan mezonlarga mos keladigan arizalar topilmadi.</p>
+              </div>
+            ) : (
+              filteredApplications.map((application) => (
+                <Card key={application.id} className="border hover:shadow-md transition-shadow duration-200">
                   <CardContent className="p-4 lg:p-6">
-                    <div className="flex flex-wrap lg:flex-nowrap gap-4 justify-between">
-                      {/* Left */}
-                      <div className="flex gap-4 flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-4 flex-wrap lg:flex-nowrap">
+                      <div className="flex items-start gap-4 flex-1 min-w-0">
                         <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center shrink-0">
-                          {getTypeIcon(app.type)}
+                          {getTypeIcon(application.type)}
                         </div>
-                        <div className="min-w-0 space-y-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h3 className="font-medium">Ariza #{app.id.slice(-8)}</h3>
-                            {getStatusBadge(app.status)}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            <h3 className="font-semibold text-lg truncate">Ariza #{application.id.slice(-8)}</h3>
+                            {getStatusBadge(application.status)}
                           </div>
                           <p className="text-sm text-gray-600 truncate">
-                            <b>Tur:</b> {getTypeName(app.type)}
+                            <strong>Tur:</strong> {getTypeName(application.type)}
                           </p>
                           <p className="text-sm text-gray-600 truncate">
-                            <b>Ariza beruvchi:</b> {app.users?.full_name || app.name || app.full_name || "Noma'lum"}
+                            <strong>Ariza beruvchi:</strong>{" "}
+                            {application.users?.full_name || application.name || "Noma'lum"}
                           </p>
                           <p className="text-sm text-gray-600 truncate">
-                            <b>Email:</b> {app.users?.email || app.email || "Noma'lum"}
+                            <strong>Email:</strong> {application.users?.email || application.email || "Noma'lum"}
                           </p>
                           <p className="text-sm text-gray-600">
-                            <b>Sana:</b> {formatDate(app.created_at)}
+                            <strong>Sana:</strong> {formatDate(application.created_at)}
                           </p>
                         </div>
                       </div>
-
-                      {/* Actions */}
                       <div className="flex items-center gap-2 shrink-0">
                         <Button
                           size="sm"
                           variant="outline"
                           onClick={() => {
-                            setSelectedApplication(app)
+                            setSelectedApplication(application)
                             setShowDetailsDialog(true)
                           }}
                         >
                           <Eye className="h-4 w-4 mr-1" />
                           Ko'rish
                         </Button>
-
-                        {(app.users?.phone || app.phone) && (
+                        {application.users?.phone && (
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => window.open(`tel:${app.users?.phone || app.phone}`)}
-                            aria-label="Qo‘ng‘iroq qilish"
+                            onClick={() => window.open(`tel:${application.users.phone}`)}
+                            aria-label={`Qo'ng'iroq qilish ${application.users.phone}`}
                           >
                             <Phone className="h-4 w-4" />
                           </Button>
@@ -579,63 +674,51 @@ export default function AdminApplicationsPage() {
                       </div>
                     </div>
 
-                    {/* Quick seller/contact info */}
-                    {(app.type === "seller" || app.type === "contact") && (
-                      <div className="mt-4 p-3 bg-gray-50 rounded-lg space-y-1">
-                        {app.type === "seller" && app.company_name && (
-                          <p className="text-sm">
-                            <b>Kompaniya:</b> {app.company_name}
+                    {(application.type === "seller" || application.type === "contact") && (
+                      <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                        {application.type === "seller" && application.company_name && (
+                          <p className="text-sm font-medium text-gray-800 mb-1">
+                            Kompaniya: {application.company_name}
                           </p>
                         )}
-                        {app.type === "contact" && app.subject && (
-                          <p className="text-sm">
-                            <b>Mavzu:</b> {app.subject}
+                        {application.type === "contact" && application.subject && (
+                          <p className="text-sm font-medium text-gray-800 mb-1">
+                            Mavzu: {application.subject}
                           </p>
                         )}
-                        {app.type === "contact" && app.message && (
-                          <p className="text-sm text-gray-600 line-clamp-2">{app.message}</p>
+                        {application.type === "contact" && application.message && (
+                          <p className="text-sm text-gray-600 line-clamp-2">{application.message}</p>
                         )}
                       </div>
                     )}
 
-                    {/* Pending action buttons */}
-                    {app.status === "pending" && (
+                    {(application.status === "pending" || (application.type === "complaint" && application.status === "pending")) && (
                       <div className="flex gap-2 flex-wrap mt-3">
-                        {app.type !== "complaint" && (
+                        {application.type !== "complaint" && (
                           <Button
                             size="sm"
                             className="bg-green-600 hover:bg-green-700"
-                            onClick={() => openActionDialog(app, "approve")}
+                            onClick={() => openActionDialog(application, "approve")}
                           >
                             <CheckCircle className="h-4 w-4 mr-2" />
                             Tasdiqlash
                           </Button>
                         )}
-                        {app.type === "seller" && (
+                        {application.type === "seller" && (
                           <Button
                             size="sm"
                             className="bg-blue-600 hover:bg-blue-700"
-                            onClick={() => openActionDialog(app, "approve_verified")}
+                            onClick={() => openActionDialog(application, "approve_verified")}
                           >
                             <CheckCircle className="h-4 w-4 mr-2" />
-                            Verified
+                            Verified qilish
                           </Button>
                         )}
-                        {app.type === "contact" && (
+                        {application.type === "complaint" && (
                           <Button
                             size="sm"
                             className="bg-green-600 hover:bg-green-700"
-                            onClick={() => openActionDialog(app, "respond")}
-                          >
-                            <CheckCircle className="h-4 w-4 mr-2" />
-                            Javob berish
-                          </Button>
-                        )}
-                        {app.type === "complaint" && (
-                          <Button
-                            size="sm"
-                            className="bg-green-600 hover:bg-green-700"
-                            onClick={() => openActionDialog(app, "resolve")}
+                            onClick={() => openActionDialog(application, "resolve")}
                           >
                             <CheckCircle className="h-4 w-4 mr-2" />
                             Hal qilish
@@ -644,8 +727,8 @@ export default function AdminApplicationsPage() {
                         <Button
                           size="sm"
                           variant="outline"
-                          className="border-red-200 text-red-600 hover:bg-red-50 bg-transparent"
-                          onClick={() => openActionDialog(app, "reject")}
+                          className="border-red-200 text-red-600 hover:bg-red-50"
+                          onClick={() => openActionDialog(application, "reject")}
                         >
                           <XCircle className="h-4 w-4 mr-2" />
                           Rad etish
@@ -653,33 +736,62 @@ export default function AdminApplicationsPage() {
                       </div>
                     )}
 
-                    {/* Admin notes / response */}
-                    {app.admin_notes && (
-                      <AdminNote title="Admin eslatmasi" color="gray">
-                        {app.admin_notes}
-                      </AdminNote>
+                    {application.admin_notes && (
+                      <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                        <p className="text-sm font-medium text-gray-700 mb-1">Admin eslatmasi:</p>
+                        <p className="text-sm text-gray-600">{application.admin_notes}</p>
+                      </div>
                     )}
-                    {app.admin_response && (
-                      <AdminNote title="Admin javobi" color="blue">
-                        {app.admin_response}
-                      </AdminNote>
+                    {application.admin_response && application.type === "complaint" && (
+                      <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                        <p className="text-sm font-medium text-blue-700 mb-1">Admin javobi:</p>
+                        <p className="text-sm text-blue-600">{application.admin_response}</p>
+                      </div>
                     )}
                   </CardContent>
                 </Card>
-              ))}
+              ))
+            )}
+          </div>
+
+          {filteredApplications.length > 0 && Math.ceil(applications.length / 10) > 1 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between mt-6 gap-4">
+              <p className="text-sm text-gray-600">
+                {applications.length} ta umumiydan {filteredApplications.length} ta ko'rsatilmoqda
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {}}
+                  disabled={true}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Oldingi
+                </Button>
+                <span className="text-sm min-w-[60px] text-center">
+                  1 / 1
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {}}
+                  disabled={true}
+                >
+                  Keyingi
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* ------------------------ Details Dialog ------------------------ */}
-      <Dialog
-        open={showDetailsDialog}
-        onOpenChange={(isOpen) => {
-          setShowDetailsDialog(isOpen)
-          if (!isOpen) setSelectedApplication(null)
-        }}
-      >
+      {/* Details Dialog */}
+      <Dialog open={showDetailsDialog} onOpenChange={(isOpen) => {
+        setShowDetailsDialog(isOpen)
+        if (!isOpen) setSelectedApplication(null)
+      }}>
         <DialogContent className="max-w-2xl w-full max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Ariza tafsilotlari</DialogTitle>
@@ -691,166 +803,239 @@ export default function AdminApplicationsPage() {
 
           {selectedApplication ? (
             <div className="space-y-6">
-              {/* Applicant info */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Ariza beruvchi haqida</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                    <InfoRow label="Ism">
-                      {selectedApplication.users?.full_name ||
-                        selectedApplication.name ||
-                        selectedApplication.full_name ||
-                        "Noma'lum"}
-                    </InfoRow>
-                    <InfoRow label="Email">
-                      {selectedApplication.users?.email || selectedApplication.email || "Noma'lum"}
-                    </InfoRow>
-                    <InfoRow label="Telefon">
-                      {selectedApplication.users?.phone || selectedApplication.phone || "Noma'lum"}
-                    </InfoRow>
-                    {selectedApplication.company_name && (
-                      <InfoRow label="Kompaniya">{selectedApplication.company_name}</InfoRow>
+                    <div>
+                      <p className="font-semibold mb-1">Ism:</p>
+                      <p className="text-gray-700">{selectedApplication.users?.full_name || selectedApplication.name || "Noma'lum"}</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold mb-1">Email:</p>
+                      <p className="text-gray-700">{selectedApplication.users?.email || selectedApplication.email || "Noma'lum"}</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold mb-1">Telefon:</p>
+                      <p className="text-gray-700">{selectedApplication.users?.phone || selectedApplication.phone || "Noma'lum"}</p>
+                    </div>
+                    {selectedApplication.users?.username && (
+                      <div>
+                        <p className="font-semibold mb-1">Username:</p>
+                        <p className="text-gray-700">@{selectedApplication.users.username}</p>
+                      </div>
                     )}
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Conditional details */}
-              {selectedApplication.type === "product" && selectedApplication.product_data && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Ariza haqida</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="font-semibold mb-1">Tur:</p>
+                      <p className="text-gray-700">{getTypeName(selectedApplication.type)}</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold mb-1">Holat:</p>
+                      <p>{getStatusBadge(selectedApplication.status)}</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold mb-1">Ariza berilgan sana:</p>
+                      <p className="text-gray-700">{formatDate(selectedApplication.created_at)}</p>
+                    </div>
+                    {selectedApplication.reviewed_at && (
+                      <div>
+                        <p className="font-semibold mb-1">Ko'rib chiqilgan sana:</p>
+                        <p className="text-gray-700">{formatDate(selectedApplication.reviewed_at)}</p>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {(selectedApplication.type === "seller" || selectedApplication.type === "product") && (
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">Mahsulot maʼlumotlari</CardTitle>
+                    <CardTitle className="text-base">
+                      {selectedApplication.type === "seller" ? "Sotuvchi ma'lumotlari" : "Mahsulot ma'lumotlari"}
+                    </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-2 text-sm">
-                      <InfoRow label="Nomi">{selectedApplication.product_data.name}</InfoRow>
-                      <InfoRow label="Narxi">{selectedApplication.product_data.price} so'm</InfoRow>
-                      {selectedApplication.product_data.description && (
-                        <InfoRow label="Tavsif">{selectedApplication.product_data.description}</InfoRow>
+                    <div className="space-y-3 text-sm">
+                      {selectedApplication.type === "seller" && (
+                        <>
+                          {selectedApplication.company_name && (
+                            <p><span className="font-semibold">Kompaniya nomi: </span><span className="text-gray-700">{selectedApplication.company_name}</span></p>
+                          )}
+                          {selectedApplication.business_type && (
+                            <p><span className="font-semibold">Biznes turi: </span><span className="text-gray-700">{selectedApplication.business_type}</span></p>
+                          )}
+                          {selectedApplication.experience && (
+                            <p><span className="font-semibold">Tajriba: </span><span className="text-gray-700">{selectedApplication.experience}</span></p>
+                          )}
+                          {selectedApplication.description && (
+                            <div>
+                              <p className="font-semibold mb-1">Tavsif:</p>
+                              <p className="text-gray-700 whitespace-pre-wrap">{selectedApplication.description}</p>
+                            </div>
+                          )}
+                        </>
+                      )}
+                      {selectedApplication.type === "product" && selectedApplication.product_data && (
+                        <>
+                          {selectedApplication.product_data.name && (
+                            <p><span className="font-semibold">Mahsulot nomi: </span><span className="text-gray-700">{selectedApplication.product_data.name}</span></p>
+                          )}
+                          {selectedApplication.product_data.price !== undefined && (
+                            <p><span className="font-semibold">Narxi: </span><span className="text-gray-700">{selectedApplication.product_data.price.toLocaleString('uz-UZ')} so'm</span></p>
+                          )}
+                          {selectedApplication.product_data.description && (
+                            <div>
+                              <p className="font-semibold mb-1">Mahsulot tavsifi:</p>
+                              <p className="text-gray-700 whitespace-pre-wrap">{selectedApplication.product_data.description}</p>
+                            </div>
+                          )}
+                          {selectedApplication.product_data.images && selectedApplication.product_data.images.length > 0 && (
+                            <div>
+                              <p className="font-semibold mb-1">Mahsulot rasmlari:</p>
+                              <div className="flex gap-2 overflow-x-auto pb-2">
+                                {selectedApplication.product_data.images.map((imgUrl, index) => (
+                                  <img
+                                    key={index}
+                                    src={imgUrl}
+                                    alt={`Mahsulot rasmi ${index + 1}`}
+                                    className="w-20 h-20 object-cover rounded-md cursor-pointer"
+                                    onClick={() => window.open(imgUrl)}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   </CardContent>
                 </Card>
               )}
 
-              {(selectedApplication.type === "contact" || selectedApplication.type === "complaint") && (
+              {selectedApplication.type === "contact" && (
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">Xabar</CardTitle>
+                    <CardTitle className="text-base">Murojaat tafsilotlari</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-sm whitespace-pre-line">{selectedApplication.message || "—"}</p>
+                    <div className="space-y-3 text-sm">
+                      {selectedApplication.subject && (
+                        <p><span className="font-semibold">Mavzu: </span><span className="text-gray-700">{selectedApplication.subject}</span></p>
+                      )}
+                      {selectedApplication.message && (
+                        <div>
+                          <p className="font-semibold mb-1">Xabar:</p>
+                          <p className="text-gray-700 whitespace-pre-wrap">{selectedApplication.message}</p>
+                        </div>
+                      )}
+                      {selectedApplication.admin_response && (
+                        <div>
+                          <p className="font-semibold mb-1 text-blue-700">Admin javobi:</p>
+                          <p className="text-blue-700 whitespace-pre-wrap">{selectedApplication.admin_response}</p>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {selectedApplication.admin_notes && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Admin eslatmasi</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-gray-700 whitespace-pre-wrap">{selectedApplication.admin_notes}</p>
                   </CardContent>
                 </Card>
               )}
             </div>
           ) : (
-            <div className="py-8 text-center text-sm text-gray-600">Maʼlumot yuklanmoqda...</div>
+            <div className="text-center py-10">
+              <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
+              <p className="text-gray-600">Yuklanmoqda...</p>
+            </div>
           )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDetailsDialog(false)}>
+              Yopish
+            </Button>
+            {selectedApplication?.users?.phone && (
+              <Button onClick={() => window.open(`tel:${selectedApplication.users.phone}`)} aria-label={`Qo'ng'iroq qilish ${selectedApplication.users.phone}`}>
+                <Phone className="h-4 w-4 mr-2" />
+                Qo'ng'iroq qilish
+              </Button>
+            )}
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* ------------------------ Action Dialog ------------------------ */}
-      <Dialog open={showActionDialog} onOpenChange={setShowActionDialog}>
-        <DialogContent className="sm:max-w-md">
+      {/* Action Dialog */}
+      <Dialog open={showActionDialog} onOpenChange={(isOpen) => {
+        setShowActionDialog(isOpen)
+        if (!isOpen) {
+          setSelectedApplication(null)
+          setActionNotes("")
+        }
+      }}>
+        <DialogContent className="max-w-md w-full">
           <DialogHeader>
-            <DialogTitle>Ariza uchun amal</DialogTitle>
+            <DialogTitle>
+              {actionType === "approve" && "Arizani tasdiqlash"}
+              {actionType === "approve_verified" && "Arizani tasdiqlash va Verified qilish"}
+              {actionType === "reject" && "Arizani rad etish"}
+              {actionType === "resolve" && "Murojaatni hal qilish"}
+            </DialogTitle>
             <DialogDescription>
-              {selectedApplication &&
-                `Ariza #${selectedApplication.id.slice(-8)} - ${getTypeName(selectedApplication.type)}`}
+              {selectedApplication && `Ariza #${selectedApplication.id.slice(-8)} uchun amalni bajaring.`}
             </DialogDescription>
           </DialogHeader>
-          {actionType && (
-            <Fragment>
-              <div className="space-y-4">
-                <Textarea
-                  placeholder="Eslatma / izoh..."
-                  value={actionNotes}
-                  onChange={(e) => setActionNotes(e.target.value)}
-                />
-              </div>
-              <DialogFooter className="pt-4">
-                <Button variant="secondary" onClick={() => setShowActionDialog(false)}>
-                  Bekor qilish
-                </Button>
-                <Button onClick={handleAction} disabled={loading}>
-                  Tasdiqlash
-                </Button>
-              </DialogFooter>
-            </Fragment>
-          )}
+
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="actionNotes">
+                {actionType === "reject" ? "Rad etish sababi" : actionType === "resolve" ? "Admin javobi" : "Qo'shimcha eslatma"} (ixtiyoriy)
+              </Label>
+              <Textarea
+                id="actionNotes"
+                placeholder={
+                  actionType === "reject" ? "Arizani nima uchun rad etyapsiz..." :
+                  actionType === "resolve" ? "Admin javobingizni kiriting..." :
+                  "Qo'shimcha ma'lumot yoki eslatmalar..."
+                }
+                value={actionNotes}
+                onChange={(e) => setActionNotes(e.target.value)}
+                className="min-h-[100px]"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowActionDialog(false)}>
+              Bekor qilish
+            </Button>
+            <Button onClick={() => handleAction(actionType)} disabled={loading}>
+              {actionType === "approve" && "Tasdiqlash"}
+              {actionType === "approve_verified" && "Tasdiqlash va Verified qilish"}
+              {actionType === "reject" && "Rad etish"}
+              {actionType === "resolve" && "Hal qilish"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  )
-}
-
-/* -------------------------------------------------------------------------- */
-/*                        Reusable Small Helper Components                    */
-/* -------------------------------------------------------------------------- */
-
-function StatCard({
-  icon,
-  value,
-  label,
-}: {
-  icon: React.ReactNode
-  value: number
-  label: string
-}) {
-  return (
-    <Card className="card-beautiful">
-      <CardContent className="p-3 lg:p-6 text-center space-y-1">
-        <div className="mx-auto mb-1">{icon}</div>
-        <div className="text-lg lg:text-2xl font-bold">{value}</div>
-        <div className="text-xs lg:text-sm text-gray-600">{label}</div>
-      </CardContent>
-    </Card>
-  )
-}
-
-function EmptyState() {
-  return (
-    <div className="text-center py-12">
-      <FileText className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-      <h3 className="text-xl font-semibold mb-2">Arizalar yo‘q</h3>
-      <p className="text-gray-600">Tanlangan mezonlarga mos arizalar topilmadi.</p>
-    </div>
-  )
-}
-
-function InfoRow({
-  label,
-  children,
-}: {
-  label: string
-  children: React.ReactNode
-}) {
-  return (
-    <div>
-      <p className="font-semibold mb-1">{label}:</p>
-      <p className="text-gray-700 break-all">{children}</p>
-    </div>
-  )
-}
-
-function AdminNote({
-  title,
-  color,
-  children,
-}: {
-  title: string
-  color: "gray" | "blue"
-  children: React.ReactNode
-}) {
-  const bg = color === "blue" ? "bg-blue-50" : "bg-gray-50"
-  const text = color === "blue" ? "text-blue-700" : "text-gray-700"
-  return (
-    <div className={`mt-4 p-3 rounded-lg ${bg}`}>
-      <p className={`text-sm font-medium mb-1 ${text}`}>{title}:</p>
-      <p className={`text-sm ${color === "blue" ? "text-blue-600" : "text-gray-600"}`}>{children}</p>
     </div>
   )
 }
