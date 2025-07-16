@@ -193,20 +193,45 @@ export default function AdminAddProductPage() {
     setSaving(true)
 
     try {
-      // Validate required fields
+      // --- Majburiy maydonlar tekshiruvi yangilangan ---
+      let validationError = false;
+
+      // Umuman olganda nom, narx, ombor va kategoriya bo'lishi kerak
       if (!formData.name || !formData.price || !formData.stock_quantity || !formData.category_id) {
-        toast.error("Majburiy maydonlarni to'ldiring")
-        return
+        toast.error("Asosiy maydonlarni (Nom, Narx, Ombor miqdori, Kategoriya) to'ldiring.");
+        validationError = true;
       }
 
-      // For group products, validate group products
+      // Agar mahsulot turi guruh bo'lsa va kamida bir guruh mahsuloti nomi kiritilmagan bo'lsa
       if (productType === "group") {
-        const validGroupProducts = groupProducts.filter((p) => p.product_name.trim())
+        const validGroupProducts = groupProducts.filter((p) => p.product_name.trim());
         if (validGroupProducts.length === 0) {
-          toast.error("Kamida bitta mahsulot qo'shing")
-          return
+          toast.error("Guruhli mahsulot qo'shish uchun kamida bitta mahsulot nomini kiriting.");
+          validationError = true;
         }
+        // Agar siz guruhli mahsulotni tanlasangiz ham, asosiy nomi bo'sh bo'lmasligi kerak,
+        // chunki bu maydon yakuniy mahsulot uchun ham ishlatiladi.
+        // Agar siz guruhli mahsulotlarning nomidan umumiy nom hosil qilishni istasangiz,
+        // unda bu yerda "name" maydonini to'ldirish shart emas deb hisoblasak bo'ladi,
+        // lekin hozirgi talabga ko'ra hammasi to'ldirilishi kerak.
+        // Shuning uchun, quyidagi tekshiruvni o'chirib tashlaymiz, chunki yuqoridagi to'liq tekshiruv allaqachon uni qamrab olgan.
+        // if (!formData.name) {
+        //   toast.error("Guruhli mahsulot uchun asosiy nomi majburiy.");
+        //   validationError = true;
+        // }
       }
+
+      // Agar yetkazib berish yoqilgan bo'lsa, narxi ham bo'lishi kerak
+      if (formData.has_delivery && !formData.delivery_price) {
+          toast.error("Yetkazib berish yoqilgan bo'lsa, yetkazib berish narxini ham kiriting.");
+          validationError = true;
+      }
+
+      if (validationError) {
+        setSaving(false);
+        return;
+      }
+      // --- Majburiy maydonlar tekshiruvi tugadi ---
 
       let imageUrl = ""
       if (imageFile) {
@@ -215,8 +240,8 @@ export default function AdminAddProductPage() {
 
       // Prepare product data
       const productData = {
-        name: productType === "group" ? generateGroupTitle() : formData.name,
-        description: productType === "group" ? generateGroupDescription() : formData.description || null,
+        name: formData.name, // Endi har doim formData.name ishlatiladi
+        description: formData.description || null, // Endi har doim formData.description ishlatiladi
         price: Number.parseFloat(formData.price),
         stock_quantity: Number.parseInt(formData.stock_quantity),
         product_type: productType,
@@ -267,7 +292,12 @@ export default function AdminAddProductPage() {
       router.push("/admin-panel/products")
     } catch (error) {
       console.error("Error creating product:", error)
-      toast.error("Mahsulot qo'shishda xatolik yuz berdi")
+      // Xatolikni aniqlash uchun error obyektining mazmunini ko'ring
+      if (error instanceof Error) {
+        toast.error(`Mahsulot qo'shishda xatolik: ${error.message}`);
+      } else {
+        toast.error("Mahsulot qo'shishda noma'lum xatolik yuz berdi")
+      }
     } finally {
       setSaving(false)
     }
@@ -341,31 +371,31 @@ export default function AdminAddProductPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {productType === "single" && (
-                  <div>
-                    <Label htmlFor="name">Mahsulot nomi *</Label>
-                    <Input
-                      id="name"
-                      value={formData.name}
-                      onChange={(e) => handleInputChange("name", e.target.value)}
-                      placeholder="Mahsulot nomini kiriting"
-                      required
-                    />
-                  </div>
-                )}
+                {/* Mahsulot Nomi */}
+                <div>
+                  <Label htmlFor="name">Mahsulot nomi *</Label>
+                  <Input
+                    id="name"
+                    value={formData.name}
+                    onChange={(e) => handleInputChange("name", e.target.value)}
+                    placeholder="Mahsulot nomini kiriting"
+                    required={productType === "single"} // Agar yakka mahsulot bo'lsa majburiy
+                    // Agar guruhli bo'lsa ham majburiy bo'lishi kerak degan talab bilan har doim required qilib qo'yamiz
+                    required
+                  />
+                </div>
 
-                {productType === "single" && (
-                  <div>
-                    <Label htmlFor="description">Tavsif</Label>
-                    <Textarea
-                      id="description"
-                      value={formData.description}
-                      onChange={(e) => handleInputChange("description", e.target.value)}
-                      placeholder="Mahsulot haqida batafsil ma'lumot"
-                      rows={4}
-                    />
-                  </div>
-                )}
+                {/* Tavsif */}
+                <div>
+                  <Label htmlFor="description">Tavsif</Label>
+                  <Textarea
+                    id="description"
+                    value={formData.description}
+                    onChange={(e) => handleInputChange("description", e.target.value)}
+                    placeholder="Mahsulot haqida batafsil ma'lumot"
+                    rows={4}
+                  />
+                </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
@@ -490,7 +520,7 @@ export default function AdminAddProductPage() {
                             value={product.product_name}
                             onChange={(e) => updateGroupProduct(product.id, "product_name", e.target.value)}
                             placeholder="Mahsulot nomini kiriting"
-                            required
+                            required // Har bir guruh mahsuloti nomi majburiy
                           />
                         </div>
                         <div>
@@ -517,22 +547,21 @@ export default function AdminAddProductPage() {
                     </div>
                   ))}
 
-                  {productType === "group" && (
-                    <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                      <h5 className="font-medium text-blue-800 mb-2">Avtomatik yaratilgan ma'lumotlar:</h5>
-                      <div className="space-y-2 text-sm">
-                        <div>
-                          <strong>Sarlavha:</strong> {generateGroupTitle() || "Mahsulot nomlarini kiriting"}
-                        </div>
-                        <div>
-                          <strong>Tavsif:</strong>
-                          <pre className="whitespace-pre-wrap text-xs mt-1 bg-white p-2 rounded border">
-                            {generateGroupDescription()}
-                          </pre>
-                        </div>
+                  {/* Bu qism endi avtomatik ma'lumotni ko'rsatadi, yakuniy mahsulotga yozilmaydi */}
+                  <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <h5 className="font-medium text-blue-800 mb-2">Avtomatik yaratilgan ma'lumotlar:</h5>
+                    <div className="space-y-2 text-sm">
+                      <div>
+                        <strong>Sarlavha:</strong> {generateGroupTitle() || "Mahsulot nomlarini kiriting"}
+                      </div>
+                      <div>
+                        <strong>Tavsif:</strong>
+                        <pre className="whitespace-pre-wrap text-xs mt-1 bg-white p-2 rounded border">
+                          {generateGroupDescription()}
+                        </pre>
                       </div>
                     </div>
-                  )}
+                  </div>
                 </CardContent>
               </Card>
             )}
@@ -563,6 +592,8 @@ export default function AdminAddProductPage() {
                       placeholder="0"
                       min="0"
                       step="1000"
+                      // Agar yetkazib berish yoqilgan bo'lsa, narxi majburiy
+                      required={formData.has_delivery}
                     />
                   </div>
                 )}
