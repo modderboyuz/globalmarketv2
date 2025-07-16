@@ -32,6 +32,7 @@ import {
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 import NotificationPopup from "@/components/notifications/notification-popup"
+import Image from "next/image"
 
 interface Order {
   id: string
@@ -50,6 +51,7 @@ interface Order {
   client_notes: string | null
   order_type: string
   created_at: string
+  selected_group_product_id: string | null
   products: {
     id: string
     name: string
@@ -65,7 +67,13 @@ interface Order {
       full_name: string
       company_name: string
       phone: string
+      username: string
     }
+  }
+  group_products?: {
+    id: string
+    product_name: string
+    product_description: string | null
   }
 }
 
@@ -160,54 +168,46 @@ export default function OrdersPage() {
 
   const fetchOrders = async (userId: string) => {
     try {
-      const { data, error } = await supabase
-        .from("orders")
-        .select(`
-          *,
-          products (
-            id,
-            name,
-            image_url,
-            price,
-            product_type,
-            brand,
-            author,
-            has_delivery,
-            delivery_price,
-            seller_id,
-            users:seller_id (
-              full_name,
-              company_name,
-              phone
-            )
-          )
-        `)
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false })
+      const session = await supabase.auth.getSession()
+      if (!session.data.session?.access_token) {
+        toast.error("Avtorizatsiya xatosi")
+        return
+      }
 
-      if (error) throw error
-      setOrders(data || [])
+      const response = await fetch("/api/orders", {
+        headers: {
+          Authorization: `Bearer ${session.data.session.access_token}`,
+        },
+      })
 
-      // Show toast for ready orders
-      const readyOrders = (data || []).filter(
-        (order) => order.stage === 2 && order.status === "pending" && order.is_agree === true,
-      )
+      const data = await response.json()
 
-      if (readyOrders.length > 0) {
-        const order = readyOrders[0]
-        if (!localStorage.getItem(`order_ready_toast_${order.id}`)) {
-          toast.info(`Buyurtmangiz tayyor! ${order.address} ga keling`, {
-            duration: 10000,
-            action: {
-              label: "Ko'rish",
-              onClick: () => {
-                setSelectedOrder(order)
-                setShowReadyDialog(true)
-                localStorage.setItem(`order_ready_toast_${order.id}`, "true")
+      if (data.success) {
+        setOrders(data.orders || [])
+
+        // Show toast for ready orders
+        const readyOrders = (data.orders || []).filter(
+          (order: Order) => order.stage === 2 && order.status === "pending" && order.is_agree === true,
+        )
+
+        if (readyOrders.length > 0) {
+          const order = readyOrders[0]
+          if (!localStorage.getItem(`order_ready_toast_${order.id}`)) {
+            toast.info(`Buyurtmangiz tayyor! ${order.pickup_address || order.address} ga keling`, {
+              duration: 10000,
+              action: {
+                label: "Ko'rish",
+                onClick: () => {
+                  setSelectedOrder(order)
+                  setShowReadyDialog(true)
+                  localStorage.setItem(`order_ready_toast_${order.id}`, "true")
+                },
               },
-            },
-          })
+            })
+          }
         }
+      } else {
+        toast.error(data.error || "Buyurtmalarni olishda xatolik")
       }
     } catch (error) {
       console.error("Error fetching orders:", error)
@@ -217,13 +217,26 @@ export default function OrdersPage() {
 
   const updateOrderStatus = async (orderId: string, action: string, notes?: string) => {
     try {
-      const { data, error } = await supabase.rpc("update_order_status", {
-        order_id_param: orderId,
-        action_param: action,
-        notes_param: notes || null,
+      const session = await supabase.auth.getSession()
+      if (!session.data.session?.access_token) {
+        toast.error("Avtorizatsiya xatosi")
+        return
+      }
+
+      const response = await fetch("/api/orders", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.data.session.access_token}`,
+        },
+        body: JSON.stringify({
+          orderId,
+          action,
+          notes: notes || null,
+        }),
       })
 
-      if (error) throw error
+      const data = await response.json()
 
       if (data.success) {
         toast.success(data.message)
@@ -233,7 +246,7 @@ export default function OrdersPage() {
         setShowReadyDialog(false)
         setActionNotes("")
       } else {
-        throw new Error(data.error)
+        toast.error(data.error || "Xatolik yuz berdi")
       }
     } catch (error: any) {
       toast.error(error.message || "Xatolik yuz berdi")
@@ -324,11 +337,11 @@ export default function OrdersPage() {
       case "client_not_went":
         return order.stage === 2 && order.is_agree === true && order.is_client_went === null
       case "reorder":
-        return order.status === "cancelled"
+        return order.status === "cancelled" || order.status === "stopped"
       case "review":
         return order.stage === 4 && order.status === "completed"
       case "complaint":
-        return order.status === "cancelled" || order.status === "completed"
+        return order.status === "cancelled" || order.status === "completed" || order.status === "stopped"
       default:
         return false
     }
@@ -344,6 +357,9 @@ export default function OrdersPage() {
     }
     if (order.stage === 0) {
       return <Badge variant="destructive">Bekor qilingan</Badge>
+    }
+    if (order.status === "stopped") {
+      return <Badge className="bg-orange-100 text-orange-800">To'xtatilgan</Badge>
     }
     if (order.stage === 1) {
       return <Badge variant="secondary">Kutilmoqda</Badge>
@@ -431,15 +447,34 @@ export default function OrdersPage() {
                       {/* Product Info */}
                       <div className="lg:col-span-2">
                         <div className="flex gap-3 md:gap-4 mb-4 md:mb-6">
-                          <img
-                            src={order.products.image_url || "/placeholder.svg?height=120&width=80"}
-                            alt={order.products.name}
-                            className="w-16 h-20 md:w-20 md:h-28 object-cover rounded-lg"
-                          />
+                          <div className="relative w-16 h-20 md:w-20 md:h-28 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
+                            <Image
+                              src={order.products.image_url || "/placeholder.svg?height=120&width=80"}
+                              alt={order.products.name}
+                              fill
+                              className="object-cover"
+                            />
+                          </div>
                           <div className="flex-1 min-w-0">
                             <h3 className="font-semibold text-base md:text-lg text-gray-800 mb-1 line-clamp-2">
                               {order.products.name}
                             </h3>
+
+                            {/* Group Product Info */}
+                            {order.products.product_type === "group" && order.group_products && (
+                              <div className="mb-2">
+                                <Badge className="bg-purple-100 text-purple-800 text-xs">
+                                  <Package className="h-3 w-3 mr-1" />
+                                  {order.group_products.product_name}
+                                </Badge>
+                                {order.group_products.product_description && (
+                                  <p className="text-xs text-gray-600 mt-1">
+                                    {order.group_products.product_description}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+
                             {order.products.author && (
                               <p className="text-gray-600 mb-1 text-sm">Muallif: {order.products.author}</p>
                             )}
@@ -521,7 +556,7 @@ export default function OrdersPage() {
                         </div>
 
                         {/* Pickup Address */}
-                        {order.address && order.stage >= 2 && (
+                        {(order.pickup_address || order.address) && order.stage >= 2 && (
                           <div className="mt-4 p-3 md:p-4 bg-blue-50 border border-blue-200 rounded-lg">
                             <div className="flex items-start gap-2">
                               <MapPin className="h-4 w-4 md:h-5 md:w-5 text-blue-600 mt-0.5" />
@@ -529,7 +564,9 @@ export default function OrdersPage() {
                                 <h5 className="font-semibold text-blue-800 mb-1 text-sm md:text-base">
                                   Mahsulot olish manzili:
                                 </h5>
-                                <p className="text-blue-700 text-sm md:text-base">{order.address}</p>
+                                <p className="text-blue-700 text-sm md:text-base">
+                                  {order.pickup_address || order.address}
+                                </p>
                               </div>
                             </div>
                           </div>
@@ -663,13 +700,16 @@ export default function OrdersPage() {
             {selectedOrder && (
               <div className="text-center">
                 <h3 className="font-semibold text-lg">{selectedOrder.products.name}</h3>
+                {selectedOrder.products.product_type === "group" && selectedOrder.group_products && (
+                  <p className="text-purple-600 text-sm">Tanlangan: {selectedOrder.group_products.product_name}</p>
+                )}
                 <p className="text-gray-600">Buyurtma #{selectedOrder.id.slice(-8)}</p>
                 <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                   <div className="flex items-start gap-2">
                     <MapPin className="h-5 w-5 text-blue-600 mt-0.5" />
                     <div>
                       <h5 className="font-semibold text-blue-800 mb-1">Mahsulot olish manzili:</h5>
-                      <p className="text-blue-700">{selectedOrder.address}</p>
+                      <p className="text-blue-700">{selectedOrder.pickup_address || selectedOrder.address}</p>
                     </div>
                   </div>
                 </div>
@@ -721,6 +761,9 @@ export default function OrdersPage() {
           <div className="space-y-4">
             <div className="text-center">
               <h3 className="font-semibold text-lg">{selectedOrder?.products.name}</h3>
+              {selectedOrder?.products.product_type === "group" && selectedOrder?.group_products && (
+                <p className="text-purple-600 text-sm">Tanlangan: {selectedOrder.group_products.product_name}</p>
+              )}
               <p className="text-gray-600">Buyurtma #{selectedOrder?.id.slice(-8)}</p>
             </div>
           </div>
@@ -794,7 +837,14 @@ export default function OrdersPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Sharh qoldirish</DialogTitle>
-            <DialogDescription>{selectedOrder?.products.name} mahsuloti haqida fikringizni bildiring</DialogDescription>
+            <DialogDescription>
+              {selectedOrder?.products.name} mahsuloti haqida fikringizni bildiring
+              {selectedOrder?.products.product_type === "group" && selectedOrder?.group_products && (
+                <span className="block text-purple-600 mt-1">
+                  Tanlangan: {selectedOrder.group_products.product_name}
+                </span>
+              )}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>

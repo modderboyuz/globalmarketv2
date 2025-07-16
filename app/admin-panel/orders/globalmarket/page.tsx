@@ -9,23 +9,15 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
-  Package,
-  User,
-  Phone,
-  MapPin,
-  Calendar,
-  DollarSign,
-  Edit,
-  CheckCircle,
-  XCircle,
-  Clock,
-  Truck,
-  RefreshCw,
-  Search,
-  ArrowUpDown,
-} from "lucide-react"
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Package, User, Phone, MapPin, Calendar, DollarSign, CheckCircle, XCircle, Clock, Truck, RefreshCw, Search, ArrowUpDown, Edit } from 'lucide-react'
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 import Image from "next/image"
@@ -40,16 +32,16 @@ interface Order {
   quantity: number
   total_amount: number
   status: string
-  admin_notes: string | null
+  stage: number
+  is_agree: boolean | null
+  is_client_went: boolean | null
+  is_client_claimed: boolean | null
+  pickup_address: string | null
+  seller_notes: string | null
+  client_notes: string | null
   created_at: string
   updated_at: string
   selected_group_product_id: string | null
-  selected_product_name: string | null
-  selected_product_info?: {
-    id: string
-    name: string
-    description: string | null
-  }
   products: {
     id: string
     name: string
@@ -64,33 +56,35 @@ interface Order {
       username: string | null
     }
   }
+  group_products?: {
+    id: string
+    product_name: string
+    product_description: string | null
+  }
 }
 
-const statusColors = {
-  pending: "bg-yellow-100 text-yellow-800 border-yellow-200",
-  confirmed: "bg-blue-100 text-blue-800 border-blue-200",
-  processing: "bg-purple-100 text-purple-800 border-purple-200",
-  shipped: "bg-indigo-100 text-indigo-800 border-indigo-200",
-  delivered: "bg-green-100 text-green-800 border-green-200",
-  cancelled: "bg-red-100 text-red-800 border-red-200",
+const stageLabels = {
+  0: "Bekor qilingan",
+  1: "Kutilmoqda",
+  2: "Tasdiqlangan",
+  3: "Mijoz keldi",
+  4: "Yakunlangan",
 }
 
-const statusLabels = {
-  pending: "Kutilmoqda",
-  confirmed: "Tasdiqlangan",
-  processing: "Tayyorlanmoqda",
-  shipped: "Yuborilgan",
-  delivered: "Yetkazilgan",
-  cancelled: "Bekor qilingan",
+const stageColors = {
+  0: "bg-red-100 text-red-800 border-red-200",
+  1: "bg-yellow-100 text-yellow-800 border-yellow-200",
+  2: "bg-blue-100 text-blue-800 border-blue-200",
+  3: "bg-purple-100 text-purple-800 border-purple-200",
+  4: "bg-green-100 text-green-800 border-green-200",
 }
 
-const statusIcons = {
-  pending: Clock,
-  confirmed: CheckCircle,
-  processing: Package,
-  shipped: Truck,
-  delivered: CheckCircle,
-  cancelled: XCircle,
+const stageIcons = {
+  0: XCircle,
+  1: Clock,
+  2: CheckCircle,
+  3: Truck,
+  4: Package,
 }
 
 export default function AdminGlobalMarketOrdersPage() {
@@ -100,7 +94,7 @@ export default function AdminGlobalMarketOrdersPage() {
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState<any>(null)
   const [searchTerm, setSearchTerm] = useState("")
-  const [statusFilter, setStatusFilter] = useState("all")
+  const [stageFilter, setStageFilter] = useState("all")
   const [sortBy, setSortBy] = useState("created_at")
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc")
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
@@ -108,8 +102,8 @@ export default function AdminGlobalMarketOrdersPage() {
   const [updating, setUpdating] = useState(false)
 
   const [updateForm, setUpdateForm] = useState({
-    status: "",
-    admin_notes: "",
+    action: "",
+    notes: "",
   })
 
   useEffect(() => {
@@ -118,7 +112,7 @@ export default function AdminGlobalMarketOrdersPage() {
 
   useEffect(() => {
     filterAndSortOrders()
-  }, [orders, searchTerm, statusFilter, sortBy, sortOrder])
+  }, [orders, searchTerm, stageFilter, sortBy, sortOrder])
 
   const checkAdminAccess = async () => {
     try {
@@ -157,7 +151,7 @@ export default function AdminGlobalMarketOrdersPage() {
         return
       }
 
-      const response = await fetch("/api/orders", {
+      const response = await fetch("/api/orders?admin=true", {
         headers: {
           Authorization: `Bearer ${session.data.session.access_token}`,
         },
@@ -189,13 +183,13 @@ export default function AdminGlobalMarketOrdersPage() {
           order.phone.includes(searchTerm) ||
           order.products.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
           order.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          (order.selected_product_info?.name || "").toLowerCase().includes(searchTerm.toLowerCase()),
+          (order.group_products?.product_name || "").toLowerCase().includes(searchTerm.toLowerCase()),
       )
     }
 
-    // Status filter
-    if (statusFilter !== "all") {
-      filtered = filtered.filter((order) => order.status === statusFilter)
+    // Stage filter
+    if (stageFilter !== "all") {
+      filtered = filtered.filter((order) => order.stage.toString() === stageFilter)
     }
 
     // Sort
@@ -229,7 +223,7 @@ export default function AdminGlobalMarketOrdersPage() {
   }
 
   const handleUpdateOrder = async () => {
-    if (!selectedOrder) return
+    if (!selectedOrder || !updateForm.action) return
 
     setUpdating(true)
     try {
@@ -240,24 +234,25 @@ export default function AdminGlobalMarketOrdersPage() {
       }
 
       const response = await fetch("/api/orders", {
-        method: "PATCH",
+        method: "PUT",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.data.session.access_token}`,
         },
         body: JSON.stringify({
-          order_id: selectedOrder.id,
-          status: updateForm.status,
-          admin_notes: updateForm.admin_notes,
+          orderId: selectedOrder.id,
+          action: updateForm.action,
+          notes: updateForm.notes,
         }),
       })
 
       const data = await response.json()
 
       if (data.success) {
-        toast.success("Buyurtma muvaffaqiyatli yangilandi")
+        toast.success(data.message)
         setShowOrderDialog(false)
         await fetchOrders()
+        setUpdateForm({ action: "", notes: "" })
       } else {
         toast.error(data.error || "Buyurtmani yangilashda xatolik")
       }
@@ -272,14 +267,14 @@ export default function AdminGlobalMarketOrdersPage() {
   const openOrderDialog = (order: Order) => {
     setSelectedOrder(order)
     setUpdateForm({
-      status: order.status,
-      admin_notes: order.admin_notes || "",
+      action: "",
+      notes: order.seller_notes || "",
     })
     setShowOrderDialog(true)
   }
 
-  const getStatusIcon = (status: string) => {
-    const IconComponent = statusIcons[status as keyof typeof statusIcons] || Clock
+  const getStageIcon = (stage: number) => {
+    const IconComponent = stageIcons[stage as keyof typeof stageIcons] || Clock
     return <IconComponent className="h-4 w-4" />
   }
 
@@ -291,6 +286,29 @@ export default function AdminGlobalMarketOrdersPage() {
       hour: "2-digit",
       minute: "2-digit",
     })
+  }
+
+  const getAvailableActions = (order: Order) => {
+    const actions = []
+
+    switch (order.stage) {
+      case 1: // Pending - admin can approve or reject
+        actions.push(
+          { value: "agree", label: "✅ Tasdiqlash", color: "bg-green-600" },
+          { value: "reject", label: "❌ Rad etish", color: "bg-red-600" },
+        )
+        break
+      case 3: // Client went - admin can confirm product given or not
+        if (order.is_client_went === true) {
+          actions.push(
+            { value: "product_given", label: "✅ Mahsulot berildi", color: "bg-green-600" },
+            { value: "product_not_given", label: "❌ Mahsulot berilmadi", color: "bg-red-600" },
+          )
+        }
+        break
+    }
+
+    return actions
   }
 
   if (loading) {
@@ -312,7 +330,7 @@ export default function AdminGlobalMarketOrdersPage() {
           <h1 className="text-3xl font-bold gradient-text">GlobalMarket Buyurtmalari</h1>
           <p className="text-gray-600">
             Jami {filteredOrders.length} ta buyurtma
-            {statusFilter !== "all" && ` (${statusLabels[statusFilter as keyof typeof statusLabels]})`}
+            {stageFilter !== "all" && ` (${stageLabels[Number(stageFilter) as keyof typeof stageLabels]})`}
           </p>
         </div>
         <Button onClick={fetchOrders} variant="outline" className="bg-transparent">
@@ -340,19 +358,18 @@ export default function AdminGlobalMarketOrdersPage() {
             </div>
 
             <div>
-              <Label htmlFor="status-filter">Status</Label>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <Label htmlFor="stage-filter">Bosqich</Label>
+              <Select value={stageFilter} onValueChange={setStageFilter}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Barchasi</SelectItem>
-                  <SelectItem value="pending">Kutilmoqda</SelectItem>
-                  <SelectItem value="confirmed">Tasdiqlangan</SelectItem>
-                  <SelectItem value="processing">Tayyorlanmoqda</SelectItem>
-                  <SelectItem value="shipped">Yuborilgan</SelectItem>
-                  <SelectItem value="delivered">Yetkazilgan</SelectItem>
-                  <SelectItem value="cancelled">Bekor qilingan</SelectItem>
+                  <SelectItem value="1">Kutilmoqda</SelectItem>
+                  <SelectItem value="2">Tasdiqlangan</SelectItem>
+                  <SelectItem value="3">Mijoz keldi</SelectItem>
+                  <SelectItem value="4">Yakunlangan</SelectItem>
+                  <SelectItem value="0">Bekor qilingan</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -368,7 +385,7 @@ export default function AdminGlobalMarketOrdersPage() {
                   <SelectItem value="updated_at">Yangilangan vaqt</SelectItem>
                   <SelectItem value="total_amount">Summa</SelectItem>
                   <SelectItem value="full_name">Mijoz ismi</SelectItem>
-                  <SelectItem value="status">Status</SelectItem>
+                  <SelectItem value="stage">Bosqich</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -396,7 +413,7 @@ export default function AdminGlobalMarketOrdersPage() {
               <Package className="h-16 w-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-gray-600 mb-2">Buyurtmalar topilmadi</h3>
               <p className="text-gray-500">
-                {searchTerm || statusFilter !== "all"
+                {searchTerm || stageFilter !== "all"
                   ? "Qidiruv shartlariga mos buyurtmalar yo'q"
                   : "Hozircha buyurtmalar mavjud emas"}
               </p>
@@ -422,14 +439,14 @@ export default function AdminGlobalMarketOrdersPage() {
                         <h3 className="font-semibold text-lg mb-1 truncate">{order.products.name}</h3>
 
                         {/* Group Product Info */}
-                        {order.products.product_type === "group" && order.selected_product_info && (
+                        {order.products.product_type === "group" && order.group_products && (
                           <div className="mb-2">
                             <Badge className="bg-purple-100 text-purple-800 text-xs">
                               <Package className="h-3 w-3 mr-1" />
-                              Tanlangan: {order.selected_product_info.name}
+                              Tanlangan: {order.group_products.product_name}
                             </Badge>
-                            {order.selected_product_info.description && (
-                              <p className="text-xs text-gray-600 mt-1">{order.selected_product_info.description}</p>
+                            {order.group_products.product_description && (
+                              <p className="text-xs text-gray-600 mt-1">{order.group_products.product_description}</p>
                             )}
                           </div>
                         )}
@@ -474,33 +491,99 @@ export default function AdminGlobalMarketOrdersPage() {
                         <span>{formatDate(order.created_at)}</span>
                       </div>
                     </div>
+
+                    {/* Order Status Details */}
+                    <div className="mt-4 space-y-2">
+                      {order.is_agree !== null && (
+                        <div className="text-xs">
+                          <span className="font-medium">Admin javobi: </span>
+                          <Badge className={order.is_agree ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
+                            {order.is_agree ? "Tasdiqlangan" : "Rad etilgan"}
+                          </Badge>
+                        </div>
+                      )}
+                      {order.is_client_went !== null && (
+                        <div className="text-xs">
+                          <span className="font-medium">Mijoz holati: </span>
+                          <Badge
+                            className={order.is_client_went ? "bg-blue-100 text-blue-800" : "bg-orange-100 text-orange-800"}
+                          >
+                            {order.is_client_went ? "Keldi" : "Kelmadi"}
+                          </Badge>
+                        </div>
+                      )}
+                      {order.is_client_claimed !== null && (
+                        <div className="text-xs">
+                          <span className="font-medium">Mahsulot: </span>
+                          <Badge
+                            className={
+                              order.is_client_claimed ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+                            }
+                          >
+                            {order.is_client_claimed ? "Berildi" : "Berilmadi"}
+                          </Badge>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {/* Status & Actions */}
                   <div>
                     <div className="flex items-center justify-between mb-4">
                       <Badge
-                        className={`${statusColors[order.status as keyof typeof statusColors]} flex items-center gap-1`}
+                        className={`${stageColors[order.stage as keyof typeof stageColors]} flex items-center gap-1`}
                       >
-                        {getStatusIcon(order.status)}
-                        {statusLabels[order.status as keyof typeof statusLabels]}
+                        {getStageIcon(order.stage)}
+                        {stageLabels[order.stage as keyof typeof stageLabels]}
                       </Badge>
                       <span className="text-xs text-gray-500">#{order.id.slice(-8)}</span>
                     </div>
 
-                    {order.admin_notes && (
+                    {/* Notes */}
+                    {order.seller_notes && (
                       <div className="mb-4 p-3 bg-blue-50 rounded-lg">
                         <p className="text-sm text-blue-800">
-                          <strong>Admin eslatmasi:</strong> {order.admin_notes}
+                          <strong>Admin eslatmasi:</strong> {order.seller_notes}
                         </p>
                       </div>
                     )}
 
+                    {order.client_notes && (
+                      <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+                        <p className="text-sm text-gray-700">
+                          <strong>Mijoz eslatmasi:</strong> {order.client_notes}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Action Buttons */}
                     <div className="space-y-2">
-                      <Button onClick={() => openOrderDialog(order)} className="w-full btn-primary" size="sm">
-                        <Edit className="h-4 w-4 mr-2" />
-                        Tahrirlash
-                      </Button>
+                      {getAvailableActions(order).length > 0 ? (
+                        getAvailableActions(order).map((action) => (
+                          <Button
+                            key={action.value}
+                            onClick={() => {
+                              setSelectedOrder(order)
+                              setUpdateForm({ action: action.value, notes: order.seller_notes || "" })
+                              setShowOrderDialog(true)
+                            }}
+                            className={`w-full text-white ${action.color} hover:opacity-90`}
+                            size="sm"
+                          >
+                            {action.label}
+                          </Button>
+                        ))
+                      ) : (
+                        <Button
+                          onClick={() => openOrderDialog(order)}
+                          variant="outline"
+                          className="w-full bg-transparent"
+                          size="sm"
+                        >
+                          <Edit className="h-4 w-4 mr-2" />
+                          Ko'rish
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -514,15 +597,20 @@ export default function AdminGlobalMarketOrdersPage() {
       <Dialog open={showOrderDialog} onOpenChange={setShowOrderDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Buyurtmani tahrirlash</DialogTitle>
+            <DialogTitle>Buyurtmani boshqarish</DialogTitle>
+            <DialogDescription>
+              Buyurtma holati va eslatmalarni yangilang
+            </DialogDescription>
           </DialogHeader>
 
           {selectedOrder && (
             <div className="space-y-4">
               <div className="p-4 bg-gray-50 rounded-lg">
                 <h4 className="font-medium mb-2">{selectedOrder.products.name}</h4>
-                {selectedOrder.products.product_type === "group" && selectedOrder.selected_product_info && (
-                  <p className="text-sm text-purple-600 mb-2">Tanlangan: {selectedOrder.selected_product_info.name}</p>
+                {selectedOrder.products.product_type === "group" && selectedOrder.group_products && (
+                  <p className="text-sm text-purple-600 mb-2">
+                    Tanlangan: {selectedOrder.group_products.product_name}
+                  </p>
                 )}
                 <p className="text-sm text-gray-600">
                   Mijoz: {selectedOrder.full_name} • {selectedOrder.phone}
@@ -530,54 +618,77 @@ export default function AdminGlobalMarketOrdersPage() {
                 <p className="text-sm text-gray-600">
                   Miqdor: {selectedOrder.quantity} • Jami: {selectedOrder.total_amount.toLocaleString()} so'm
                 </p>
+                <p className="text-sm text-gray-600 mt-2">
+                  Holat: <Badge className={`${stageColors[selectedOrder.stage as keyof typeof stageColors]}`}>
+                    {stageLabels[selectedOrder.stage as keyof typeof stageLabels]}
+                  </Badge>
+                </p>
               </div>
 
-              <div>
-                <Label htmlFor="status">Status *</Label>
-                <Select
-                  value={updateForm.status}
-                  onValueChange={(value) => setUpdateForm((prev) => ({ ...prev, status: value }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="pending">Kutilmoqda</SelectItem>
-                    <SelectItem value="confirmed">Tasdiqlangan</SelectItem>
-                    <SelectItem value="processing">Tayyorlanmoqda</SelectItem>
-                    <SelectItem value="shipped">Yuborilgan</SelectItem>
-                    <SelectItem value="delivered">Yetkazilgan</SelectItem>
-                    <SelectItem value="cancelled">Bekor qilingan</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              {getAvailableActions(selectedOrder).length > 0 && (
+                <div>
+                  <Label htmlFor="action">Harakat tanlang *</Label>
+                  <Select
+                    value={updateForm.action}
+                    onValueChange={(value) => setUpdateForm((prev) => ({ ...prev, action: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Harakatni tanlang" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {getAvailableActions(selectedOrder).map((action) => (
+                        <SelectItem key={action.value} value={action.value}>
+                          {action.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
               <div>
-                <Label htmlFor="admin_notes">Admin eslatmasi</Label>
+                <Label htmlFor="notes">Eslatma</Label>
                 <Textarea
-                  id="admin_notes"
-                  value={updateForm.admin_notes}
-                  onChange={(e) => setUpdateForm((prev) => ({ ...prev, admin_notes: e.target.value }))}
+                  id="notes"
+                  value={updateForm.notes}
+                  onChange={(e) => setUpdateForm((prev) => ({ ...prev, notes: e.target.value }))}
                   placeholder="Qo'shimcha eslatma..."
                   rows={3}
                 />
               </div>
 
               <div className="flex gap-3">
-                <Button onClick={handleUpdateOrder} disabled={updating} className="flex-1 btn-primary">
-                  {updating ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                      Saqlanmoqda...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle className="h-4 w-4 mr-2" />
-                      Saqlash
-                    </>
-                  )}
-                </Button>
-                <Button onClick={() => setShowOrderDialog(false)} variant="outline" className="flex-1 bg-transparent">
+                {getAvailableActions(selectedOrder).length > 0 ? (
+                  <Button
+                    onClick={handleUpdateOrder}
+                    disabled={updating || !updateForm.action}
+                    className="flex-1 btn-primary"
+                  >
+                    {updating ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                        Bajarilmoqda...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="h-4 w-4 mr-2" />
+                        Bajarish
+                      </>
+                    )}
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={() => setShowOrderDialog(false)}
+                    className="flex-1 btn-primary"
+                  >
+                    Yopish
+                  </Button>
+                )}
+                <Button
+                  onClick={() => setShowOrderDialog(false)}
+                  variant="outline"
+                  className="flex-1 bg-transparent"
+                >
                   Bekor qilish
                 </Button>
               </div>
