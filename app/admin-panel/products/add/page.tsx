@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
-import { Package, Upload, Save, ArrowLeft } from "lucide-react"
+import { Package, Upload, Save, ArrowLeft, Plus, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 import Link from "next/link"
@@ -22,6 +22,13 @@ interface Category {
   slug: string
 }
 
+interface GroupProduct {
+  id: string
+  product_name: string
+  product_description: string
+  individual_price: string
+}
+
 export default function AdminAddProductPage() {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
@@ -30,12 +37,16 @@ export default function AdminAddProductPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string>("")
+  const [productType, setProductType] = useState<"single" | "group">("single")
+  const [groupProducts, setGroupProducts] = useState<GroupProduct[]>([
+    { id: "1", product_name: "", product_description: "", individual_price: "" },
+  ])
+
   const [formData, setFormData] = useState({
     name: "",
     description: "",
     price: "",
     stock_quantity: "",
-    product_type: "book",
     brand: "",
     author: "",
     isbn: "",
@@ -133,6 +144,50 @@ export default function AdminAddProductPage() {
     return publicUrl
   }
 
+  const addGroupProduct = () => {
+    if (groupProducts.length < 30) {
+      setGroupProducts([
+        ...groupProducts,
+        { id: Date.now().toString(), product_name: "", product_description: "", individual_price: "" },
+      ])
+    } else {
+      toast.error("Maksimal 30 ta mahsulot qo'shish mumkin")
+    }
+  }
+
+  const removeGroupProduct = (id: string) => {
+    if (groupProducts.length > 1) {
+      setGroupProducts(groupProducts.filter((p) => p.id !== id))
+    }
+  }
+
+  const updateGroupProduct = (id: string, field: string, value: string) => {
+    setGroupProducts(groupProducts.map((p) => (p.id === id ? { ...p, [field]: value } : p)))
+  }
+
+  const generateGroupTitle = () => {
+    const validProducts = groupProducts.filter((p) => p.product_name.trim())
+    return validProducts.map((p) => p.product_name.trim()).join(", ")
+  }
+
+  const generateGroupDescription = () => {
+    const validProducts = groupProducts.filter((p) => p.product_name.trim())
+    let description = "Bu to'plamda quyidagi mahsulotlar mavjud:\n\n"
+
+    validProducts.forEach((product, index) => {
+      description += `${index + 1}. ${product.product_name}`
+      if (product.product_description.trim()) {
+        description += ` - ${product.product_description}`
+      }
+      if (product.individual_price.trim()) {
+        description += ` (${Number(product.individual_price).toLocaleString()} so'm)`
+      }
+      description += "\n"
+    })
+
+    return description
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaving(true)
@@ -144,6 +199,15 @@ export default function AdminAddProductPage() {
         return
       }
 
+      // For group products, validate group products
+      if (productType === "group") {
+        const validGroupProducts = groupProducts.filter((p) => p.product_name.trim())
+        if (validGroupProducts.length === 0) {
+          toast.error("Kamida bitta mahsulot qo'shing")
+          return
+        }
+      }
+
       let imageUrl = ""
       if (imageFile) {
         imageUrl = await uploadImage(imageFile)
@@ -151,11 +215,11 @@ export default function AdminAddProductPage() {
 
       // Prepare product data
       const productData = {
-        name: formData.name,
-        description: formData.description || null,
+        name: productType === "group" ? generateGroupTitle() : formData.name,
+        description: productType === "group" ? generateGroupDescription() : formData.description || null,
         price: Number.parseFloat(formData.price),
         stock_quantity: Number.parseInt(formData.stock_quantity),
-        product_type: formData.product_type,
+        product_type: productType,
         brand: formData.brand || null,
         author: formData.author || null,
         isbn: formData.isbn || null,
@@ -179,9 +243,25 @@ export default function AdminAddProductPage() {
         updated_at: new Date().toISOString(),
       }
 
-      const { data, error } = await supabase.from("products").insert(productData).select().single()
+      const { data: product, error } = await supabase.from("products").insert(productData).select().single()
 
       if (error) throw error
+
+      // If group product, insert group products
+      if (productType === "group") {
+        const validGroupProducts = groupProducts.filter((p) => p.product_name.trim())
+        const groupProductsData = validGroupProducts.map((gp) => ({
+          group_id: product.id,
+          product_name: gp.product_name.trim(),
+          product_description: gp.product_description.trim() || null,
+          individual_price: gp.individual_price.trim() ? Number.parseFloat(gp.individual_price) : null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }))
+
+        const { error: groupError } = await supabase.from("group_products").insert(groupProductsData)
+        if (groupError) throw groupError
+      }
 
       toast.success("Mahsulot muvaffaqiyatli qo'shildi")
       router.push("/admin-panel/products")
@@ -225,6 +305,34 @@ export default function AdminAddProductPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Main Info */}
           <div className="lg:col-span-2 space-y-6">
+            {/* Product Type Selection */}
+            <Card className="card-beautiful">
+              <CardHeader>
+                <CardTitle>Mahsulot turi</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex gap-4">
+                  <Button
+                    type="button"
+                    variant={productType === "single" ? "default" : "outline"}
+                    onClick={() => setProductType("single")}
+                    className="flex-1"
+                  >
+                    Yakka mahsulot
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={productType === "group" ? "default" : "outline"}
+                    onClick={() => setProductType("group")}
+                    className="flex-1"
+                  >
+                    Guruhli mahsulot
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Basic Information */}
             <Card className="card-beautiful">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -233,27 +341,31 @@ export default function AdminAddProductPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div>
-                  <Label htmlFor="name">Mahsulot nomi *</Label>
-                  <Input
-                    id="name"
-                    value={formData.name}
-                    onChange={(e) => handleInputChange("name", e.target.value)}
-                    placeholder="Mahsulot nomini kiriting"
-                    required
-                  />
-                </div>
+                {productType === "single" && (
+                  <div>
+                    <Label htmlFor="name">Mahsulot nomi *</Label>
+                    <Input
+                      id="name"
+                      value={formData.name}
+                      onChange={(e) => handleInputChange("name", e.target.value)}
+                      placeholder="Mahsulot nomini kiriting"
+                      required
+                    />
+                  </div>
+                )}
 
-                <div>
-                  <Label htmlFor="description">Tavsif</Label>
-                  <Textarea
-                    id="description"
-                    value={formData.description}
-                    onChange={(e) => handleInputChange("description", e.target.value)}
-                    placeholder="Mahsulot haqida batafsil ma'lumot"
-                    rows={4}
-                  />
-                </div>
+                {productType === "single" && (
+                  <div>
+                    <Label htmlFor="description">Tavsif</Label>
+                    <Textarea
+                      id="description"
+                      value={formData.description}
+                      onChange={(e) => handleInputChange("description", e.target.value)}
+                      placeholder="Mahsulot haqida batafsil ma'lumot"
+                      rows={4}
+                    />
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
@@ -303,29 +415,6 @@ export default function AdminAddProductPage() {
                     </Select>
                   </div>
                   <div>
-                    <Label htmlFor="product_type">Mahsulot turi</Label>
-                    <Select
-                      value={formData.product_type}
-                      onValueChange={(value) => handleInputChange("product_type", value)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="book">Kitob</SelectItem>
-                        <SelectItem value="electronics">Elektronika</SelectItem>
-                        <SelectItem value="clothing">Kiyim</SelectItem>
-                        <SelectItem value="home">Uy-ro'zg'or</SelectItem>
-                        <SelectItem value="sports">Sport</SelectItem>
-                        <SelectItem value="beauty">Go'zallik</SelectItem>
-                        <SelectItem value="other">Boshqa</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
                     <Label htmlFor="condition">Holati</Label>
                     <Select value={formData.condition} onValueChange={(value) => handleInputChange("condition", value)}>
                       <SelectTrigger>
@@ -340,97 +429,18 @@ export default function AdminAddProductPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div>
-                    <Label htmlFor="language">Til</Label>
-                    <Select value={formData.language} onValueChange={(value) => handleInputChange("language", value)}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="uzbek">O'zbek</SelectItem>
-                        <SelectItem value="russian">Rus</SelectItem>
-                        <SelectItem value="english">Ingliz</SelectItem>
-                        <SelectItem value="other">Boshqa</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
                 </div>
-              </CardContent>
-            </Card>
 
-            {/* Book Specific Fields */}
-            {formData.product_type === "book" && (
-              <Card className="card-beautiful">
-                <CardHeader>
-                  <CardTitle>Kitob ma'lumotlari</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="author">Muallif</Label>
-                      <Input
-                        id="author"
-                        value={formData.author}
-                        onChange={(e) => handleInputChange("author", e.target.value)}
-                        placeholder="Muallif ismi"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="publisher">Nashriyot</Label>
-                      <Input
-                        id="publisher"
-                        value={formData.publisher}
-                        onChange={(e) => handleInputChange("publisher", e.target.value)}
-                        placeholder="Nashriyot nomi"
-                      />
-                    </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="author">Muallif</Label>
+                    <Input
+                      id="author"
+                      value={formData.author}
+                      onChange={(e) => handleInputChange("author", e.target.value)}
+                      placeholder="Muallif ismi"
+                    />
                   </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <Label htmlFor="isbn">ISBN</Label>
-                      <Input
-                        id="isbn"
-                        value={formData.isbn}
-                        onChange={(e) => handleInputChange("isbn", e.target.value)}
-                        placeholder="ISBN raqami"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="publication_year">Nashr yili</Label>
-                      <Input
-                        id="publication_year"
-                        type="number"
-                        value={formData.publication_year}
-                        onChange={(e) => handleInputChange("publication_year", e.target.value)}
-                        placeholder="2024"
-                        min="1900"
-                        max="2030"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="pages">Sahifalar soni</Label>
-                      <Input
-                        id="pages"
-                        type="number"
-                        value={formData.pages}
-                        onChange={(e) => handleInputChange("pages", e.target.value)}
-                        placeholder="0"
-                        min="1"
-                      />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Other Product Fields */}
-            {formData.product_type !== "book" && (
-              <Card className="card-beautiful">
-                <CardHeader>
-                  <CardTitle>Qo'shimcha ma'lumotlar</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
                   <div>
                     <Label htmlFor="brand">Brend</Label>
                     <Input
@@ -440,6 +450,89 @@ export default function AdminAddProductPage() {
                       placeholder="Brend nomi"
                     />
                   </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Group Products */}
+            {productType === "group" && (
+              <Card className="card-beautiful">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle>Guruh mahsulotlari</CardTitle>
+                    <Button type="button" onClick={addGroupProduct} size="sm" disabled={groupProducts.length >= 30}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Mahsulot qo'shish
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {groupProducts.map((product, index) => (
+                    <div key={product.id} className="border rounded-lg p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-medium">Mahsulot {index + 1}</h4>
+                        {groupProducts.length > 1 && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => removeGroupProduct(product.id)}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <Label>Mahsulot nomi *</Label>
+                          <Input
+                            value={product.product_name}
+                            onChange={(e) => updateGroupProduct(product.id, "product_name", e.target.value)}
+                            placeholder="Mahsulot nomini kiriting"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <Label>Alohida narx (ixtiyoriy)</Label>
+                          <Input
+                            type="number"
+                            value={product.individual_price}
+                            onChange={(e) => updateGroupProduct(product.id, "individual_price", e.target.value)}
+                            placeholder="0"
+                            min="0"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <Label>Tavsif (ixtiyoriy)</Label>
+                        <Textarea
+                          value={product.product_description}
+                          onChange={(e) => updateGroupProduct(product.id, "product_description", e.target.value)}
+                          placeholder="Mahsulot haqida qisqacha"
+                          rows={2}
+                        />
+                      </div>
+                    </div>
+                  ))}
+
+                  {productType === "group" && (
+                    <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <h5 className="font-medium text-blue-800 mb-2">Avtomatik yaratilgan ma'lumotlar:</h5>
+                      <div className="space-y-2 text-sm">
+                        <div>
+                          <strong>Sarlavha:</strong> {generateGroupTitle() || "Mahsulot nomlarini kiriting"}
+                        </div>
+                        <div>
+                          <strong>Tavsif:</strong>
+                          <pre className="whitespace-pre-wrap text-xs mt-1 bg-white p-2 rounded border">
+                            {generateGroupDescription()}
+                          </pre>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}

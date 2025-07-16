@@ -4,6 +4,8 @@ import { supabase } from "@/lib/supabase"
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
+    console.log("Order request body:", body)
+
     const {
       product_id,
       full_name,
@@ -11,86 +13,158 @@ export async function POST(request: NextRequest) {
       address,
       quantity,
       with_delivery = false,
-      neighborhood,
-      street,
-      house_number,
+      neighborhood = null,
+      street = null,
+      house_number = null,
+      selected_group_product_id = null,
     } = body
 
     // Validate required fields
-    if (!product_id || !full_name || !phone || !address || !quantity || quantity <= 0) {
+    if (!product_id || !full_name || !phone || !quantity) {
+      console.log("Missing required fields:", { product_id, full_name, phone, quantity })
       return NextResponse.json(
         {
           success: false,
-          error: "Barcha majburiy maydonlar to'ldirilishi kerak",
+          error: "Majburiy maydonlar to'ldirilmagan",
         },
         { status: 400 },
       )
     }
 
-    // Get current user if logged in
-    const authHeader = request.headers.get("authorization")
+    // Get user ID from auth header if available
     let user_id = null
-
-    if (authHeader) {
-      const token = authHeader.replace("Bearer ", "")
+    const authHeader = request.headers.get("authorization")
+    if (authHeader?.startsWith("Bearer ")) {
+      const token = authHeader.substring(7)
       try {
         const {
           data: { user },
           error: authError,
         } = await supabase.auth.getUser(token)
-
         if (!authError && user) {
           user_id = user.id
+          console.log("Authenticated user:", user_id)
         }
       } catch (authError) {
-        console.error("Auth error:", authError)
-        // Continue as anonymous user
+        console.log("Auth error (non-critical):", authError)
       }
     }
 
-    // Use the database function to create order
-    const { data, error } = await supabase.rpc("create_simple_order", {
+    console.log("Creating order with data:", {
+      product_id,
+      user_id,
+      full_name,
+      phone,
+      address,
+      quantity,
+      with_delivery,
+      selected_group_product_id,
+    })
+
+    // Use the create_simple_order function
+    const { data: result, error: functionError } = await supabase.rpc("create_simple_order", {
       product_id_param: product_id,
       full_name_param: full_name,
       phone_param: phone,
-      address_param: address,
-      quantity_param: quantity,
+      address_param: address || "Do'kondan olib ketish",
+      quantity_param: Number.parseInt(quantity),
       user_id_param: user_id,
+      selected_group_product_id: selected_group_product_id,
     })
 
-    if (error) {
-      console.error("Order creation error:", error)
+    console.log("Function result:", result)
+    console.log("Function error:", functionError)
+
+    if (functionError) {
+      console.error("Function error:", functionError)
       return NextResponse.json(
         {
           success: false,
-          error: "Buyurtma yaratishda xatolik",
+          error: "Buyurtma yaratishda xatolik: " + functionError.message,
         },
         { status: 500 },
       )
     }
 
-    if (!data.success) {
+    if (!result || !result.success) {
+      console.error("Function returned error:", result)
       return NextResponse.json(
         {
           success: false,
-          error: data.error,
+          error: result?.error || "Buyurtma yaratishda xatolik",
         },
         { status: 400 },
       )
     }
 
+    console.log("Order created successfully:", result)
+
+    // Send notification to admin via Telegram if it's an admin product
+    try {
+      const { data: product } = await supabase
+        .from("products")
+        .select(`
+          name, 
+          price,
+          users!inner(username, full_name)
+        `)
+        .eq("id", product_id)
+        .single()
+
+      if (product?.users?.username === "admin") {
+        console.log("Sending admin notification for product:", product.name)
+
+        // Get selected product name for group products
+        let selectedProductName = ""
+        if (selected_group_product_id) {
+          const { data: groupProduct } = await supabase
+            .from("group_products")
+            .select("product_name")
+            .eq("id", selected_group_product_id)
+            .single()
+
+          if (groupProduct) {
+            selectedProductName = ` (${groupProduct.product_name})`
+          }
+        }
+
+        const message = `🛒 Yangi buyurtma!
+
+📦 Mahsulot: ${product.name}${selectedProductName}
+👤 Mijoz: ${full_name}
+📞 Telefon: ${phone}
+📍 Manzil: ${address}
+📊 Miqdor: ${quantity}
+💰 Jami: ${result.total_amount?.toLocaleString()} so'm
+🚚 Yetkazib berish: ${with_delivery ? "Ha" : "Yo'q"}
+
+Buyurtma ID: ${result.order_id}`
+
+        await fetch(`${process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"}/api/telegram-bot/notify-admins`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ message }),
+        })
+      }
+    } catch (notificationError) {
+      console.error("Error sending notification:", notificationError)
+      // Don't fail the order creation if notification fails
+    }
+
     return NextResponse.json({
       success: true,
-      order_id: data.order_id,
-      total_amount: data.total_amount,
-      message: "Buyurtma muvaffaqiyatli yaratildi",
+      order_id: result.order_id,
+      total_amount: result.total_amount,
+      message: "Buyurtma muvaffaqiyatli yaratildi!",
     })
   } catch (error) {
-    console.error("Orders POST error:", error)
+    console.error("Unexpected error in order creation:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Server xatoligi",
+        error: "Buyurtma yaratishda kutilmagan xatolik yuz berdi",
       },
       { status: 500 },
     )
@@ -99,25 +173,18 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url)
-    const user_id = searchParams.get("user_id")
-    const status = searchParams.get("status")
-    const page = Number.parseInt(searchParams.get("page") || "1")
-    const limit = Number.parseInt(searchParams.get("limit") || "10")
-
-    // Get authorization header
     const authHeader = request.headers.get("authorization")
-    if (!authHeader) {
+    if (!authHeader?.startsWith("Bearer ")) {
       return NextResponse.json(
         {
           success: false,
-          error: "Authorization required",
+          error: "Avtorizatsiya kerak",
         },
         { status: 401 },
       )
     }
 
-    const token = authHeader.replace("Bearer ", "")
+    const token = authHeader.substring(7)
     const {
       data: { user },
       error: authError,
@@ -127,101 +194,130 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: "Invalid token",
+          error: "Yaroqsiz token",
         },
         { status: 401 },
       )
     }
 
-    // Build query
-    let query = supabase.from("orders").select(
-      `
+    // Check if user is admin
+    const { data: userData, error: userError } = await supabase
+      .from("users")
+      .select("is_admin, username")
+      .eq("id", user.id)
+      .single()
+
+    if (userError) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Foydalanuvchi ma'lumotlarini olishda xatolik",
+        },
+        { status: 500 },
+      )
+    }
+
+    const isAdmin = userData?.is_admin || userData?.username === "admin"
+
+    let query = supabase
+      .from("orders")
+      .select(`
         *,
         products (
           id,
           name,
           price,
           image_url,
-          seller_id,
-          has_delivery,
-          delivery_price
+          product_type,
+          users (
+            id,
+            full_name,
+            company_name,
+            phone,
+            username
+          )
+        ),
+        group_products (
+          id,
+          product_name,
+          product_description
         )
-      `,
-      { count: "exact" },
-    )
+      `)
+      .order("created_at", { ascending: false })
 
-    // Apply filters
-    if (user_id) {
-      query = query.eq("user_id", user_id)
-    } else {
+    // If not admin, only show user's orders
+    if (!isAdmin) {
       query = query.eq("user_id", user.id)
     }
 
-    if (status) {
-      query = query.eq("status", status)
+    const { data: orders, error: ordersError } = await query
+
+    if (ordersError) {
+      console.error("Error fetching orders:", ordersError)
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Buyurtmalarni olishda xatolik",
+        },
+        { status: 500 },
+      )
     }
 
-    // Apply pagination
-    const offset = (page - 1) * limit
-    query = query.range(offset, offset + limit - 1)
-    query = query.order("created_at", { ascending: false })
+    // Process orders to include selected product info for group products
+    const processedOrders = orders?.map((order) => {
+      let selectedProductInfo = null
 
-    const { data: orders, error, count } = await query
+      if (order.selected_group_product_id && order.group_products) {
+        const groupProduct = Array.isArray(order.group_products)
+          ? order.group_products.find((gp) => gp.id === order.selected_group_product_id)
+          : order.group_products
 
-    if (error) {
-      throw error
-    }
+        if (groupProduct) {
+          selectedProductInfo = {
+            id: groupProduct.id,
+            name: groupProduct.product_name,
+            description: groupProduct.product_description,
+          }
+        }
+      }
+
+      return {
+        ...order,
+        selected_product_info: selectedProductInfo,
+      }
+    })
 
     return NextResponse.json({
       success: true,
-      orders: orders || [],
-      pagination: {
-        page,
-        limit,
-        total: count || 0,
-        totalPages: Math.ceil((count || 0) / limit),
-      },
+      orders: processedOrders || [],
+      is_admin: isAdmin,
     })
   } catch (error) {
-    console.error("Orders GET error:", error)
+    console.error("Error in GET /api/orders:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Server xatoligi",
+        error: "Buyurtmalarni olishda xatolik",
       },
       { status: 500 },
     )
   }
 }
 
-export async function PUT(request: NextRequest) {
+export async function PATCH(request: NextRequest) {
   try {
-    const body = await request.json()
-    const { orderId, action, notes, pickupAddress } = body
-
-    if (!orderId || !action) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Order ID va action majburiy",
-        },
-        { status: 400 },
-      )
-    }
-
-    // Get authorization header
     const authHeader = request.headers.get("authorization")
-    if (!authHeader) {
+    if (!authHeader?.startsWith("Bearer ")) {
       return NextResponse.json(
         {
           success: false,
-          error: "Authorization required",
+          error: "Avtorizatsiya kerak",
         },
         { status: 401 },
       )
     }
 
-    const token = authHeader.replace("Bearer ", "")
+    const token = authHeader.substring(7)
     const {
       data: { user },
       error: authError,
@@ -231,130 +327,87 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: "Invalid token",
+          error: "Yaroqsiz token",
         },
         { status: 401 },
       )
     }
 
-    // Get current order with product info
-    const { data: order, error: orderError } = await supabase
-      .from("orders")
-      .select(`
-        *,
-        products (
-          id,
-          seller_id,
-          order_count
-        )
-      `)
-      .eq("id", orderId)
+    // Check if user is admin
+    const { data: userData, error: userError } = await supabase
+      .from("users")
+      .select("is_admin, username")
+      .eq("id", user.id)
       .single()
 
-    if (orderError || !order) {
+    if (userError) {
       return NextResponse.json(
         {
           success: false,
-          error: "Buyurtma topilmadi",
+          error: "Foydalanuvchi ma'lumotlarini olishda xatolik",
         },
-        { status: 404 },
+        { status: 500 },
       )
     }
 
-    // Check if user is the seller or admin
-    const { data: userData } = await supabase.from("users").select("is_admin").eq("id", user.id).single()
+    const isAdmin = userData?.is_admin || userData?.username === "admin"
 
-    const isAdmin = userData?.is_admin
-    const isSeller = order.products?.seller_id === user.id
-
-    if (!isAdmin && !isSeller) {
+    if (!isAdmin) {
       return NextResponse.json(
         {
           success: false,
-          error: "Sizda bu buyurtmani o'zgartirish huquqi yo'q",
+          error: "Sizda bu amalni bajarish huquqi yo'q",
         },
         { status: 403 },
       )
     }
 
-    const updateData: any = {
-      updated_at: new Date().toISOString(),
+    const body = await request.json()
+    const { order_id, status, admin_notes } = body
+
+    if (!order_id || !status) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Buyurtma ID va status majburiy",
+        },
+        { status: 400 },
+      )
     }
 
-    let shouldIncrementOrderCount = false
+    const { data: updatedOrder, error: updateError } = await supabase
+      .from("orders")
+      .update({
+        status,
+        admin_notes: admin_notes || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", order_id)
+      .select()
+      .single()
 
-    switch (action) {
-      case "agree":
-        updateData.is_agree = true
-        updateData.pickup_address = pickupAddress || order.address
-        updateData.seller_notes = notes
-        break
-      case "reject":
-        updateData.is_agree = false
-        updateData.status = "cancelled"
-        updateData.seller_notes = notes
-        break
-      case "client_went":
-        updateData.is_client_went = true
-        updateData.client_notes = notes
-        break
-      case "client_not_went":
-        updateData.is_client_went = false
-        updateData.client_notes = notes
-        break
-      case "product_given":
-        updateData.is_client_claimed = true
-        updateData.status = "completed"
-        updateData.seller_notes = notes
-        shouldIncrementOrderCount = true // Only increment when order is completed
-        break
-      case "product_not_given":
-        updateData.is_client_claimed = false
-        updateData.seller_notes = notes
-        break
-      default:
-        return NextResponse.json(
-          {
-            success: false,
-            error: "Noto'g'ri action",
-          },
-          { status: 400 },
-        )
-    }
-
-    // Start a transaction to update both order and product
-    const { data, error } = await supabase.from("orders").update(updateData).eq("id", orderId).select().single()
-
-    if (error) {
-      throw error
-    }
-
-    // If order is completed, increment product order_count
-    if (shouldIncrementOrderCount && order.products?.id) {
-      const { error: productError } = await supabase
-        .from("products")
-        .update({
-          order_count: (order.products.order_count || 0) + order.quantity,
-        })
-        .eq("id", order.products.id)
-
-      if (productError) {
-        console.error("Error updating product order_count:", productError)
-        // Don't fail the whole operation, just log the error
-      }
+    if (updateError) {
+      console.error("Error updating order:", updateError)
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Buyurtmani yangilashda xatolik",
+        },
+        { status: 500 },
+      )
     }
 
     return NextResponse.json({
       success: true,
-      order: data,
-      message: "Buyurtma holati yangilandi",
+      order: updatedOrder,
+      message: "Buyurtma muvaffaqiyatli yangilandi",
     })
   } catch (error) {
-    console.error("Orders PUT error:", error)
+    console.error("Error in PATCH /api/orders:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Server xatoligi",
+        error: "Buyurtmani yangilashda xatolik",
       },
       { status: 500 },
     )

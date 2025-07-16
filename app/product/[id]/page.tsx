@@ -36,6 +36,13 @@ import { toast } from "sonner"
 import Image from "next/image"
 import Link from "next/link"
 
+interface GroupProduct {
+  id: string
+  product_name: string
+  product_description: string | null
+  individual_price: number | null
+}
+
 interface Product {
   id: string
   name: string
@@ -45,6 +52,7 @@ interface Product {
   stock_quantity: number
   category_id: string
   seller_id: string
+  product_type: string
   has_delivery: boolean
   delivery_price: number
   has_warranty: boolean
@@ -102,6 +110,8 @@ export default function ProductDetailPage() {
   const params = useParams<{ id: string }>()
   const router = useRouter()
   const [product, setProduct] = useState<Product | null>(null)
+  const [groupProducts, setGroupProducts] = useState<GroupProduct[]>([])
+  const [selectedGroupProduct, setSelectedGroupProduct] = useState<string>("")
   const [similarProducts, setSimilarProducts] = useState<SimilarProduct[]>([])
   const [neighborhoods, setNeighborhoods] = useState<Neighborhood[]>([])
   const [loading, setLoading] = useState(true)
@@ -182,6 +192,12 @@ export default function ProductDetailPage() {
       } else {
         setProduct(data)
         setLikesCount(data.like_count || 0)
+
+        // If it's a group product, fetch group products
+        if (data.product_type === "group") {
+          await fetchGroupProducts(data.id)
+        }
+
         if (data.category_id) {
           fetchSimilarProducts(data.category_id, data.id)
         }
@@ -192,6 +208,26 @@ export default function ProductDetailPage() {
       setProduct(null)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchGroupProducts = async (productId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("group_products")
+        .select("*")
+        .eq("group_id", productId)
+        .order("created_at")
+
+      if (error) throw error
+      setGroupProducts(data || [])
+
+      // Auto-select first product if available
+      if (data && data.length > 0) {
+        setSelectedGroupProduct(data[0].id)
+      }
+    } catch (error: any) {
+      console.error("Error fetching group products:", error.message)
     }
   }
 
@@ -306,6 +342,12 @@ export default function ProductDetailPage() {
       return
     }
 
+    // For group products, check if a product is selected
+    if (product.product_type === "group" && !selectedGroupProduct) {
+      toast.error("Iltimos, mahsulotni tanlang")
+      return
+    }
+
     try {
       const session = (await supabase.auth.getSession()).data.session
       if (!session?.access_token) {
@@ -322,6 +364,7 @@ export default function ProductDetailPage() {
         body: JSON.stringify({
           product_id: product.id,
           quantity: quantity,
+          selected_group_product_id: product.product_type === "group" ? selectedGroupProduct : null,
         }),
       })
 
@@ -350,6 +393,12 @@ export default function ProductDetailPage() {
       return
     }
 
+    // For group products, check if a product is selected
+    if (product.product_type === "group" && !selectedGroupProduct) {
+      toast.error("Iltimos, mahsulotni tanlang")
+      return
+    }
+
     if (quickOrderForm.with_delivery && product.has_delivery) {
       if (!quickOrderForm.neighborhood || !quickOrderForm.street || !quickOrderForm.house_number) {
         toast.error("Yetkazib berish uchun to'liq manzil majburiy")
@@ -374,6 +423,7 @@ export default function ProductDetailPage() {
         neighborhood: quickOrderForm.with_delivery && product.has_delivery ? quickOrderForm.neighborhood : null,
         street: quickOrderForm.with_delivery && product.has_delivery ? quickOrderForm.street : null,
         house_number: quickOrderForm.with_delivery && product.has_delivery ? quickOrderForm.house_number : null,
+        selected_group_product_id: product.product_type === "group" ? selectedGroupProduct : null,
       }
 
       const response = await fetch("/api/orders", {
@@ -441,6 +491,12 @@ export default function ProductDetailPage() {
     }
   }
 
+  const getSelectedProductName = () => {
+    if (product?.product_type !== "group" || !selectedGroupProduct) return ""
+    const selected = groupProducts.find((gp) => gp.id === selectedGroupProduct)
+    return selected?.product_name || ""
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
@@ -501,6 +557,12 @@ export default function ProductDetailPage() {
                   <Badge className="bg-white/90 text-gray-800 shadow-lg">
                     {product.categories.icon && <span className="mr-1">{product.categories.icon}</span>}
                     {product.categories.name}
+                  </Badge>
+                )}
+                {product.product_type === "group" && (
+                  <Badge className="bg-purple-500 text-white shadow-lg">
+                    <Package className="h-3 w-3 mr-1" />
+                    Guruhli mahsulot
                   </Badge>
                 )}
                 {product.stock_quantity > 0 && product.stock_quantity <= 5 && (
@@ -588,6 +650,49 @@ export default function ProductDetailPage() {
               {product.price.toLocaleString("uz-UZ")} so'm
             </div>
 
+            {/* Group Products Selection */}
+            {product.product_type === "group" && groupProducts.length > 0 && (
+              <div className="bg-white rounded-2xl p-6 shadow-lg border">
+                <Label className="text-lg font-semibold mb-4 block">Mahsulotni tanlang</Label>
+                <div className="space-y-3">
+                  {groupProducts.map((gp) => (
+                    <div
+                      key={gp.id}
+                      className={`p-4 border rounded-lg cursor-pointer transition-all ${
+                        selectedGroupProduct === gp.id
+                          ? "border-blue-500 bg-blue-50"
+                          : "border-gray-200 hover:border-gray-300"
+                      }`}
+                      onClick={() => setSelectedGroupProduct(gp.id)}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`w-4 h-4 rounded-full border-2 ${
+                            selectedGroupProduct === gp.id ? "border-blue-500 bg-blue-500" : "border-gray-300"
+                          }`}
+                        >
+                          {selectedGroupProduct === gp.id && (
+                            <div className="w-full h-full rounded-full bg-white scale-50"></div>
+                          )}
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="font-medium">{gp.product_name}</h4>
+                          {gp.product_description && (
+                            <p className="text-sm text-gray-600 mt-1">{gp.product_description}</p>
+                          )}
+                          {gp.individual_price && (
+                            <p className="text-sm text-green-600 mt-1">
+                              Alohida narx: {gp.individual_price.toLocaleString()} so'm
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-6">
               <div className="bg-white rounded-2xl p-6 shadow-lg border">
                 <Label htmlFor="quantity" className="text-lg font-semibold mb-4 block">
@@ -626,7 +731,11 @@ export default function ProductDetailPage() {
                     onClick={handleAddToCart}
                     variant="outline"
                     className="bg-gradient-to-r from-gray-50 to-gray-100 border-gray-300 hover:from-gray-100 hover:to-gray-200 text-gray-800 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={product.stock_quantity === 0 || !user}
+                    disabled={
+                      product.stock_quantity === 0 ||
+                      !user ||
+                      (product.product_type === "group" && !selectedGroupProduct)
+                    }
                   >
                     <ShoppingCart className="w-5 h-5 mr-2" />
                     Savatga qo'shish
@@ -667,6 +776,45 @@ export default function ProductDetailPage() {
                             placeholder="+998 90 123 45 67"
                           />
                         </div>
+
+                        {/* Group Product Selection in Order Dialog */}
+                        {product.product_type === "group" && groupProducts.length > 0 && (
+                          <div>
+                            <Label>Mahsulotni tanlang *</Label>
+                            <div className="space-y-2 mt-2 max-h-40 overflow-y-auto">
+                              {groupProducts.map((gp) => (
+                                <div
+                                  key={gp.id}
+                                  className={`p-3 border rounded-lg cursor-pointer transition-all ${
+                                    selectedGroupProduct === gp.id
+                                      ? "border-blue-500 bg-blue-50"
+                                      : "border-gray-200 hover:border-gray-300"
+                                  }`}
+                                  onClick={() => setSelectedGroupProduct(gp.id)}
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <div
+                                      className={`w-3 h-3 rounded-full border ${
+                                        selectedGroupProduct === gp.id
+                                          ? "border-blue-500 bg-blue-500"
+                                          : "border-gray-300"
+                                      }`}
+                                    />
+                                    <div className="flex-1">
+                                      <p className="font-medium text-sm">{gp.product_name}</p>
+                                      {gp.product_description && (
+                                        <p className="text-xs text-gray-600">{gp.product_description}</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            {selectedGroupProduct && (
+                              <p className="text-sm text-blue-600 mt-2">Tanlangan: {getSelectedProductName()}</p>
+                            )}
+                          </div>
+                        )}
 
                         {product.has_delivery && (
                           <div className="flex items-center space-x-2">
@@ -742,6 +890,13 @@ export default function ProductDetailPage() {
                               </span>
                             </div>
 
+                            {product.product_type === "group" && selectedGroupProduct && (
+                              <div className="flex justify-between text-sm text-gray-600">
+                                <span>Tanlangan mahsulot:</span>
+                                <span>{getSelectedProductName()}</span>
+                              </div>
+                            )}
+
                             {quickOrderForm.with_delivery && product.has_delivery && (
                               <div className="flex justify-between">
                                 <span>Yetkazib berish:</span>
@@ -761,7 +916,11 @@ export default function ProductDetailPage() {
                         </div>
 
                         <div className="grid grid-cols-1 gap-3">
-                          <Button onClick={handleQuickOrder} className="w-full btn-primary">
+                          <Button
+                            onClick={handleQuickOrder}
+                            className="w-full btn-primary"
+                            disabled={product.product_type === "group" && !selectedGroupProduct}
+                          >
                             <Package className="w-5 h-5 mr-2" />
                             Buyurtma berish
                           </Button>
@@ -818,7 +977,7 @@ export default function ProductDetailPage() {
             {product.description && (
               <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl p-6">
                 <h3 className="font-semibold mb-3 text-gray-800">Tavsif</h3>
-                <p className="text-gray-700 leading-relaxed">{product.description}</p>
+                <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">{product.description}</p>
               </div>
             )}
 
