@@ -42,6 +42,7 @@ interface GroupProduct {
   product_name: string
   product_description: string | null
   individual_price: number | null
+  stock_quantity: number
 }
 
 interface Product {
@@ -166,7 +167,7 @@ export default function ProductDetailPage() {
         setUser(user)
         const { data: profile, error: profileError } = await supabase
           .from("users")
-          .select("id, full_name, phone, username")
+          .select("id, full_name, phone, username, is_admin")
           .eq("id", user.id)
           .single()
 
@@ -178,8 +179,7 @@ export default function ProductDetailPage() {
             full_name: profile.full_name || "",
             phone: profile.phone || "",
           }))
-          // Assuming 'admin' is a specific username for admin users
-          setIsAdmin(profile.username === "admin")
+          setIsAdmin(profile.is_admin === true)
         }
       }
     } catch (error) {
@@ -379,8 +379,8 @@ export default function ProductDetailPage() {
     }
     // Check stock based on selected product for group
     const currentStock =
-      product.product_type === "group"
-        ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity || product.stock_quantity // Fallback to main product stock if group product stock is not available
+      product.product_type === "group" && selectedGroupProduct
+        ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity ?? product.stock_quantity // Fallback to main product stock if group product stock is not available
         : product.stock_quantity
 
     if (quantity > currentStock) {
@@ -445,8 +445,8 @@ export default function ProductDetailPage() {
 
     // Check stock based on selected product for group
     const currentStock =
-      product.product_type === "group"
-        ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity || product.stock_quantity // Fallback to main product stock
+      product.product_type === "group" && selectedGroupProduct
+        ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity ?? product.stock_quantity // Fallback to main product stock
         : product.stock_quantity
 
     if (quantity > currentStock) {
@@ -517,10 +517,11 @@ export default function ProductDetailPage() {
     }
   }
 
+  // --- MODIFIED FUNCTION ---
   const handleTelegramOrder = async () => {
     if (!product) return
 
-    // Create a temporary order first to get order ID
+    // Validations are still important to ensure the user has filled the form
     const priceForOrder = getCurrentSelectedPrice()
     if (priceForOrder <= 0 && product.product_type !== "group") {
       toast.error("Mahsulot narxi aniqlanmadi.")
@@ -540,49 +541,23 @@ export default function ProductDetailPage() {
       return
     }
 
+    // Directly open the Telegram bot with the product ID. No order is created in our database.
     try {
-      const orderData = {
-        product_id: product.id,
-        full_name: quickOrderForm.full_name,
-        phone: quickOrderForm.phone,
-        address: "Do'kondan olib ketish",
-        quantity: quantity,
-        with_delivery: false,
-        neighborhood: null,
-        street: null,
-        house_number: null,
-        selected_group_product_id: product.product_type === "group" ? selectedGroupProduct : null,
-        price_at_order: priceForOrder,
-      }
-
-      const response = await fetch("/api/orders", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(orderData),
-      })
-
-      const data = await response.json()
-
-      if (data.success && data.order_id) {
-        const telegramUrl = `https://t.me/globalmarketshopbot?start=order_${data.product_id}`
-        window.open(telegramUrl, "_blank")
-        setShowQuickOrder(false)
-        setQuantity(1)
-      } else {
-        toast.error(data.error || "Buyurtma yaratishda xatolik")
-      }
+      const telegramUrl = `https://t.me/globalmarketshopbot?start=order_${product.id}`
+      window.open(telegramUrl, "_blank")
+      setShowQuickOrder(false)
+      setQuantity(1)
     } catch (error) {
-      console.error("Error creating telegram order:", error)
+      console.error("Error creating telegram order link:", error)
       toast.error("Buyurtma yaratishda xatolik")
     }
   }
+  // --- END OF MODIFIED FUNCTION ---
 
   const calculateTotal = () => {
     const currentPrice = getCurrentSelectedPrice()
     let total = currentPrice * quantity
-    if (quickOrderForm.with_delivery && product.has_delivery) {
+    if (quickOrderForm.with_delivery && product?.has_delivery) {
       total += product.delivery_price || 0
     }
     return total
@@ -846,7 +821,7 @@ export default function ProductDetailPage() {
                     setQuantity(
                       Math.min(
                         product.product_type === "group" && selectedGroupProduct
-                          ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity ||
+                          ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity ??
                               product.stock_quantity // Use specific group product stock or fallback
                           : product.stock_quantity,
                         quantity + 1,
@@ -856,7 +831,7 @@ export default function ProductDetailPage() {
                   disabled={
                     quantity >=
                     (product.product_type === "group" && selectedGroupProduct
-                      ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity ||
+                      ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity ??
                         product.stock_quantity
                       : product.stock_quantity)
                   }
@@ -868,7 +843,7 @@ export default function ProductDetailPage() {
                   <p className="text-sm text-gray-600">
                     Mavjud:{" "}
                     {product.product_type === "group" && selectedGroupProduct
-                      ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity ||
+                      ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity ??
                         product.stock_quantity
                       : product.stock_quantity}
                     dona
@@ -892,7 +867,7 @@ export default function ProductDetailPage() {
                     quantity <= 0 || // Quantity must be positive
                     quantity >
                       (product.product_type === "group" && selectedGroupProduct
-                        ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity ||
+                        ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity ??
                           product.stock_quantity
                         : product.stock_quantity) // Check stock
                   }
@@ -908,10 +883,11 @@ export default function ProductDetailPage() {
                       className="w-full btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
                       disabled={
                         product.stock_quantity === 0 || // Main check for overall availability
+                        (product.product_type === "group" && !selectedGroupProduct) || // Must select group product
                         quantity <= 0 || // Quantity must be positive
                         quantity >
                           (product.product_type === "group" && selectedGroupProduct
-                            ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity ||
+                            ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity ??
                               product.stock_quantity
                             : product.stock_quantity) // Check stock
                       }
@@ -1119,7 +1095,7 @@ export default function ProductDetailPage() {
                                   quantity <= 0 ||
                                   quantity >
                                     (product.product_type === "group" && selectedGroupProduct
-                                      ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity ||
+                                      ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity ??
                                         product.stock_quantity
                                       : product.stock_quantity)
                                 }
@@ -1150,7 +1126,7 @@ export default function ProductDetailPage() {
                               quantity <= 0 ||
                               quantity >
                                 (product.product_type === "group" && selectedGroupProduct
-                                  ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity ||
+                                  ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity ??
                                     product.stock_quantity
                                   : product.stock_quantity)
                             }
