@@ -20,34 +20,6 @@ export default function LoginPage() {
         data: { user },
       } = await supabase.auth.getUser()
       if (user) {
-        // Check if user exists in public.users table
-        const { data: userData, error: userError } = await supabase
-          .from("users")
-          .select("id, full_name, phone, address")
-          .eq("id", user.id)
-          .single()
-
-        if (userError && userError.code === "PGRST116") {
-          // User doesn't exist in public.users, create them
-          const { error: createError } = await supabase.from("users").insert({
-            id: user.id,
-            email: user.email,
-            full_name: user.user_metadata?.full_name || "",
-            phone: user.user_metadata?.phone || "",
-            address: "",
-            type: "google",
-            is_seller: false,
-            is_verified_seller: false,
-            is_admin: false,
-            created_at: new Date().toISOString(),
-            last_sign_in_at: new Date().toISOString(),
-          })
-
-          if (createError) {
-            console.error("Error creating user:", createError)
-          }
-        }
-
         router.push("/")
       }
     }

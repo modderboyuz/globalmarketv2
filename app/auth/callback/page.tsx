@@ -3,6 +3,7 @@
 import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
+import { toast } from "sonner"
 
 export default function AuthCallback() {
   const router = useRouter()
@@ -14,31 +15,59 @@ export default function AuthCallback() {
 
         if (error) {
           console.error("Auth callback error:", error)
-          router.push("/?error=auth_failed")
+          toast.error("Kirish jarayonida xatolik yuz berdi")
+          router.push("/login")
           return
         }
 
         if (data.session?.user) {
-          // Check if user profile is complete
-          const { data: userData } = await supabase
+          const user = data.session.user
+
+          // Check if user exists in our users table
+          const { data: existingUser, error: userError } = await supabase
             .from("users")
-            .select("full_name, phone, address")
-            .eq("id", data.session.user.id)
+            .select("*")
+            .eq("id", user.id)
             .single()
 
-          if (!userData || !userData.full_name || !userData.phone || !userData.address) {
-            // Profile incomplete, redirect to home with auth modal
-            router.push("/?auth=profile_required")
-          } else {
-            // Profile complete, redirect to home
-            router.push("/")
+          if (userError && userError.code !== "PGRST116") {
+            console.error("Error checking user:", userError)
           }
-        } else {
+
+          // If user doesn't exist, create them
+          if (!existingUser) {
+            const { error: insertError } = await supabase.from("users").insert({
+              id: user.id,
+              email: user.email,
+              full_name: user.user_metadata?.full_name || user.user_metadata?.name || "",
+              phone: "+998958657500", // Default phone number
+              address: "",
+              type: "google",
+              username: null,
+              is_admin: false,
+              is_verified_seller: false,
+              created_at: new Date().toISOString(),
+              last_sign_in_at: new Date().toISOString(),
+            })
+
+            if (insertError) {
+              console.error("Error creating user:", insertError)
+              // Don't block login if user creation fails
+            }
+          } else {
+            // Update last sign in time
+            await supabase.from("users").update({ last_sign_in_at: new Date().toISOString() }).eq("id", user.id)
+          }
+
+          toast.success("Muvaffaqiyatli kirildi!")
           router.push("/")
+        } else {
+          router.push("/login")
         }
       } catch (error) {
         console.error("Auth callback error:", error)
-        router.push("/?error=auth_failed")
+        toast.error("Kirish jarayonida xatolik yuz berdi")
+        router.push("/login")
       }
     }
 
@@ -48,8 +77,8 @@ export default function AuthCallback() {
   return (
     <div className="min-h-screen flex items-center justify-center">
       <div className="text-center">
-        <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-        <p>Kirish jarayoni...</p>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+        <p className="text-gray-600">Kirish jarayoni...</p>
       </div>
     </div>
   )
