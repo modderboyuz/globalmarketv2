@@ -566,7 +566,7 @@ export default function ProductDetailPage() {
       const data = await response.json()
 
       if (data.success && data.order_id) {
-        const telegramUrl = `https://t.me/globalmarketshopbot?start=order_${data.order_id}`
+        const telegramUrl = `https://t.me/globalmarketshopbot?start=order_${data.product_id}`
         window.open(telegramUrl, "_blank")
         setShowQuickOrder(false)
         setQuantity(1)
