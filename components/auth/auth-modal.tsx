@@ -44,21 +44,33 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
       } = await supabase.auth.getUser()
 
       if (currentUser) {
-        const { data: userData } = await supabase
+        // Check if user exists in public.users table
+        const { data: userData, error: userError } = await supabase
           .from("users")
           .select("full_name, phone, address")
           .eq("id", currentUser.id)
           .single()
 
-        if (!userData || !userData.full_name || !userData.phone || !userData.address) {
+        if (userError && userError.code === "PGRST116") {
+          // User doesn't exist in public.users, show profile form
           setUser(currentUser)
           setShowProfileForm(true)
           setProfileData({
-            full_name: userData?.full_name || currentUser.user_metadata?.full_name || "",
-            phone: userData?.phone || currentUser.user_metadata?.phone || "",
-            address: userData?.address || "",
+            full_name: currentUser.user_metadata?.full_name || "",
+            phone: currentUser.user_metadata?.phone || "",
+            address: "",
+          })
+        } else if (userData && (!userData.full_name || !userData.phone || !userData.address)) {
+          // User exists but profile is incomplete
+          setUser(currentUser)
+          setShowProfileForm(true)
+          setProfileData({
+            full_name: userData.full_name || currentUser.user_metadata?.full_name || "",
+            phone: userData.phone || currentUser.user_metadata?.phone || "",
+            address: userData.address || "",
           })
         } else {
+          // User exists and profile is complete
           onClose()
           router.refresh()
         }
@@ -99,18 +111,36 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
     setLoading(true)
 
     try {
-      // Update or create user profile
-      const { error: upsertError } = await supabase.from("users").upsert({
-        id: user.id,
-        email: user.email,
-        full_name: profileData.full_name.trim(),
-        phone: profileData.phone.trim(),
-        address: profileData.address.trim(),
-        type: "google",
-        created_at: new Date().toISOString(),
-      })
+      // First, ensure user exists in auth.users
+      const { data: authUser, error: authError } = await supabase.auth.getUser()
+      if (authError || !authUser.user) {
+        throw new Error("Foydalanuvchi topilmadi")
+      }
 
-      if (upsertError) throw upsertError
+      // Create or update user in public.users table
+      const { error: upsertError } = await supabase.from("users").upsert(
+        {
+          id: authUser.user.id,
+          email: authUser.user.email,
+          full_name: profileData.full_name.trim(),
+          phone: profileData.phone.trim(),
+          address: profileData.address.trim(),
+          type: "google",
+          is_seller: false,
+          is_verified_seller: false,
+          is_admin: false,
+          created_at: new Date().toISOString(),
+          last_sign_in_at: new Date().toISOString(),
+        },
+        {
+          onConflict: "id",
+        },
+      )
+
+      if (upsertError) {
+        console.error("Upsert error:", upsertError)
+        throw upsertError
+      }
 
       // Update auth user metadata
       const { error: updateError } = await supabase.auth.updateUser({
@@ -121,7 +151,10 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
         },
       })
 
-      if (updateError) throw updateError
+      if (updateError) {
+        console.error("Update error:", updateError)
+        // Don't throw here as the main profile creation succeeded
+      }
 
       toast.success("Profil muvaffaqiyatli yaratildi!")
       setShowProfileForm(false)

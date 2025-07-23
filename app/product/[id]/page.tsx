@@ -11,26 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import {
-  Heart,
-  ShoppingCart,
-  Truck,
-  Shield,
-  RotateCcw,
-  UserIcon,
-  Phone,
-  Package,
-  Star,
-  Eye,
-  Share2,
-  ArrowLeft,
-  Plus,
-  Minus,
-  Clock,
-  CheckCircle,
-  Send,
-  RefreshCw,
-} from "lucide-react"
+import { Heart, ShoppingCart, Truck, Shield, RotateCcw, UserIcon, Phone, Package, Star, Eye, Share2, ArrowLeft, Plus, Minus, Clock, CheckCircle, Send, RefreshCw, LogIn } from 'lucide-react'
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 import Image from "next/image"
@@ -447,7 +428,6 @@ export default function ProductDetailPage() {
       return
     }
 
-
     if (!quickOrderForm.full_name || !quickOrderForm.phone) {
       toast.error("Ism va telefon raqam majburiy")
       return
@@ -468,15 +448,12 @@ export default function ProductDetailPage() {
         product_id: product.id,
         full_name: quickOrderForm.full_name,
         phone: quickOrderForm.phone,
-        address:
-          quickOrderForm.with_delivery && product.has_delivery
-            ? `${quickOrderForm.neighborhood}, ${quickOrderForm.street}, ${quickOrderForm.house_number}`
-            : "Do'kondan olib ketish",
+        address: "Do'kondan olib ketish", // Always pickup for now
         quantity: quantity,
-        with_delivery: quickOrderForm.with_delivery && product.has_delivery,
-        neighborhood: quickOrderForm.with_delivery && product.has_delivery ? quickOrderForm.neighborhood : null,
-        street: quickOrderForm.with_delivery && product.has_delivery ? quickOrderForm.street : null,
-        house_number: quickOrderForm.with_delivery && product.has_delivery ? quickOrderForm.house_number : null,
+        with_delivery: false, // Always false for now
+        neighborhood: null,
+        street: null,
+        house_number: null,
         // Pass the selected group product ID and its price at the time of order
         selected_group_product_id: product.product_type === "group" ? selectedGroupProduct : null,
         price_at_order: priceForOrder, // Store the specific price of the selected group product
@@ -513,18 +490,16 @@ export default function ProductDetailPage() {
 
   const handleTelegramOrder = () => {
     if (!product) return
-    // This needs to be a robust link that passes product details to the bot
-    const telegramUrl = `https://t.me/YourTelegramBotUsername?start=order_${product.id}_qty_${quantity}_group_${product.product_type === "group" ? selectedGroupProduct : ""}`
+    
+    // Create a temporary order ID or use product info
+    const orderInfo = `${product.id}_qty_${quantity}${product.product_type === "group" && selectedGroupProduct ? `_group_${selectedGroupProduct}` : ""}`
+    const telegramUrl = `https://t.me/globalmarketshopbot?start=order_${orderInfo}`
     window.open(telegramUrl, "_blank")
   }
 
   const calculateTotal = () => {
     const currentPrice = getCurrentSelectedPrice()
-    let total = currentPrice * quantity
-    if (quickOrderForm.with_delivery && product.has_delivery) {
-      total += product.delivery_price || 0
-    }
-    return total
+    return currentPrice * quantity
   }
 
   const handleShare = async () => {
@@ -859,206 +834,216 @@ export default function ProductDetailPage() {
                     </DialogHeader>
 
                     <div className="space-y-4">
-                      {/* User Info */}
-                      <div>
-                        <Label htmlFor="quick_full_name">To'liq ism *</Label>
-                        <Input
-                          id="quick_full_name"
-                          value={quickOrderForm.full_name}
-                          onChange={(e) => setQuickOrderForm((prev) => ({ ...prev, full_name: e.target.value }))}
-                          placeholder="Ism Familiya"
-                        />
-                      </div>
-
-                      <div>
-                        <Label htmlFor="quick_phone">Telefon raqam *</Label>
-                        <Input
-                          id="quick_phone"
-                          value={quickOrderForm.phone}
-                          onChange={(e) => setQuickOrderForm((prev) => ({ ...prev, phone: e.target.value }))}
-                          placeholder="+998 90 123 45 67"
-                        />
-                      </div>
-
-                      {/* Group Product Selection in Order Dialog */}
-                      {product.product_type === "group" && groupProducts.length > 0 && (
-                        <div>
-                          <Label>Mahsulotni tanlang *</Label>
-                          <div className="space-y-2 mt-2 max-h-40 overflow-y-auto">
-                            {groupProducts.map((gp) => (
-                              <div
-                                key={gp.id}
-                                className={`p-3 border rounded-lg cursor-pointer transition-all ${
-                                  selectedGroupProduct === gp.id
-                                    ? "border-blue-500 bg-blue-50"
-                                    : "border-gray-200 hover:border-gray-300"
-                                }`}
-                                onClick={() => {
-                                  setSelectedGroupProduct(gp.id)
-                                  setQuantity(1) // Reset quantity on group product change
-                                }}
-                              >
-                                <div className="flex items-center gap-2">
-                                  <div
-                                    className={`w-3 h-3 rounded-full border ${
-                                      selectedGroupProduct === gp.id
-                                        ? "border-blue-500 bg-blue-500"
-                                        : "border-gray-300"
-                                    }`}
-                                  />
-                                  <div className="flex-1">
-                                    <p className="font-medium text-sm">{gp.product_name}</p>
-                                    {gp.product_description && (
-                                      <p className="text-xs text-gray-600">{gp.product_description}</p>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                          {selectedGroupProduct && (
-                            <p className="text-sm text-blue-600 mt-2">
-                              Tanlangan: {getSelectedProductName()} (Narxi:{" "}
-                              {getCurrentSelectedPrice().toLocaleString("uz-UZ")} so'm)
+                      {/* Show different content based on user login status */}
+                      {!user ? (
+                        // Not logged in - show Telegram and Google login options
+                        <div className="space-y-4">
+                          <div className="text-center">
+                            <h3 className="text-lg font-semibold mb-2">Buyurtma berish</h3>
+                            <p className="text-gray-600 text-sm mb-4">
+                              Buyurtma berish uchun quyidagi usullardan birini tanlang
                             </p>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Delivery Option */}
-                      {product.has_delivery && (
-                        <div className="flex items-center space-x-2">
-                          <Checkbox
-                            id="quick_with_delivery"
-                            checked={quickOrderForm.with_delivery}
-                            onCheckedChange={(checked) =>
-                              setQuickOrderForm((prev) => ({ ...prev, with_delivery: checked as boolean }))
-                            }
-                          />
-                          <Label htmlFor="quick_with_delivery" className="flex items-center gap-2 cursor-pointer">
-                            <Truck className="w-4 h-4" />
-                            Yetkazib berish kerak (+{(product.delivery_price || 0).toLocaleString("uz-UZ")} so'm)
-                          </Label>
-                        </div>
-                      )}
-
-                      {/* Address Fields if Delivery is Chosen */}
-                      {quickOrderForm.with_delivery && product.has_delivery && (
-                        <>
-                          <div>
-                            <Label htmlFor="quick_neighborhood">Mahalla *</Label>
-                            <Select
-                              value={quickOrderForm.neighborhood}
-                              onValueChange={(value) =>
-                                setQuickOrderForm((prev) => ({ ...prev, neighborhood: value }))
-                              }
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Mahallani tanlang" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {neighborhoods.map((neighborhood) => (
-                                  <SelectItem key={neighborhood.id} value={neighborhood.name}>
-                                    {neighborhood.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
                           </div>
 
-                          <div>
-                            <Label htmlFor="quick_street">Ko'cha nomi *</Label>
-                            <Input
-                              id="quick_street"
-                              value={quickOrderForm.street}
-                              onChange={(e) => setQuickOrderForm((prev) => ({ ...prev, street: e.target.value }))}
-                              placeholder="Ko'cha nomi"
-                            />
-                          </div>
+                          {/* Product Summary for non-logged users */}
+                          <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-4">
+                            <div className="space-y-2">
+                              <div className="flex justify-between">
+                                <span>Mahsulot ({quantity} dona):</span>
+                                <span className="font-semibold">
+                                  {(getCurrentSelectedPrice() * quantity).toLocaleString("uz-UZ")} so'm
+                                </span>
+                              </div>
 
-                          <div>
-                            <Label htmlFor="quick_house_number">Uy raqami *</Label>
-                            <Input
-                              id="quick_house_number"
-                              value={quickOrderForm.house_number}
-                              onChange={(e) =>
-                                setQuickOrderForm((prev) => ({ ...prev, house_number: e.target.value }))
-                              }
-                              placeholder="Uy raqami"
-                            />
-                          </div>
-                        </>
-                      )}
+                              {product.product_type === "group" && selectedGroupProduct && (
+                                <div className="flex justify-between text-sm text-gray-600">
+                                  <span>Tanlangan mahsulot:</span>
+                                  <span>{getSelectedProductName()}</span>
+                                </div>
+                              )}
 
-                      <Separator />
-
-                      {/* Order Summary */}
-                      <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-4">
-                        <div className="space-y-2">
-                          <div className="flex justify-between">
-                            <span>Mahsulot ({quantity} dona):</span>
-                            <span className="font-semibold">
-                              {(getCurrentSelectedPrice() * quantity).toLocaleString("uz-UZ")} so'm
-                            </span>
-                          </div>
-
-                          {product.product_type === "group" && selectedGroupProduct && (
-                            <div className="flex justify-between text-sm text-gray-600">
-                              <span>Tanlangan mahsulot:</span>
-                              <span>{getSelectedProductName()}</span>
+                              <div className="flex justify-between font-bold text-lg text-blue-700">
+                                <span>Jami:</span>
+                                <span>{(getCurrentSelectedPrice() * quantity).toLocaleString("uz-UZ")} so'm</span>
+                              </div>
+                              
+                              <div className="text-sm text-gray-600 mt-2">
+                                <p>📞 Telefon: +998958657500</p>
+                                <p>📧 Email: admin@globalmarketshop.uz</p>
+                                <p>🚚 Hozircha faqat do'kondan olib ketish</p>
+                              </div>
                             </div>
-                          )}
+                          </div>
 
-                          {quickOrderForm.with_delivery && product.has_delivery && (
-                            <div className="flex justify-between">
-                              <span>Yetkazib berish:</span>
-                              <span className="font-semibold">
-                                {(product.delivery_price || 0).toLocaleString("uz-UZ")} so'm
-                              </span>
+                          {/* Telegram Order Button */}
+                          <Button
+                            onClick={handleTelegramOrder}
+                            className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white h-12"
+                          >
+                            <Send className="w-5 h-5 mr-2" />
+                            Telegram bot orqali buyurtma berish
+                          </Button>
+
+                          <div className="relative">
+                            <div className="absolute inset-0 flex items-center">
+                              <span className="w-full border-t" />
+                            </div>
+                            <div className="relative flex justify-center text-xs uppercase">
+                              <span className="bg-white px-2 text-muted-foreground">yoki</span>
+                            </div>
+                          </div>
+
+                          {/* Google Login Button */}
+                          <Button
+                            onClick={() => {
+                              setShowQuickOrder(false)
+                              router.push('/login')
+                            }}
+                            variant="outline"
+                            className="w-full h-12 bg-white border-2 border-gray-200 hover:bg-gray-50"
+                          >
+                            <svg className="w-5 h-5 mr-3" viewBox="0 0 24 24">
+                              <path
+                                fill="currentColor"
+                                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                              />
+                              <path
+                                fill="currentColor"
+                                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                              />
+                              <path
+                                fill="currentColor"
+                                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                              />
+                              <path
+                                fill="currentColor"
+                                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                              />
+                            </svg>
+                            Google orqali kirish va buyurtma berish
+                          </Button>
+                        </div>
+                      ) : (
+                        // Logged in - show full order form
+                        <>
+                          {/* User Info */}
+                          <div>
+                            <Label htmlFor="quick_full_name">To'liq ism *</Label>
+                            <Input
+                              id="quick_full_name"
+                              value={quickOrderForm.full_name}
+                              onChange={(e) => setQuickOrderForm((prev) => ({ ...prev, full_name: e.target.value }))}
+                              placeholder="Ism Familiya"
+                            />
+                          </div>
+
+                          <div>
+                            <Label htmlFor="quick_phone">Telefon raqam *</Label>
+                            <Input
+                              id="quick_phone"
+                              value={quickOrderForm.phone}
+                              onChange={(e) => setQuickOrderForm((prev) => ({ ...prev, phone: e.target.value }))}
+                              placeholder="+998 90 123 45 67"
+                            />
+                          </div>
+
+                          {/* Group Product Selection in Order Dialog */}
+                          {product.product_type === "group" && groupProducts.length > 0 && (
+                            <div>
+                              <Label>Mahsulotni tanlang *</Label>
+                              <div className="space-y-2 mt-2 max-h-40 overflow-y-auto">
+                                {groupProducts.map((gp) => (
+                                  <div
+                                    key={gp.id}
+                                    className={`p-3 border rounded-lg cursor-pointer transition-all ${
+                                      selectedGroupProduct === gp.id
+                                        ? "border-blue-500 bg-blue-50"
+                                        : "border-gray-200 hover:border-gray-300"
+                                    }`}
+                                    onClick={() => {
+                                      setSelectedGroupProduct(gp.id)
+                                      setQuantity(1) // Reset quantity on group product change
+                                    }}
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <div
+                                        className={`w-3 h-3 rounded-full border ${
+                                          selectedGroupProduct === gp.id
+                                            ? "border-blue-500 bg-blue-500"
+                                            : "border-gray-300"
+                                        }`}
+                                      />
+                                      <div className="flex-1">
+                                        <p className="font-medium text-sm">{gp.product_name}</p>
+                                        {gp.product_description && (
+                                          <p className="text-xs text-gray-600">{gp.product_description}</p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                              {selectedGroupProduct && (
+                                <p className="text-sm text-blue-600 mt-2">
+                                  Tanlangan: {getSelectedProductName()} (Narxi:{" "}
+                                  {getCurrentSelectedPrice().toLocaleString("uz-UZ")} so'm)
+                                </p>
+                              )}
                             </div>
                           )}
 
                           <Separator />
 
-                          <div className="flex justify-between font-bold text-lg text-blue-700">
-                            <span>Jami:</span>
-                            <span>{calculateTotal().toLocaleString("uz-UZ")} so'm</span>
+                          {/* Order Summary */}
+                          <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-4">
+                            <div className="space-y-2">
+                              <div className="flex justify-between">
+                                <span>Mahsulot ({quantity} dona):</span>
+                                <span className="font-semibold">
+                                  {(getCurrentSelectedPrice() * quantity).toLocaleString("uz-UZ")} so'm
+                                </span>
+                              </div>
+
+                              {product.product_type === "group" && selectedGroupProduct && (
+                                <div className="flex justify-between text-sm text-gray-600">
+                                  <span>Tanlangan mahsulot:</span>
+                                  <span>{getSelectedProductName()}</span>
+                                </div>
+                              )}
+
+                              <Separator />
+
+                              <div className="flex justify-between font-bold text-lg text-blue-700">
+                                <span>Jami:</span>
+                                <span>{(getCurrentSelectedPrice() * quantity).toLocaleString("uz-UZ")} so'm</span>
+                              </div>
+                              
+                              <div className="text-sm text-gray-600 mt-2">
+                                <p>🚚 Hozircha faqat do'kondan olib ketish</p>
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                      </div>
 
-                      {/* Order Action Buttons */}
-                      <div className="grid grid-cols-1 gap-3">
-                        <Button
-                          onClick={handleQuickOrder}
-                          className="w-full btn-primary"
-                          disabled={
-                            !quickOrderForm.full_name || !quickOrderForm.phone || // Basic info validation
-                            (product.product_type === "group" && !selectedGroupProduct) || // Group product must be selected
-                            (quickOrderForm.with_delivery && product.has_delivery &&
-                              (!quickOrderForm.neighborhood || !quickOrderForm.street || !quickOrderForm.house_number)) || // Full address if delivery
-                            quantity <= 0 || // Quantity positive
-                            quantity > (product.product_type === 'group' && selectedGroupProduct ?
-                              groupProducts.find(gp => gp.id === selectedGroupProduct)?.stock_quantity || product.stock_quantity
-                              : product.stock_quantity) // Stock check
-                          }
-                        >
-                          <Package className="w-5 h-5 mr-2" />
-                          Buyurtma berish
-                        </Button>
-
-                        {/* Telegram Order Button - conditional rendering for admin/specific seller */}
-                        {/* You might want to adjust this logic based on your needs */}
-                        {isAdmin && (
-                          <Button
-                            onClick={handleTelegramOrder}
-                            className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white"
-                          >
-                            <Send className="w-5 h-5 mr-2" />
-                            Telegram orqali buyurtma
-                          </Button>
-                        )}
-                      </div>
+                          {/* Order Action Buttons */}
+                          <div className="grid grid-cols-1 gap-3">
+                            <Button
+                              onClick={handleQuickOrder}
+                              className="w-full btn-primary"
+                              disabled={
+                                !quickOrderForm.full_name || !quickOrderForm.phone || // Basic info validation
+                                (product.product_type === "group" && !selectedGroupProduct) || // Group product must be selected
+                                quantity <= 0 || // Quantity positive
+                                quantity > (product.product_type === 'group' && selectedGroupProduct ?
+                                  groupProducts.find(gp => gp.id === selectedGroupProduct)?.stock_quantity || product.stock_quantity
+                                  : product.stock_quantity) // Stock check
+                              }
+                            >
+                              <Package className="w-5 h-5 mr-2" />
+                              Buyurtma berish
+                            </Button>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </DialogContent>
                 </Dialog>

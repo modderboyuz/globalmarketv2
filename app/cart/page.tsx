@@ -6,11 +6,9 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
-import { Trash2, Plus, Minus, ShoppingCart, Truck, Shield, RotateCcw } from "lucide-react"
+import { Trash2, Plus, Minus, ShoppingCart, Shield, RotateCcw } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 import Image from "next/image"
@@ -25,8 +23,6 @@ interface CartItem {
     price: number
     image_url: string
     stock: number
-    has_delivery: boolean
-    delivery_price: number
     has_warranty: boolean
     warranty_period: string
     has_return: boolean
@@ -34,15 +30,9 @@ interface CartItem {
   }
 }
 
-interface Neighborhood {
-  id: string
-  name: string
-}
-
 export default function CartPage() {
   const router = useRouter()
   const [cartItems, setCartItems] = useState<CartItem[]>([])
-  const [neighborhoods, setNeighborhoods] = useState<Neighborhood[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [user, setUser] = useState<any>(null)
@@ -50,16 +40,11 @@ export default function CartPage() {
   const [orderForm, setOrderForm] = useState({
     full_name: "",
     phone: "",
-    neighborhood: "",
-    street: "",
-    house_number: "",
-    with_delivery: false,
   })
 
   useEffect(() => {
     checkUser()
     fetchCartItems()
-    fetchNeighborhoods()
   }, [])
 
   const checkUser = async () => {
@@ -101,8 +86,6 @@ export default function CartPage() {
             price,
             image_url,
             stock,
-            has_delivery,
-            delivery_price,
             has_warranty,
             warranty_period,
             has_return,
@@ -118,18 +101,6 @@ export default function CartPage() {
       toast.error("Savatni yuklashda xatolik")
     } finally {
       setLoading(false)
-    }
-  }
-
-  const fetchNeighborhoods = async () => {
-    try {
-      const response = await fetch("/api/neighborhoods")
-      const data = await response.json()
-      if (data.success) {
-        setNeighborhoods(data.neighborhoods)
-      }
-    } catch (error) {
-      console.error("Error fetching neighborhoods:", error)
     }
   }
 
@@ -167,20 +138,6 @@ export default function CartPage() {
     return cartItems.reduce((sum, item) => sum + item.products.price * item.quantity, 0)
   }
 
-  const calculateDeliveryTotal = () => {
-    if (!orderForm.with_delivery) return 0
-    return cartItems.reduce((sum, item) => {
-      if (item.products.has_delivery) {
-        return sum + item.products.delivery_price
-      }
-      return sum
-    }, 0)
-  }
-
-  const calculateTotal = () => {
-    return calculateSubtotal() + calculateDeliveryTotal()
-  }
-
   const handleSubmitOrder = async () => {
     if (!user) {
       toast.error("Buyurtma berish uchun tizimga kiring")
@@ -192,11 +149,6 @@ export default function CartPage() {
       return
     }
 
-    if (orderForm.with_delivery && (!orderForm.neighborhood || !orderForm.street || !orderForm.house_number)) {
-      toast.error("Yetkazib berish uchun to'liq manzil majburiy")
-      return
-    }
-
     if (cartItems.length === 0) {
       toast.error("Savat bo'sh")
       return
@@ -205,7 +157,8 @@ export default function CartPage() {
     setSubmitting(true)
 
     try {
-      const token = (await supabase.auth.getSession()).data.session?.access_token
+      const session = (await supabase.auth.getSession()).data.session
+      const token = session?.access_token
 
       // Create orders for each cart item
       for (const item of cartItems) {
@@ -213,14 +166,12 @@ export default function CartPage() {
           product_id: item.product_id,
           full_name: orderForm.full_name,
           phone: orderForm.phone,
-          address: orderForm.with_delivery
-            ? `${orderForm.neighborhood}, ${orderForm.street}, ${orderForm.house_number}`
-            : "Do'kondan olib ketish",
+          address: "Do'kondan olib ketish",
           quantity: item.quantity,
-          with_delivery: orderForm.with_delivery && item.products.has_delivery,
-          neighborhood: orderForm.with_delivery ? orderForm.neighborhood : null,
-          street: orderForm.with_delivery ? orderForm.street : null,
-          house_number: orderForm.with_delivery ? orderForm.house_number : null,
+          with_delivery: false,
+          neighborhood: null,
+          street: null,
+          house_number: null,
         }
 
         const response = await fetch("/api/orders", {
@@ -309,12 +260,6 @@ export default function CartPage() {
                     <h3 className="font-semibold mb-2">{item.products.title}</h3>
 
                     <div className="flex flex-wrap gap-2 mb-2">
-                      {item.products.has_delivery && (
-                        <Badge variant="secondary" className="text-xs">
-                          <Truck className="w-3 h-3 mr-1" />
-                          Yetkazib berish: {item.products.delivery_price.toLocaleString()} so'm
-                        </Badge>
-                      )}
                       {item.products.has_warranty && (
                         <Badge variant="secondary" className="text-xs">
                           <Shield className="w-3 h-3 mr-1" />
@@ -396,59 +341,11 @@ export default function CartPage() {
                 />
               </div>
 
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="with_delivery"
-                  checked={orderForm.with_delivery}
-                  onCheckedChange={(checked) =>
-                    setOrderForm((prev) => ({ ...prev, with_delivery: checked as boolean }))
-                  }
-                />
-                <Label htmlFor="with_delivery">Yetkazib berish kerak</Label>
+              <div className="bg-blue-50 p-4 rounded-lg">
+                <p className="text-sm text-blue-700">🚚 Hozircha faqat do'kondan olib ketish mavjud</p>
+                <p className="text-sm text-blue-700 mt-1">📞 Telefon: +998958657500</p>
+                <p className="text-sm text-blue-700">📧 Email: admin@globalmarketshop.uz</p>
               </div>
-
-              {orderForm.with_delivery && (
-                <>
-                  <div>
-                    <Label htmlFor="neighborhood">Mahalla *</Label>
-                    <Select
-                      value={orderForm.neighborhood}
-                      onValueChange={(value) => setOrderForm((prev) => ({ ...prev, neighborhood: value }))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Mahallani tanlang" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {neighborhoods.map((neighborhood) => (
-                          <SelectItem key={neighborhood.id} value={neighborhood.name}>
-                            {neighborhood.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <Label htmlFor="street">Ko'cha nomi *</Label>
-                    <Input
-                      id="street"
-                      value={orderForm.street}
-                      onChange={(e) => setOrderForm((prev) => ({ ...prev, street: e.target.value }))}
-                      placeholder="Ko'cha nomi"
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="house_number">Uy raqami *</Label>
-                    <Input
-                      id="house_number"
-                      value={orderForm.house_number}
-                      onChange={(e) => setOrderForm((prev) => ({ ...prev, house_number: e.target.value }))}
-                      placeholder="Uy raqami"
-                    />
-                  </div>
-                </>
-              )}
 
               <Separator />
 
@@ -458,18 +355,11 @@ export default function CartPage() {
                   <span>{calculateSubtotal().toLocaleString()} so'm</span>
                 </div>
 
-                {orderForm.with_delivery && calculateDeliveryTotal() > 0 && (
-                  <div className="flex justify-between">
-                    <span>Yetkazib berish:</span>
-                    <span>{calculateDeliveryTotal().toLocaleString()} so'm</span>
-                  </div>
-                )}
-
                 <Separator />
 
                 <div className="flex justify-between font-bold text-lg">
                   <span>Jami:</span>
-                  <span>{calculateTotal().toLocaleString()} so'm</span>
+                  <span>{calculateSubtotal().toLocaleString()} so'm</span>
                 </div>
               </div>
 
