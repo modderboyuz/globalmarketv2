@@ -3,7 +3,6 @@
 import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { toast } from "sonner"
 
 export default function AuthCallback() {
   const router = useRouter()
@@ -15,59 +14,48 @@ export default function AuthCallback() {
 
         if (error) {
           console.error("Auth callback error:", error)
-          toast.error("Kirish jarayonida xatolik yuz berdi")
-          router.push("/login")
+          router.push("/login?error=auth_error")
           return
         }
 
         if (data.session?.user) {
           const user = data.session.user
 
-          // Check if user exists in our users table
-          const { data: existingUser, error: userError } = await supabase
+          // Check if user exists in public.users table
+          const { data: userData, error: userError } = await supabase
             .from("users")
-            .select("*")
+            .select("id")
             .eq("id", user.id)
             .single()
 
-          if (userError && userError.code !== "PGRST116") {
-            console.error("Error checking user:", userError)
-          }
-
-          // If user doesn't exist, create them
-          if (!existingUser) {
-            const { error: insertError } = await supabase.from("users").insert({
+          if (userError && userError.code === "PGRST116") {
+            // User doesn't exist in public.users, create them
+            const { error: createError } = await supabase.from("users").insert({
               id: user.id,
               email: user.email,
-              full_name: user.user_metadata?.full_name || user.user_metadata?.name || "",
-              phone: "+998958657500", // Default phone number
+              full_name: user.user_metadata?.full_name || "",
+              phone: user.user_metadata?.phone || "",
               address: "",
               type: "google",
-              username: null,
-              is_admin: false,
+              is_seller: false,
               is_verified_seller: false,
+              is_admin: false,
               created_at: new Date().toISOString(),
               last_sign_in_at: new Date().toISOString(),
             })
 
-            if (insertError) {
-              console.error("Error creating user:", insertError)
-              // Don't block login if user creation fails
+            if (createError) {
+              console.error("Error creating user:", createError)
             }
-          } else {
-            // Update last sign in time
-            await supabase.from("users").update({ last_sign_in_at: new Date().toISOString() }).eq("id", user.id)
           }
 
-          toast.success("Muvaffaqiyatli kirildi!")
           router.push("/")
         } else {
           router.push("/login")
         }
       } catch (error) {
-        console.error("Auth callback error:", error)
-        toast.error("Kirish jarayonida xatolik yuz berdi")
-        router.push("/login")
+        console.error("Unexpected error:", error)
+        router.push("/login?error=unexpected_error")
       }
     }
 
@@ -77,8 +65,8 @@ export default function AuthCallback() {
   return (
     <div className="min-h-screen flex items-center justify-center">
       <div className="text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-        <p className="text-gray-600">Kirish jarayoni...</p>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+        <p className="text-gray-600">Tizimga kirilmoqda...</p>
       </div>
     </div>
   )

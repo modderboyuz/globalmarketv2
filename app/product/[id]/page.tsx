@@ -141,6 +141,11 @@ export default function ProductDetailPage() {
     return product?.price ?? 0 // Default to product's main price
   }
 
+  // Check if product seller is admin (for telegram ordering)
+  const isProductSellerAdmin = () => {
+    return product?.users?.is_admin === true
+  }
+
   useEffect(() => {
     if (params.id) {
       fetchProduct()
@@ -190,7 +195,7 @@ export default function ProductDetailPage() {
         .select(`
           *,
           categories (name, icon),
-          users (id, full_name, phone, company_name, is_verified_seller, username)
+          users (id, full_name, phone, company_name, is_verified_seller, username, is_admin)
         `)
         .eq("id", params.id!)
         .eq("is_active", true)
@@ -866,10 +871,6 @@ export default function ProductDetailPage() {
                       ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity ||
                         product.stock_quantity
                       : product.stock_quantity}
-                    {/* If using a separate stock for group products */}
-                    {/* {(product.product_type === 'group' && selectedGroupProduct ?
-                      groupProducts.find(gp => gp.id === selectedGroupProduct)?.stock_quantity
-                      : product.stock_quantity)} */}
                     dona
                   </p>
                   <p className="text-lg font-bold text-green-600">
@@ -1106,24 +1107,27 @@ export default function ProductDetailPage() {
                       <div className="grid grid-cols-1 gap-3">
                         {!user ? (
                           <>
-                            <Button
-                              onClick={handleTelegramOrder}
-                              className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white"
-                              disabled={
-                                !quickOrderForm.full_name ||
-                                !quickOrderForm.phone ||
-                                (product.product_type === "group" && !selectedGroupProduct) ||
-                                quantity <= 0 ||
-                                quantity >
-                                  (product.product_type === "group" && selectedGroupProduct
-                                    ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity ||
-                                      product.stock_quantity
-                                    : product.stock_quantity)
-                              }
-                            >
-                              <Send className="w-5 h-5 mr-2" />
-                              Telegram bot orqali buyurtma
-                            </Button>
+                            {/* Only show Telegram option if product seller is admin */}
+                            {isProductSellerAdmin() && (
+                              <Button
+                                onClick={handleTelegramOrder}
+                                className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white"
+                                disabled={
+                                  !quickOrderForm.full_name ||
+                                  !quickOrderForm.phone ||
+                                  (product.product_type === "group" && !selectedGroupProduct) ||
+                                  quantity <= 0 ||
+                                  quantity >
+                                    (product.product_type === "group" && selectedGroupProduct
+                                      ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity ||
+                                        product.stock_quantity
+                                      : product.stock_quantity)
+                                }
+                              >
+                                <Send className="w-5 h-5 mr-2" />
+                                Telegram bot orqali buyurtma
+                              </Button>
+                            )}
 
                             <Button onClick={() => router.push("/login")} variant="outline" className="w-full">
                               <LogIn className="w-5 h-5 mr-2" />

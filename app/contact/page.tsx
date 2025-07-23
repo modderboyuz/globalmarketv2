@@ -135,13 +135,13 @@ export default function ContactPage() {
     {
       icon: Phone,
       title: "Telefon",
-      value: "+998 90 123 45 67",
+      value: "+998 95 865 7500",
       description: "Har kuni 9:00 dan 21:00 gacha",
     },
     {
       icon: Mail,
       title: "Email",
-      value: "info@globalmarket.uz",
+      value: "admin@globalmarket.uz",
       description: "24 soat ichida javob beramiz",
     },
     {
