@@ -856,25 +856,7 @@ export default function ProductDetailPage() {
 
               {/* Action Buttons */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <Button
-                  onClick={handleAddToCart}
-                  variant="outline"
-                  className="bg-gradient-to-r from-gray-50 to-gray-100 border-gray-300 hover:from-gray-100 hover:to-gray-200 text-gray-800 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
-                  disabled={
-                    product.stock_quantity === 0 || // Main check for overall availability
-                    !user || // Must be logged in
-                    (product.product_type === "group" && !selectedGroupProduct) || // Must select a group product
-                    quantity <= 0 || // Quantity must be positive
-                    quantity >
-                      (product.product_type === "group" && selectedGroupProduct
-                        ? groupProducts.find((gp) => gp.id === selectedGroupProduct)?.stock_quantity ??
-                          product.stock_quantity
-                        : product.stock_quantity) // Check stock
-                  }
-                >
-                  <ShoppingCart className="w-5 h-5 mr-2" />
-                  Savatga qo'shish
-                </Button>
+                
 
                 {/* Quick Order Dialog */}
                 <Dialog open={showQuickOrder} onOpenChange={setShowQuickOrder}>
